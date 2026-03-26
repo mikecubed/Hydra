@@ -433,6 +433,446 @@ describe('Work-item detail routes (T018/T019 — US2)', () => {
   });
 });
 
+// ── Unit tests: work-item controls route (T041/T042 — US5) ────────────────────
+
+describe('Work-item controls routes (T041/T042 — US5)', () => {
+  let mockClient: MockOpsClient;
+  let app: Hono;
+
+  beforeEach(() => {
+    mockClient = createMockOpsClient();
+    app = buildTestApp(mockClient);
+  });
+
+  describe('GET /operations/work-items/:workItemId/controls', () => {
+    it('returns controls from daemon client', async () => {
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1/controls'));
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as {
+        workItemId: string;
+        controls: unknown[];
+        availability: string;
+      };
+      assert.equal(body.workItemId, 'wi-1');
+      assert.ok(Array.isArray(body.controls));
+      assert.equal(body.availability, 'ready');
+      assert.equal(mockClient.getWorkItemControls.mock.callCount(), 1);
+    });
+
+    it('passes decoded workItemId to daemon client', async () => {
+      const res = await app.request(
+        buildRequest('GET', '/operations/work-items/task%2F123/controls'),
+      );
+      assert.equal(res.status, 200);
+      const callArgs = mockClient.getWorkItemControls.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'task/123');
+    });
+
+    it('forwards daemon error response with correct status', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'DAEMON_UNREACHABLE',
+          category: 'daemon',
+          message: 'Daemon unreachable',
+        },
+      };
+      mockClient.getWorkItemControls.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1/controls'));
+      assert.equal(res.status, 503);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'daemon');
+    });
+
+    it('returns daemon 404 as validation category', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'NOT_FOUND',
+          category: 'validation',
+          message: 'Work item not found',
+          httpStatus: 404,
+        },
+      };
+      mockClient.getWorkItemControls.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1/controls'));
+      assert.equal(res.status, 404);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('includes control options and authority in response', async () => {
+      const controlWithOptions = makeControl({
+        options: [
+          { optionId: 'opt-1', label: 'Claude', selected: true, available: true },
+          { optionId: 'opt-2', label: 'Gemini', selected: false, available: true },
+        ],
+        authority: 'granted',
+      });
+      mockClient.getWorkItemControls.mock.mockImplementation(() =>
+        Promise.resolve({
+          data: { workItemId: 'wi-1', controls: [controlWithOptions], availability: 'ready' },
+        }),
+      );
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1/controls'));
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { controls: OperationalControlView[] };
+      assert.equal(body.controls[0].options.length, 2);
+      assert.equal(body.controls[0].authority, 'granted');
+    });
+  });
+
+  describe('POST /operations/work-items/:workItemId/controls/:controlId', () => {
+    const validBody = JSON.stringify({
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    });
+
+    it('returns accepted outcome from daemon', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { outcome: string; workItemId: string };
+      assert.equal(body.outcome, 'accepted');
+      assert.equal(body.workItemId, 'wi-1');
+      assert.equal(mockClient.submitControlAction.mock.callCount(), 1);
+    });
+
+    it('passes workItemId, controlId, and body to daemon client', async () => {
+      await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+
+      const callArgs = mockClient.submitControlAction.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'wi-1');
+      assert.equal(callArgs[1], 'ctrl-1');
+      assert.equal(callArgs[2].requestedOptionId, 'opt-1');
+      assert.equal(callArgs[2].expectedRevision, 'rev-1');
+    });
+
+    it('passes through rejected outcome without reinterpreting', async () => {
+      mockClient.submitControlAction.mock.mockImplementation(() =>
+        Promise.resolve({
+          data: {
+            outcome: 'rejected' as const,
+            control: makeControl({
+              availability: 'read-only',
+              authority: 'forbidden',
+              reason: 'Operator not authorized',
+            }),
+            workItemId: 'wi-1',
+            resolvedAt: NOW,
+            message: 'Operator not authorized for this control',
+          },
+        }),
+      );
+
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { outcome: string; message: string };
+      assert.equal(body.outcome, 'rejected');
+      assert.equal(body.message, 'Operator not authorized for this control');
+    });
+
+    it('passes through stale outcome without reinterpreting', async () => {
+      mockClient.submitControlAction.mock.mockImplementation(() =>
+        Promise.resolve({
+          data: {
+            outcome: 'stale' as const,
+            control: makeControl({ availability: 'stale', expectedRevision: 'rev-3' }),
+            workItemId: 'wi-1',
+            resolvedAt: NOW,
+          },
+        }),
+      );
+
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { outcome: string; control: { availability: string } };
+      assert.equal(body.outcome, 'stale');
+      assert.equal(body.control.availability, 'stale');
+    });
+
+    it('passes through superseded outcome without reinterpreting', async () => {
+      mockClient.submitControlAction.mock.mockImplementation(() =>
+        Promise.resolve({
+          data: {
+            outcome: 'superseded' as const,
+            control: makeControl({ availability: 'superseded' }),
+            workItemId: 'wi-1',
+            resolvedAt: NOW,
+          },
+        }),
+      );
+
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { outcome: string };
+      assert.equal(body.outcome, 'superseded');
+    });
+
+    it('returns 400 on missing requestedOptionId', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', {
+          body: JSON.stringify({ expectedRevision: 'rev-1' }),
+        }),
+      );
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('returns 400 on missing expectedRevision', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', {
+          body: JSON.stringify({ requestedOptionId: 'opt-1' }),
+        }),
+      );
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('returns 400 on empty JSON body', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', {
+          body: JSON.stringify({}),
+        }),
+      );
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('forwards daemon 409 stale-revision error as session category', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'CONTROL_REVISION_STALE',
+          category: 'session',
+          message: 'Revision token is stale; re-fetch controls',
+          httpStatus: 409,
+        },
+      };
+      mockClient.submitControlAction.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+      assert.equal(res.status, 409);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'session');
+      assert.equal(body.code, 'CONTROL_REVISION_STALE');
+    });
+
+    it('forwards daemon error on 503', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'DAEMON_UNREACHABLE',
+          category: 'daemon',
+          message: 'Daemon unreachable',
+        },
+      };
+      mockClient.submitControlAction.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(
+        buildRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', { body: validBody }),
+      );
+      assert.equal(res.status, 503);
+    });
+
+    it('handles URL-encoded workItemId and controlId', async () => {
+      await app.request(
+        buildRequest('POST', '/operations/work-items/task%2F123/controls/ctrl%2Fx', {
+          body: validBody,
+        }),
+      );
+
+      const callArgs = mockClient.submitControlAction.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'task/123');
+      assert.equal(callArgs[1], 'ctrl/x');
+    });
+  });
+
+  describe('POST /operations/controls/discover', () => {
+    const validBody = JSON.stringify({ workItemIds: ['wi-1', 'wi-2'] });
+
+    it('returns discovery results from daemon', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/controls/discover', { body: validBody }),
+      );
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { items: unknown[] };
+      assert.ok(Array.isArray(body.items));
+      assert.equal(mockClient.discoverControls.mock.callCount(), 1);
+    });
+
+    it('passes workItemIds to daemon client', async () => {
+      await app.request(
+        buildRequest('POST', '/operations/controls/discover', { body: validBody }),
+      );
+
+      const callArgs = mockClient.discoverControls.mock.calls[0].arguments;
+      assert.deepStrictEqual(callArgs[0].workItemIds, ['wi-1', 'wi-2']);
+    });
+
+    it('passes optional kindFilter to daemon client', async () => {
+      await app.request(
+        buildRequest('POST', '/operations/controls/discover', {
+          body: JSON.stringify({ workItemIds: ['wi-1'], kindFilter: 'routing' }),
+        }),
+      );
+
+      const callArgs = mockClient.discoverControls.mock.calls[0].arguments;
+      assert.equal(callArgs[0].kindFilter, 'routing');
+    });
+
+    it('returns 400 on missing workItemIds', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/controls/discover', {
+          body: JSON.stringify({}),
+        }),
+      );
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('returns 400 on empty workItemIds array', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/controls/discover', {
+          body: JSON.stringify({ workItemIds: [] }),
+        }),
+      );
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('returns 400 on invalid kindFilter value', async () => {
+      const res = await app.request(
+        buildRequest('POST', '/operations/controls/discover', {
+          body: JSON.stringify({ workItemIds: ['wi-1'], kindFilter: 'invalid_kind' }),
+        }),
+      );
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+    });
+
+    it('forwards daemon error response with correct status', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'DAEMON_UNREACHABLE',
+          category: 'daemon',
+          message: 'Daemon unreachable',
+        },
+      };
+      mockClient.discoverControls.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(
+        buildRequest('POST', '/operations/controls/discover', { body: validBody }),
+      );
+      assert.equal(res.status, 503);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'daemon');
+    });
+  });
+});
+
+// ── Unit tests: detail-read control hydration (T041 — US5) ────────────────────
+
+describe('Detail-read control hydration (T041 — US5)', () => {
+  let mockClient: MockOpsClient;
+  let app: Hono;
+
+  beforeEach(() => {
+    mockClient = createMockOpsClient();
+    app = buildTestApp(mockClient);
+  });
+
+  it('detail response includes hydrated controls array', async () => {
+    const detail = {
+      item: makeQueueItem({ id: 'wi-42' }),
+      checkpoints: [],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [
+        makeControl({ controlId: 'ctrl-1', kind: 'routing', availability: 'actionable' }),
+        makeControl({ controlId: 'ctrl-2', kind: 'mode', availability: 'read-only' }),
+      ],
+      itemBudget: null,
+      availability: 'ready' as const,
+    };
+    mockClient.getWorkItemDetail.mock.mockImplementation(() => Promise.resolve({ data: detail }));
+
+    const res = await app.request(buildRequest('GET', '/operations/work-items/wi-42'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as typeof detail;
+    assert.equal(body.controls.length, 2);
+    assert.equal(body.controls[0].controlId, 'ctrl-1');
+    assert.equal(body.controls[0].availability, 'actionable');
+    assert.equal(body.controls[1].controlId, 'ctrl-2');
+    assert.equal(body.controls[1].availability, 'read-only');
+  });
+
+  it('detail response includes empty controls array when work item has no controls', async () => {
+    const detail = {
+      item: makeQueueItem({ id: 'wi-empty' }),
+      checkpoints: [],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [],
+      itemBudget: null,
+      availability: 'ready' as const,
+    };
+    mockClient.getWorkItemDetail.mock.mockImplementation(() => Promise.resolve({ data: detail }));
+
+    const res = await app.request(buildRequest('GET', '/operations/work-items/wi-empty'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as typeof detail;
+    assert.deepStrictEqual(body.controls, []);
+  });
+
+  it('detail response preserves control expectedRevision and lastResolvedAt', async () => {
+    const ctrl = makeControl({
+      expectedRevision: 'rev-abc',
+      lastResolvedAt: '2026-03-22T09:00:00.000Z',
+    });
+    const detail = {
+      item: makeQueueItem({ id: 'wi-rev' }),
+      checkpoints: [],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [ctrl],
+      itemBudget: null,
+      availability: 'ready' as const,
+    };
+    mockClient.getWorkItemDetail.mock.mockImplementation(() => Promise.resolve({ data: detail }));
+
+    const res = await app.request(buildRequest('GET', '/operations/work-items/wi-rev'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as typeof detail;
+    assert.equal(body.controls[0].expectedRevision, 'rev-abc');
+    assert.equal(body.controls[0].lastResolvedAt, '2026-03-22T09:00:00.000Z');
+  });
+});
+
 // ── Wiring tests: auth + CSRF protection ──────────────────────────────────────
 
 function gwRequest(
@@ -483,7 +923,7 @@ async function login(gw: GatewayApp): Promise<Record<string, string>> {
   return parseCookies(res);
 }
 
-describe('Operations route wiring — auth/CSRF (T009/T010)', () => {
+describe('Operations route wiring — auth/CSRF (T009/T010/T041)', () => {
   let gw: GatewayApp;
   let clock: FakeClock;
   let fetchMock: ReturnType<typeof mock.fn<typeof globalThis.fetch>>;
@@ -617,5 +1057,122 @@ describe('Operations route wiring — auth/CSRF (T009/T010)', () => {
     assert.ok(Array.isArray(body.queue));
     assert.equal(validateMock.mock.callCount(), 1);
     assert.equal(touchActivityMock.mock.callCount(), 1);
+  });
+
+  it('rejects unauthenticated GET /operations/work-items/:workItemId/controls', async () => {
+    const req = gwRequest('GET', '/operations/work-items/wi-1/controls', {
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 401);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_NOT_FOUND');
+    assert.equal(body.category, 'auth');
+  });
+
+  it('GET /operations/work-items/:workItemId/controls with valid session succeeds', async () => {
+    const cookies = await login(gw);
+    fetchMock.mock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            workItemId: 'wi-1',
+            controls: [],
+            availability: 'ready',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const req = gwRequest('GET', '/operations/work-items/wi-1/controls', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { workItemId: string; controls: unknown[] };
+    assert.equal(body.workItemId, 'wi-1');
+    assert.ok(Array.isArray(body.controls));
+  });
+
+  it('rejects unauthenticated POST /operations/work-items/:workItemId/controls/:controlId', async () => {
+    const req = gwRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', {
+      body: JSON.stringify({ requestedOptionId: 'opt-1', expectedRevision: 'rev-1' }),
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 401);
+  });
+
+  it('POST control action with valid session and CSRF succeeds', async () => {
+    const cookies = await login(gw);
+    fetchMock.mock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            outcome: 'accepted',
+            control: {
+              controlId: 'ctrl-1',
+              kind: 'routing',
+              label: 'Route',
+              availability: 'accepted',
+              authority: 'granted',
+              reason: null,
+              options: [],
+              expectedRevision: 'rev-2',
+              lastResolvedAt: NOW,
+            },
+            workItemId: 'wi-1',
+            resolvedAt: NOW,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const req = gwRequest('POST', '/operations/work-items/wi-1/controls/ctrl-1', {
+      body: JSON.stringify({ requestedOptionId: 'opt-1', expectedRevision: 'rev-1' }),
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { outcome: string };
+    assert.equal(body.outcome, 'accepted');
+  });
+
+  it('rejects unauthenticated POST /operations/controls/discover', async () => {
+    const req = gwRequest('POST', '/operations/controls/discover', {
+      body: JSON.stringify({ workItemIds: ['wi-1'] }),
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 401);
+  });
+
+  it('POST discover controls with valid session and CSRF succeeds', async () => {
+    const cookies = await login(gw);
+    fetchMock.mock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            items: [{ workItemId: 'wi-1', controls: [], availability: 'ready' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const req = gwRequest('POST', '/operations/controls/discover', {
+      body: JSON.stringify({ workItemIds: ['wi-1'] }),
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { items: unknown[] };
+    assert.ok(Array.isArray(body.items));
   });
 });

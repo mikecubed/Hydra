@@ -284,6 +284,334 @@ describe('DaemonOperationsClient', () => {
     });
   });
 
+  // ─── getWorkItemControls (US5 — control reads) ──────────────────────────────
+
+  describe('getWorkItemControls', () => {
+    it('sends GET /operations/work-items/:workItemId/controls', async () => {
+      const controls = {
+        workItemId: 'wi-1',
+        controls: [
+          {
+            controlId: 'ctrl-1',
+            kind: 'routing',
+            label: 'Route override',
+            availability: 'actionable',
+            authority: 'granted',
+            reason: null,
+            options: [{ optionId: 'opt-1', label: 'Claude', selected: true, available: true }],
+            expectedRevision: 'rev-1',
+            lastResolvedAt: null,
+          },
+        ],
+        availability: 'ready',
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse(controls)));
+
+      const result = await client.getWorkItemControls('wi-1');
+
+      assert.equal(fetchMock.mock.callCount(), 1);
+      const [url, opts] = fetchMock.mock.calls[0].arguments;
+      assert.equal(url, `${baseUrl}/operations/work-items/wi-1/controls`);
+      assert.equal(opts?.method, 'GET');
+      assert.ok('data' in result);
+      assert.deepStrictEqual(result.data, controls);
+    });
+
+    it('encodes special characters in workItemId', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(okResponse({ workItemId: 'a/b', controls: [], availability: 'ready' })),
+      );
+
+      await client.getWorkItemControls('a/b');
+
+      const [url] = fetchMock.mock.calls[0].arguments;
+      assert.ok((url as string).includes('a%2Fb'));
+    });
+
+    it('returns translated error on daemon 404', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(404, 'NOT_FOUND', 'Work item not found')),
+      );
+
+      const result = await client.getWorkItemControls('nonexistent');
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'validation');
+    });
+
+    it('returns translated error on daemon 500', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(500, 'INTERNAL_ERROR', 'Server error')),
+      );
+
+      const result = await client.getWorkItemControls('wi-1');
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'daemon');
+    });
+
+    it('translates network failure into daemon-unreachable', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+
+      const result = await client.getWorkItemControls('wi-1');
+      assert.ok('error' in result);
+      assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
+    });
+  });
+
+  // ─── submitControlAction (US5 — control mutations) ─────────────────────────
+
+  describe('submitControlAction', () => {
+    const actionBody = {
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    };
+
+    it('sends POST to /operations/work-items/:workItemId/controls/:controlId', async () => {
+      const accepted = {
+        outcome: 'accepted',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route override',
+          availability: 'accepted',
+          authority: 'granted',
+          reason: null,
+          options: [],
+          expectedRevision: 'rev-2',
+          lastResolvedAt: '2026-03-22T10:00:00.000Z',
+        },
+        workItemId: 'wi-1',
+        resolvedAt: '2026-03-22T10:00:00.000Z',
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse(accepted)));
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+
+      assert.equal(fetchMock.mock.callCount(), 1);
+      const [url, opts] = fetchMock.mock.calls[0].arguments;
+      assert.equal(url, `${baseUrl}/operations/work-items/wi-1/controls/ctrl-1`);
+      assert.equal(opts?.method, 'POST');
+      assert.ok('data' in result);
+      assert.equal(result.data.outcome, 'accepted');
+    });
+
+    it('sends JSON body with requestedOptionId and expectedRevision', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(
+          okResponse({
+            outcome: 'accepted',
+            control: {},
+            workItemId: 'wi-1',
+            resolvedAt: '2026-03-22T10:00:00.000Z',
+          }),
+        ),
+      );
+
+      await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+
+      const [, opts] = fetchMock.mock.calls[0].arguments;
+      const parsed = JSON.parse(opts?.body as string);
+      assert.equal(parsed.requestedOptionId, 'opt-1');
+      assert.equal(parsed.expectedRevision, 'rev-1');
+    });
+
+    it('passes through rejected outcome from daemon', async () => {
+      const rejected = {
+        outcome: 'rejected',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route override',
+          availability: 'read-only',
+          authority: 'forbidden',
+          reason: 'Operator not authorized',
+          options: [],
+          expectedRevision: 'rev-1',
+          lastResolvedAt: null,
+        },
+        workItemId: 'wi-1',
+        resolvedAt: '2026-03-22T10:00:00.000Z',
+        message: 'Operator not authorized for this control',
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse(rejected)));
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+
+      assert.ok('data' in result);
+      assert.equal(result.data.outcome, 'rejected');
+      assert.equal(result.data.message, 'Operator not authorized for this control');
+    });
+
+    it('passes through stale outcome from daemon', async () => {
+      const stale = {
+        outcome: 'stale',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route override',
+          availability: 'stale',
+          authority: 'granted',
+          reason: 'Revision has been superseded',
+          options: [],
+          expectedRevision: 'rev-3',
+          lastResolvedAt: null,
+        },
+        workItemId: 'wi-1',
+        resolvedAt: '2026-03-22T10:00:00.000Z',
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse(stale)));
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+
+      assert.ok('data' in result);
+      assert.equal(result.data.outcome, 'stale');
+    });
+
+    it('encodes special characters in workItemId and controlId', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(
+          okResponse({
+            outcome: 'accepted',
+            control: {},
+            workItemId: 'a/b',
+            resolvedAt: '2026-03-22T10:00:00.000Z',
+          }),
+        ),
+      );
+
+      await client.submitControlAction('a/b', 'c/d', actionBody);
+
+      const [url] = fetchMock.mock.calls[0].arguments;
+      assert.ok((url as string).includes('a%2Fb'));
+      assert.ok((url as string).includes('c%2Fd'));
+    });
+
+    it('returns translated error on daemon 409 (stale revision)', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(409, 'REVISION_STALE', 'Revision token is stale')),
+      );
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'session');
+    });
+
+    it('returns translated error on daemon 403', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(403, 'AUTHORITY_DENIED', 'Not authorized')),
+      );
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+      assert.ok('error' in result);
+    });
+
+    it('returns translated error on daemon 500', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(500, 'INTERNAL_ERROR', 'Server error')),
+      );
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'daemon');
+    });
+
+    it('translates network failure into daemon-unreachable', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
+    });
+  });
+
+  // ─── discoverControls (US5 — batch control discovery) ──────────────────────
+
+  describe('discoverControls', () => {
+    const discoveryBody = { workItemIds: ['wi-1', 'wi-2'] };
+
+    it('sends POST to /operations/controls/discover', async () => {
+      const discovery = {
+        items: [
+          {
+            workItemId: 'wi-1',
+            controls: [
+              {
+                controlId: 'ctrl-1',
+                kind: 'routing',
+                label: 'Route override',
+                availability: 'actionable',
+                authority: 'granted',
+                reason: null,
+                options: [],
+                expectedRevision: 'rev-1',
+                lastResolvedAt: null,
+              },
+            ],
+            availability: 'ready',
+          },
+          { workItemId: 'wi-2', controls: [], availability: 'ready' },
+        ],
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse(discovery)));
+
+      const result = await client.discoverControls(discoveryBody);
+
+      assert.equal(fetchMock.mock.callCount(), 1);
+      const [url, opts] = fetchMock.mock.calls[0].arguments;
+      assert.equal(url, `${baseUrl}/operations/controls/discover`);
+      assert.equal(opts?.method, 'POST');
+      assert.ok('data' in result);
+      assert.equal(result.data.items.length, 2);
+    });
+
+    it('sends JSON body with workItemIds array', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ items: [] })));
+
+      await client.discoverControls(discoveryBody);
+
+      const [, opts] = fetchMock.mock.calls[0].arguments;
+      const parsed = JSON.parse(opts?.body as string);
+      assert.deepStrictEqual(parsed.workItemIds, ['wi-1', 'wi-2']);
+    });
+
+    it('includes optional kindFilter in request body', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ items: [] })));
+
+      await client.discoverControls({ workItemIds: ['wi-1'], kindFilter: 'routing' });
+
+      const [, opts] = fetchMock.mock.calls[0].arguments;
+      const parsed = JSON.parse(opts?.body as string);
+      assert.equal(parsed.kindFilter, 'routing');
+    });
+
+    it('returns translated error on daemon 500', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(500, 'INTERNAL_ERROR', 'Server error')),
+      );
+
+      const result = await client.discoverControls(discoveryBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'daemon');
+    });
+
+    it('translates network failure into daemon-unreachable', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+
+      const result = await client.discoverControls(discoveryBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
+    });
+
+    it('returns translated error on daemon 400 (invalid body)', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(400, 'INVALID_INPUT', 'workItemIds must be non-empty')),
+      );
+
+      const result = await client.discoverControls(discoveryBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'validation');
+    });
+  });
+
   // ─── Error handling (cross-cutting) ─────────────────────────────────────────
 
   describe('error handling', () => {

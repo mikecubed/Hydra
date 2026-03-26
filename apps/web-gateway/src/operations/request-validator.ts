@@ -20,6 +20,9 @@ export {
 /** Schema for workItemId path parameter — non-empty string. */
 export const WorkItemIdParam = z.string().min(1);
 
+/** Schema for controlId path parameter — non-empty string. */
+export const ControlIdParam = z.string().min(1);
+
 /**
  * Validate a workItemId path parameter. Returns the parsed value on success
  * or a GatewayErrorResponse on failure.
@@ -34,6 +37,26 @@ export function validateWorkItemId(
         code: 'VALIDATION_FAILED',
         category: 'validation',
         message: 'workItemId path parameter is required and must be non-empty',
+      }),
+    };
+  }
+  return { data: result.data };
+}
+
+/**
+ * Validate a controlId path parameter. Returns the parsed value on success
+ * or a GatewayErrorResponse on failure.
+ */
+export function validateControlId(
+  raw: string | undefined,
+): { data: string } | { error: GatewayErrorResponse } {
+  const result = ControlIdParam.safeParse(raw);
+  if (!result.success) {
+    return {
+      error: createGatewayErrorResponse({
+        code: 'VALIDATION_FAILED',
+        category: 'validation',
+        message: 'controlId path parameter is required and must be non-empty',
       }),
     };
   }
