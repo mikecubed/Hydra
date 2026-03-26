@@ -134,12 +134,24 @@ export function getDoctorLog(limit = 25): Record<string, unknown>[] {
   return _history.slice(-limit).reverse();
 }
 
+interface ResetDoctorOptions {
+  clearPersistent?: boolean;
+}
+
 /**
  * Reset session state (for testing or between sessions).
  * Also removes any entries written during this session from the persistent log file.
  */
-export function resetDoctor(): void {
-  if (_sessionEntries.length > 0) {
+export function resetDoctor(options: ResetDoctorOptions = {}): void {
+  if (options.clearPersistent === true) {
+    try {
+      if (fs.existsSync(LOG_PATH)) {
+        fs.writeFileSync(LOG_PATH, '', 'utf8');
+      }
+    } catch {
+      /* best effort — don't break if file is locked */
+    }
+  } else if (_sessionEntries.length > 0) {
     try {
       if (fs.existsSync(LOG_PATH)) {
         const sessionTs = new Set(_sessionEntries);
