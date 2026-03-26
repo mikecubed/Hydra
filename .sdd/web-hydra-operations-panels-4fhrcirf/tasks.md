@@ -63,7 +63,7 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 - [x] T012 [P] [US1] Implement browser snapshot client, operations state, reducer, and selectors in `apps/web/src/features/operations-panels/api/operations-client.ts`, `apps/web/src/features/operations-panels/model/operations-types.ts`, `apps/web/src/features/operations-panels/model/operations-reducer.ts`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
 - [x] T013 [US1] Implement queue panel shell, queue cards, empty states, and workspace composition in `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`, `apps/web/src/features/operations-panels/components/queue-panel.tsx`, `apps/web/src/features/operations-panels/components/queue-item-card.tsx`, `apps/web/src/features/operations-panels/components/empty-state-card.tsx`, `apps/web/src/routes/workspace.tsx`, and `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`.
 - [x] T014 [US1] Add queue visibility browser integration coverage in `apps/web/src/features/operations-panels/__tests__/queue-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
-- [ ] T015 [US1] Run the phase quality gate from the repo root with `npm run quality` and `npm test` once queue visibility is green.
+- [x] T015 [US1] Run the phase quality gate from the repo root with `npm run quality` and `npm test` once queue visibility is green.
 
 **Checkpoint**: User Story 1 is fully functional and independently testable.
 
@@ -75,15 +75,15 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Start a work item that pauses, recovers, and resumes; select it from the queue; verify the browser shows current checkpoint state plus ordered checkpoint history with waiting/recovery context preserved.
 
-- [ ] T016 [P] [US2] **TDD:** extend daemon detail projection coverage for checkpoint ordering, waiting states, recovery states, and partial-data markers in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
-- [ ] T017 [US2] Implement daemon work-item detail projection for checkpoints and availability semantics in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
-- [ ] T018 [P] [US2] **TDD:** extend gateway detail-route coverage for selected work-item reads in `apps/web-gateway/src/operations/__tests__/daemon-operations-client.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
-- [ ] T019 [US2] Implement gateway work-item detail mediation, validation, and route wiring for `GET /operations/work-items/:workItemId` in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/request-validator.ts`, and `apps/web-gateway/src/operations/operations-routes.ts`.
-- [ ] T020 [P] [US2] **TDD:** add browser selected-item state, detail-client, and detail-sync coverage in `apps/web/src/features/operations-panels/__tests__/operations-client.test.ts`, `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`, and `apps/web/src/features/operations-panels/__tests__/sync-controller.test.ts`.
-- [ ] T021 [P] [US2] Implement browser detail client, fetch orchestration, and selected-work-item synchronization in `apps/web/src/features/operations-panels/api/operations-client.ts`, `apps/web/src/features/operations-panels/model/sync-controller.ts`, `apps/web/src/features/operations-panels/model/operations-reducer.ts`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
-- [ ] T022 [US2] Implement checkpoint detail rendering in `apps/web/src/features/operations-panels/components/checkpoint-panel.tsx` and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
-- [ ] T023 [US2] Add checkpoint workflow coverage in `apps/web/src/features/operations-panels/__tests__/checkpoint-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
-- [ ] T024 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after checkpoint detail is green.
+- [x] T016 [P] [US2] **TDD:** extend daemon detail projection coverage for checkpoint ordering, waiting states, recovery states, and partial-data markers in `test/web-operations-projection.test.ts` and `test/web-operations-routes.test.ts`.
+- [x] T017 [US2] Implement daemon work-item detail projection for checkpoints and availability semantics in `lib/daemon/web-operations-projection.ts` and `lib/daemon/web-operations-routes.ts`.
+- [x] T018 [P] [US2] **TDD:** extend gateway detail-route coverage for selected work-item reads in `apps/web-gateway/src/operations/__tests__/daemon-operations-client.test.ts` and `apps/web-gateway/src/operations/__tests__/operations-routes.test.ts`.
+- [x] T019 [US2] Implement gateway work-item detail mediation, validation, and route wiring for `GET /operations/work-items/:workItemId` in `apps/web-gateway/src/operations/daemon-operations-client.ts`, `apps/web-gateway/src/operations/request-validator.ts`, and `apps/web-gateway/src/operations/operations-routes.ts`.
+- [x] T020 [P] [US2] **TDD:** add browser selected-item state, detail-client, and detail-sync coverage in `apps/web/src/features/operations-panels/__tests__/operations-client.test.ts`, `apps/web/src/features/operations-panels/__tests__/operations-reducer.test.ts`, and `apps/web/src/features/operations-panels/__tests__/sync-controller.test.ts`.
+- [x] T021 [P] [US2] Implement browser detail client, fetch orchestration, and selected-work-item synchronization in `apps/web/src/features/operations-panels/api/operations-client.ts`, `apps/web/src/features/operations-panels/model/sync-controller.ts`, `apps/web/src/features/operations-panels/model/operations-reducer.ts`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
+- [x] T022 [US2] Implement checkpoint detail rendering in `apps/web/src/features/operations-panels/components/checkpoint-panel.tsx` and `apps/web/src/features/operations-panels/components/operations-panel-shell.tsx`.
+- [x] T023 [US2] Add checkpoint workflow coverage in `apps/web/src/features/operations-panels/__tests__/checkpoint-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
+- [x] T024 [US2] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after checkpoint detail is green.
 
 **Checkpoint**: User Stories 1 and 2 work together as an authoritative queue + progress surface.
 

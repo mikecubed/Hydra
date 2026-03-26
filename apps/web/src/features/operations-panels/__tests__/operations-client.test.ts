@@ -234,8 +234,9 @@ describe('OperationsClient', () => {
 
     const abortController = new AbortController();
     await client.getWorkItemDetail('wq-1', { signal: abortController.signal });
-    assert.ok(capturedSignal instanceof AbortSignal, 'AbortSignal should be forwarded to fetch');
-    assert.equal(capturedSignal.aborted, false);
+    assert.ok(capturedSignal, 'AbortSignal should be forwarded to fetch');
+    assert.equal(capturedSignal, abortController.signal);
+    assert.equal(abortController.signal.aborted, false);
   });
 
   it('URL-encodes work item IDs containing special characters', async () => {
