@@ -169,7 +169,7 @@ jobs:
         run: npm run lint:cycles
 
   check-coverage:
-    name: Coverage Gate (64% / 62% funcs)
+    name: Coverage Gate (78% / 79% funcs)
     runs-on: ubuntu-latest
     continue-on-error: false
     permissions:
@@ -196,13 +196,17 @@ jobs:
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
-        # Interim gate: 64% lines/statements/branches and 62% functions — blocking.
+        # Gate: 78% lines/statements, 76% branches, 79% functions — blocking.
         # Ultimate target: 80% (see docs/quality-evaluation.md roadmap).
+
+      - name: Check per-file coverage floors
+        run: npm run test:coverage:per-file
 
   audit:
     name: Dependency Audit (warn-only)
     runs-on: ubuntu-latest
-    # warn-only until vulnerability baseline is established; flip to false once clean
+    # Warn-only: new upstream advisories can land at any time and block unrelated PRs.
+    # Flip to false only after establishing an allowlist/baseline process.
     continue-on-error: true
     permissions:
       contents: read
@@ -250,13 +254,77 @@ jobs:
           requireScope: false
 
   mutation-testing:
-    name: Mutation Testing (warn-only)
+    name: Mutation Testing (${{ matrix.scope }})
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 20
+    continue-on-error: false
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [shared, daemon]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          HUSKY: '0'
+
+      # On PRs: only mutate changed files within this matrix scope
+      - name: Get changed mutation-scope files (PR)
+        id: changed-mutate
+        if: github.event_name == 'pull_request'
+        run: |
+          scope="${{ matrix.scope }}"
+          if [ "$scope" = "shared" ]; then
+            pattern='lib/hydra-shared/**/*.ts'
+          else
+            pattern='lib/daemon/**/*.ts'
+          fi
+          changed=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
+            "$pattern" \
+            | grep -v '\.test\.ts$' \
+            | grep -v '\.d\.ts$' \
+            | paste -sd ',' - || true)
+          echo "files=$changed" >> "$GITHUB_OUTPUT"
+          echo "Changed $scope files: $changed"
+
+      - name: Run mutation tests (changed files)
+        if: github.event_name == 'pull_request' && steps.changed-mutate.outputs.files != ''
+        run: npx stryker run stryker.${{ matrix.scope }}.config.json --mutate "${{ steps.changed-mutate.outputs.files }}"
+        env:
+          HUSKY: '0'
+
+      - name: Skip mutation tests (no relevant changes)
+        if: github.event_name == 'pull_request' && steps.changed-mutate.outputs.files == ''
+        run: echo "No ${{ matrix.scope }} files changed — skipping."
+
+      # On push to main only: run full scope for this matrix entry
+      - name: Run mutation tests (full scope)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npm run test:mutation:${{ matrix.scope }}
+        env:
+          HUSKY: '0'
+
+  new-file-policy:
+    name: New File Test Policy
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -265,7 +333,5 @@ jobs:
         run: npm ci
         env:
           HUSKY: '0'
-      - name: Run mutation tests
-        run: npm run test:mutation
-        env:
-          HUSKY: '0'
+      - name: Check new files have tests
+        run: npm run test:new-file-policy -- origin/${{ github.base_ref }}

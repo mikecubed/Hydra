@@ -214,3 +214,153 @@ describe('setDispatchExecutor', () => {
     setDispatchExecutor(original);
   });
 });
+
+// ── getRoleAgent: local agent branch ────────────────────────────────────────
+
+describe('getRoleAgent — local agent handling', () => {
+  afterEach(() => {
+    invalidateConfigCache();
+  });
+
+  it('returns local when preferred agent is local and local.enabled is true', () => {
+    _setTestConfig({
+      roles: { coordinator: { agent: 'local', model: null } },
+      local: { enabled: true },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: false,
+      gemini: false,
+      codex: false,
+    };
+    assert.equal(getRoleAgent('coordinator', clis), 'local');
+  });
+
+  it('falls back when preferred agent is local but local.enabled is false', () => {
+    _setTestConfig({
+      roles: { coordinator: { agent: 'local', model: null } },
+      local: { enabled: false },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: true,
+      gemini: true,
+      codex: true,
+    };
+    const agent = getRoleAgent('coordinator', clis);
+    assert.notEqual(agent, 'local');
+    assert.equal(typeof agent, 'string');
+  });
+
+  it('preference order includes local when local.enabled is true and no CLI agents installed', () => {
+    _setTestConfig({
+      roles: { coordinator: { agent: 'claude', model: null } },
+      local: { enabled: true },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: false,
+      gemini: false,
+      codex: false,
+      copilot: false,
+    };
+    const agent = getRoleAgent('coordinator', clis);
+    assert.equal(agent, 'local');
+  });
+
+  it('skips local in preference order when local.enabled is false', () => {
+    _setTestConfig({
+      roles: { coordinator: { agent: 'claude', model: null } },
+      local: { enabled: false },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: false,
+      gemini: false,
+      codex: false,
+      copilot: false,
+    };
+    assert.throws(() => getRoleAgent('coordinator', clis), /No agents available/);
+  });
+});
+
+// ── getRoleAgent: empty/null preferred agent ─────────────────────────────────
+
+describe('getRoleAgent — empty/null preferred agent', () => {
+  afterEach(() => {
+    invalidateConfigCache();
+  });
+
+  it('falls back to preference order when role agent is empty string', () => {
+    _setTestConfig({
+      roles: { coordinator: { agent: '', model: null } },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: true,
+      gemini: true,
+      codex: true,
+    };
+    const agent = getRoleAgent('coordinator', clis);
+    assert.equal(typeof agent, 'string');
+    assert.ok(agent.length > 0);
+  });
+
+  it('falls back to preference order when role agent is undefined', () => {
+    _setTestConfig({
+      roles: { coordinator: { agent: undefined, model: null } },
+    });
+    const clis: Record<string, boolean | undefined> = {
+      claude: true,
+      gemini: true,
+      codex: true,
+    };
+    const agent = getRoleAgent('coordinator', clis);
+    assert.equal(typeof agent, 'string');
+    assert.ok(agent.length > 0);
+  });
+});
+
+// ── setDispatchExecutor: round-trip restore ────────────────────────────────
+
+describe('setDispatchExecutor — round-trip restore', () => {
+  it('restoring previous executor returns the mock that was swapped in', () => {
+    const mockExecutor: IAgentExecutor = {
+      executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
+      executeAgent: async () => ({
+        ok: true,
+        output: 'round-trip',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        durationMs: 0,
+        timedOut: false,
+        error: null,
+        command: 'rt',
+        args: [],
+        promptSnippet: '',
+      }),
+    };
+    const original = setDispatchExecutor(mockExecutor);
+    const displaced = setDispatchExecutor(original);
+    assert.equal(displaced, mockExecutor, 'displaced should be the mock we installed');
+  });
+
+  it('original executor has executeAgentWithRecovery method', () => {
+    const mockExecutor: IAgentExecutor = {
+      executeAgentWithRecovery: null as unknown as IAgentExecutor['executeAgentWithRecovery'],
+      executeAgent: async () => ({
+        ok: true,
+        output: '',
+        stderr: '',
+        exitCode: 0,
+        signal: null,
+        durationMs: 0,
+        timedOut: false,
+        error: null,
+        command: '',
+        args: [],
+        promptSnippet: '',
+      }),
+    };
+    const original = setDispatchExecutor(mockExecutor);
+    assert.equal(typeof original.executeAgentWithRecovery, 'function');
+    // Restore
+    setDispatchExecutor(original);
+  });
+});

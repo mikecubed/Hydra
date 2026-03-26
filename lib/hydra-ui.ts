@@ -553,7 +553,7 @@ export function colorStatus(status: string): string {
 
 // ─── Task Formatting ────────────────────────────────────────────────────────
 
-export function formatTaskLine(task: TaskLike | null | undefined): string {
+export function formatTaskLine(task?: TaskLike | null): string {
   if (!task) return '';
   const id = pc.bold(pc.white(task.id ?? '???'));
   const status = colorStatus(task.status ?? 'todo');
@@ -562,7 +562,7 @@ export function formatTaskLine(task: TaskLike | null | undefined): string {
   return `  ${id} ${status}  ${owner}  ${title}`;
 }
 
-export function formatHandoffLine(handoff: HandoffLike | null | undefined): string {
+export function formatHandoffLine(handoff?: HandoffLike | null): string {
   if (!handoff) return '';
   const id = pc.bold(pc.white(handoff.id ?? '???'));
   const from = colorAgent(handoff.from ?? '?');

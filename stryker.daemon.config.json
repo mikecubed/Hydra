@@ -8,14 +8,7 @@
     "command": "node --test --experimental-test-module-mocks 'test/**/*.test.{ts,mjs}'"
   },
   "coverageAnalysis": "off",
-  "mutate": [
-    "lib/hydra-shared/**/*.ts",
-    "lib/daemon/**/*.ts",
-    "!lib/hydra-shared/**/*.test.ts",
-    "!lib/hydra-shared/**/*.d.ts",
-    "!lib/daemon/**/*.test.ts",
-    "!lib/daemon/**/*.d.ts"
-  ],
+  "mutate": ["lib/daemon/**/*.ts", "!lib/daemon/**/*.test.ts", "!lib/daemon/**/*.d.ts"],
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",
   "thresholds": {

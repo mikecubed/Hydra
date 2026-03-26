@@ -7,6 +7,7 @@ import {
   validateAgentSpec,
   analyzeCodebase,
   loadForgeRegistry,
+  saveForgeRegistry,
   listForgedAgents,
   persistForgedAgent,
   removeForgedAgent,
@@ -280,5 +281,201 @@ test('persist and remove a forged agent round-trip', () => {
     assert.ok(!registryAfter[testName], 'Should be removed from forge registry');
   } finally {
     teardownTmp();
+  }
+});
+
+// ── _setTestForgeDir ─────────────────────────────────────────────────────────
+
+test('_setTestForgeDir redirects registry reads to temp dir', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-forge-seam-'));
+  try {
+    _setTestForgeDir(tmpDir);
+    // Reading registry from an empty temp dir should return empty object
+    const registry = loadForgeRegistry();
+    assert.deepEqual(registry, {});
+  } finally {
+    _setTestForgeDir(null);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('_setTestForgeDir(null) restores default behavior', () => {
+  _setTestForgeDir('/some/fake/path');
+  _setTestForgeDir(null);
+  // Should not throw — reads from real forge dir
+  const registry = loadForgeRegistry();
+  assert.ok(typeof registry === 'object');
+});
+
+// ── saveForgeRegistry + loadForgeRegistry round-trip ──────────────────────────
+
+test('saveForgeRegistry + loadForgeRegistry round-trip', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-forge-reg-'));
+  try {
+    _setTestForgeDir(tmpDir);
+    const data = {
+      'test-agent': {
+        forgedAt: '2025-01-01T00:00:00.000Z',
+        description: 'Test entry',
+        phasesRun: ['analyze', 'design'],
+        testResult: null,
+        version: 1,
+      },
+    };
+    saveForgeRegistry(data);
+    const loaded = loadForgeRegistry();
+    assert.deepEqual(loaded, data);
+  } finally {
+    _setTestForgeDir(null);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// ── validateAgentSpec: additional edge cases ─────────────────────────────────
+
+test('validateAgentSpec: rejects name starting with uppercase', () => {
+  const spec: Record<string, unknown> = {
+    name: 'UpperCase',
+    baseAgent: 'claude',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some((e: string) => e.includes('Invalid name')));
+});
+
+test('validateAgentSpec: rejects name with spaces', () => {
+  const spec: Record<string, unknown> = {
+    name: 'has space',
+    baseAgent: 'claude',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some((e: string) => e.includes('Invalid name')));
+});
+
+test('validateAgentSpec: rejects undefined name', () => {
+  const spec: Record<string, unknown> = {
+    baseAgent: 'claude',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some((e: string) => e.includes('Invalid name')));
+});
+
+test('validateAgentSpec: warns on very long rolePrompt', () => {
+  const spec: Record<string, unknown> = {
+    name: 'long-prompt',
+    baseAgent: 'claude',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(6000),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(result.valid);
+  assert.ok(result.warnings.some((w: string) => w.includes('very long')));
+});
+
+test('validateAgentSpec: warns on missing displayName', () => {
+  const spec: Record<string, unknown> = {
+    name: 'no-display',
+    baseAgent: 'claude',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(result.valid);
+  assert.ok(result.warnings.some((w: string) => w.includes('displayName')));
+});
+
+test('validateAgentSpec: warns on out-of-range affinity values', () => {
+  const spec: Record<string, unknown> = {
+    name: 'bad-range',
+    baseAgent: 'claude',
+    taskAffinity: { implementation: 1.5, review: -0.5 },
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(result.valid); // out of range is a warning, not error
+  assert.ok(result.warnings.some((w: string) => w.includes('out of range')));
+});
+
+test('validateAgentSpec: rejects non-existent baseAgent', () => {
+  const spec: Record<string, unknown> = {
+    name: 'bad-base',
+    baseAgent: 'nonexistent-agent-xyz',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some((e: string) => e.includes('does not exist')));
+});
+
+test('validateAgentSpec: rejects empty string baseAgent', () => {
+  const spec: Record<string, unknown> = {
+    name: 'empty-base',
+    baseAgent: '',
+    taskAffinity: Object.fromEntries(TASK_TYPES.map((t) => [t, 0.5])),
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some((e: string) => e.includes('baseAgent')));
+});
+
+test('validateAgentSpec: taskAffinity as non-object is rejected', () => {
+  const spec: Record<string, unknown> = {
+    name: 'bad-affinity-type',
+    baseAgent: 'claude',
+    taskAffinity: 'not-an-object',
+    rolePrompt: 'A'.repeat(200),
+  };
+  const result = validateAgentSpec(spec);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some((e: string) => e.includes('taskAffinity')));
+});
+
+// ── analyzeCodebase: additional checks ───────────────────────────────────────
+
+test('analyzeCodebase returns non-empty fileTypes for this repo', () => {
+  const profile = analyzeCodebase();
+  assert.ok(Object.keys(profile.fileTypes).length > 0, 'should detect file types');
+  assert.ok(profile.fileTypes['.ts'] > 0, 'should detect .ts files');
+});
+
+test('analyzeCodebase detects package.json', () => {
+  const profile = analyzeCodebase();
+  assert.ok(profile.packageJson !== null, 'should detect package.json');
+  assert.ok(typeof profile.packageJson === 'object');
+});
+
+test('analyzeCodebase returns recentCommits as array of strings', () => {
+  const profile = analyzeCodebase();
+  assert.ok(Array.isArray(profile.recentCommits));
+  if (profile.recentCommits.length > 0) {
+    assert.equal(typeof profile.recentCommits[0], 'string');
+  }
+});
+
+test('analyzeCodebase existingAgents have expected shape', () => {
+  const profile = analyzeCodebase();
+  for (const agent of profile.existingAgents) {
+    assert.ok(typeof agent.name === 'string');
+    assert.ok(typeof agent.type === 'string');
+    assert.ok(Array.isArray(agent.topAffinities));
+  }
+});
+
+test('analyzeCodebase coverageGaps have expected shape', () => {
+  const profile = analyzeCodebase();
+  for (const gap of profile.coverageGaps) {
+    assert.ok(typeof gap.type === 'string');
+    assert.ok(typeof gap.bestScore === 'number');
+    assert.ok(gap.bestScore < 0.7, 'gaps should have bestScore < 0.7');
   }
 });

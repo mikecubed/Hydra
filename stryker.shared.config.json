@@ -10,11 +10,8 @@
   "coverageAnalysis": "off",
   "mutate": [
     "lib/hydra-shared/**/*.ts",
-    "lib/daemon/**/*.ts",
     "!lib/hydra-shared/**/*.test.ts",
-    "!lib/hydra-shared/**/*.d.ts",
-    "!lib/daemon/**/*.test.ts",
-    "!lib/daemon/**/*.d.ts"
+    "!lib/hydra-shared/**/*.d.ts"
   ],
   "checkers": ["typescript"],
   "tsconfigFile": "tsconfig.json",

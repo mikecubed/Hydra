@@ -5,7 +5,15 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isDoctorEnabled, diagnose, getDoctorStats, resetDoctor } from '../lib/hydra-doctor.ts';
+import {
+  initDoctor,
+  isDoctorEnabled,
+  diagnose,
+  getDoctorStats,
+  getDoctorLog,
+  resetDoctor,
+} from '../lib/hydra-doctor.ts';
+import { _setTestConfig, invalidateConfigCache } from '../lib/hydra-config.ts';
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -182,6 +190,185 @@ describe('hydra-doctor', () => {
 
       resetDoctor();
       assert.equal(getDoctorStats().total, 0);
+    });
+  });
+
+  describe('initDoctor()', () => {
+    it('initializes without error', () => {
+      assert.doesNotThrow(() => {
+        initDoctor();
+      });
+    });
+
+    it('is idempotent — calling twice does not throw', () => {
+      initDoctor();
+      assert.doesNotThrow(() => {
+        initDoctor();
+      });
+    });
+
+    it('allows re-initialization after reset', () => {
+      initDoctor();
+      resetDoctor();
+      assert.doesNotThrow(() => {
+        initDoctor();
+      });
+    });
+  });
+
+  describe('isDoctorEnabled() with config overrides', () => {
+    afterEach(() => {
+      invalidateConfigCache();
+    });
+
+    it('returns false when doctor.enabled is explicitly false', () => {
+      _setTestConfig({ doctor: { enabled: false } });
+      assert.equal(isDoctorEnabled(), false);
+    });
+
+    it('returns true when doctor.enabled is true', () => {
+      _setTestConfig({ doctor: { enabled: true } });
+      assert.equal(isDoctorEnabled(), true);
+    });
+
+    it('returns true when doctor config is empty object', () => {
+      _setTestConfig({ doctor: {} });
+      assert.equal(isDoctorEnabled(), true);
+    });
+
+    it('returns true when doctor config is undefined', () => {
+      _setTestConfig({ doctor: undefined });
+      assert.equal(isDoctorEnabled(), true);
+    });
+  });
+
+  describe('getDoctorStats() shape and isolation', () => {
+    it('returns a copy — mutations do not affect internal state', () => {
+      const stats1 = getDoctorStats();
+      stats1.total = 999;
+      stats1.fixes = 999;
+      const stats2 = getDoctorStats();
+      assert.equal(stats2.total, 0, 'internal state should not be mutated');
+      assert.equal(stats2.fixes, 0);
+    });
+
+    it('has all expected numeric fields', () => {
+      const stats = getDoctorStats();
+      for (const key of ['total', 'fixes', 'tickets', 'investigations', 'ignored'] as const) {
+        assert.equal(typeof stats[key], 'number', `${key} should be a number`);
+      }
+    });
+  });
+
+  describe('getDoctorLog()', () => {
+    it('returns empty array before any diagnoses', () => {
+      const log = getDoctorLog();
+      assert.ok(Array.isArray(log));
+      assert.equal(log.length, 0);
+    });
+
+    it('returns empty array with explicit limit', () => {
+      const log = getDoctorLog(10);
+      assert.ok(Array.isArray(log));
+      assert.equal(log.length, 0);
+    });
+
+    it('returns empty array with limit of 0', () => {
+      const log = getDoctorLog(0);
+      assert.ok(Array.isArray(log));
+      assert.equal(log.length, 0);
+    });
+
+    it('auto-initializes if not already initialized', () => {
+      resetDoctor(); // ensure uninitialized state
+      const log = getDoctorLog();
+      assert.ok(Array.isArray(log));
+    });
+
+    it('returns entries after diagnose calls', async () => {
+      await diagnose(makeFailure({ error: '429 rate limit' }));
+      const log = getDoctorLog();
+      assert.ok(log.length >= 1, 'should have at least one log entry');
+      // Each entry should be an object with a 'ts' field
+      assert.ok(typeof log[0] === 'object');
+    });
+
+    it('respects limit parameter', async () => {
+      await diagnose(makeFailure({ error: '429 rate limit A' }));
+      await diagnose(makeFailure({ error: '429 rate limit B' }));
+      await diagnose(makeFailure({ error: '429 rate limit C' }));
+      const log = getDoctorLog(1);
+      assert.ok(log.length <= 1, 'should respect limit of 1');
+    });
+
+    it('returns newest first', async () => {
+      await diagnose(makeFailure({ error: '429 rate limit first' }));
+      await diagnose(makeFailure({ error: '429 rate limit second' }));
+      const log = getDoctorLog();
+      if (log.length >= 2) {
+        const ts0 = new Date(log[0]['ts'] as string).getTime();
+        const ts1 = new Date(log[1]['ts'] as string).getTime();
+        assert.ok(ts0 >= ts1, 'newest entry should be first');
+      }
+    });
+  });
+
+  describe('resetDoctor() thorough', () => {
+    it('can be called multiple times safely', () => {
+      resetDoctor();
+      resetDoctor();
+      resetDoctor();
+      const stats = getDoctorStats();
+      assert.equal(stats.total, 0);
+    });
+
+    it('clears log entries', async () => {
+      await diagnose(makeFailure({ error: '429 rate limit' }));
+      assert.ok(getDoctorLog().length >= 1);
+      resetDoctor();
+      // After reset, getDoctorLog() calls initDoctor(), which may reload log entries
+      // from disk, but resetDoctor() also clears session entries from that file.
+      getDoctorLog();
+      // Log may or may not be empty depending on pre-existing file entries,
+      // but session stats should be zero
+      assert.equal(getDoctorStats().total, 0);
+    });
+  });
+
+  describe('diagnose() with categorized errors', () => {
+    it('handles errorCategory field', async () => {
+      const result = await diagnose(
+        makeFailure({
+          error: 'Failed to connect',
+          errorCategory: 'network',
+          errorDetail: 'ECONNREFUSED',
+        }),
+      );
+      assert.ok(typeof result.explanation === 'string');
+      assert.ok(typeof result.rootCause === 'string');
+    });
+
+    it('handles signal-terminated processes', async () => {
+      const result = await diagnose(
+        makeFailure({
+          error: '',
+          signal: 'SIGKILL',
+          exitCode: null,
+        }),
+      );
+      assert.ok(typeof result.explanation === 'string');
+      assert.ok(['ignore', 'fix', 'ticket'].includes(result.action));
+    });
+
+    it('handles empty error with stderr', async () => {
+      const result = await diagnose(
+        makeFailure({
+          error: '',
+          stderr: 'fatal: not a git repository',
+        }),
+      );
+      assert.ok(typeof result.explanation === 'string');
+      assert.ok(result.explanation.length > 0);
     });
   });
 });

@@ -137,3 +137,66 @@ describe('findWindowsTerminal — platform behavior', () => {
     assert.ok(result === null || typeof result === 'string');
   });
 });
+
+// ── Coverage Phase 4: Extended Tests ─────────────────────────────────────────
+
+describe('extractHandoffAgents — type coercion edge cases', () => {
+  it('handles numeric to field', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ to: 123 }] },
+    });
+    // String(123) = '123', not a known agent
+    assert.deepEqual(result, []);
+  });
+
+  it('handles boolean to field', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ to: true }] },
+    });
+    assert.deepEqual(result, []);
+  });
+
+  it('handles undefined to field', () => {
+    const result = extractHandoffAgents({
+      published: { handoffs: [{ to: undefined }] },
+    });
+    assert.deepEqual(result, []);
+  });
+
+  it('preserves order of first appearance', () => {
+    const result = extractHandoffAgents({
+      published: {
+        handoffs: [{ to: 'gemini' }, { to: 'claude' }, { to: 'gemini' }, { to: 'codex' }],
+      },
+    });
+    assert.equal(result[0], 'gemini');
+    assert.equal(result[1], 'claude');
+    assert.equal(result[2], 'codex');
+    assert.equal(result.length, 3);
+  });
+
+  it('handles case-insensitive deduplication', () => {
+    const result = extractHandoffAgents({
+      published: {
+        handoffs: [{ to: 'Claude' }, { to: 'CLAUDE' }, { to: 'claude' }],
+      },
+    });
+    assert.equal(result.length, 1);
+    assert.equal(result[0], 'claude');
+  });
+});
+
+describe('findPowerShell — extended non-Windows tests', () => {
+  it('always returns null on non-Windows', { skip: process.platform === 'win32' }, () => {
+    // Call multiple times to ensure consistent behavior
+    assert.equal(findPowerShell(), null);
+    assert.equal(findPowerShell(), null);
+  });
+});
+
+describe('findWindowsTerminal — extended non-Windows tests', () => {
+  it('always returns null on non-Windows', { skip: process.platform === 'win32' }, () => {
+    assert.equal(findWindowsTerminal(), null);
+    assert.equal(findWindowsTerminal(), null);
+  });
+});
