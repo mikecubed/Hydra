@@ -12,12 +12,15 @@
 import { describe, it, mock, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-// ── Suppress console.log to prevent IPC serialization errors ────────────────
-const originalLog = console.log;
-let suppressLog = false;
-console.log = (...args: unknown[]) => {
-  if (!suppressLog) originalLog(...args);
-};
+// ── Suppress console output to prevent IPC serialization errors in CI ────────
+// Node's test runner serializes worker output across IPC; complex objects from
+// mocked modules can trigger "Unable to deserialize cloned data" errors.
+const _origLog = console.log;
+const _origWarn = console.warn;
+const _origError = console.error;
+console.log = () => {};
+console.warn = () => {};
+console.error = () => {};
 
 // ── Mock state ──────────────────────────────────────────────────────────────
 
@@ -368,7 +371,6 @@ function makeCtx(overrides: Record<string, unknown> = {}): any {
 
 describe('hydra-operator-commands-deep', () => {
   beforeEach(() => {
-    suppressLog = true;
     mockRequest.mock.resetCalls();
     mockLoadConfig.mock.resetCalls();
     mockSaveConfig.mock.resetCalls();
@@ -392,9 +394,7 @@ describe('hydra-operator-commands-deep', () => {
     mockExecuteAgent.mock.resetCalls();
   });
 
-  afterEach(() => {
-    suppressLog = false;
-  });
+  afterEach(() => {});
 
   // ── handleModelCommand ──────────────────────────────────────────────────
 
