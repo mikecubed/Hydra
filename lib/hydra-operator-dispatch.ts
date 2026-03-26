@@ -398,6 +398,7 @@ export async function publishFastPathDelegation({
   };
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- publish keeps task creation, decision metadata, and handoffs in one linear flow
 export async function publishMiniRoundDelegation({
   baseUrl,
   from,
@@ -425,11 +426,13 @@ export async function publishMiniRoundDelegation({
         }));
 
   const createdTasks = [];
+  const recommendedMode = String(report?.recommendedMode ?? 'handoff');
   for (const task of tasksToCreate) {
     const created = (await request('POST', baseUrl, '/task/add', {
       title: task.title,
       owner: task.owner,
       status: 'todo',
+      mode: recommendedMode,
       notes: task.rationale ? `Mini-round rationale: ${task.rationale}` : '',
     })) as any;
     createdTasks.push(created.task);
@@ -439,7 +442,29 @@ export async function publishMiniRoundDelegation({
     title: `Hydra Mini Round: ${short(promptText, 90)}`,
     owner: from,
     rationale: short(report?.consensus ?? 'Mini-round completed without explicit consensus.', 600),
-    impact: `recommended=${String(report?.recommendedMode ?? 'handoff')}; tasks=${String(createdTasks.length)}`,
+    impact: `recommended=${recommendedMode}; tasks=${String(createdTasks.length)}`,
+    route: 'mini-round',
+    mode: recommendedMode,
+    taskIds: createdTasks.flatMap((task: any) =>
+      typeof task?.id === 'string' && task.id !== '' ? [task.id] : [],
+    ),
+    councilParticipants: agents.map((agent) => ({
+      agent,
+      role: null,
+      state: 'completed',
+      startedAt: null,
+      endedAt: null,
+    })),
+    councilTransitions: [
+      {
+        label: 'Mini-round recommendation',
+        status: 'completed',
+        timestamp: new Date().toISOString(),
+        detail: short(String(report?.recommendationRationale ?? report?.consensus ?? ''), 220),
+      },
+    ],
+    councilFinalOutcome: short(String(report?.consensus ?? ''), 220),
+    councilStatus: 'completed',
   })) as any;
 
   const handoffs = [];

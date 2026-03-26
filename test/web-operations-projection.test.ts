@@ -22,6 +22,9 @@ import {
   CheckpointRecordView as CheckpointRecordViewSchema,
   DaemonHealthView as DaemonHealthViewSchema,
   BudgetStatusView as BudgetStatusViewSchema,
+  RoutingDecisionView as RoutingDecisionViewSchema,
+  AgentAssignmentView as AgentAssignmentViewSchema,
+  CouncilExecutionView as CouncilExecutionViewSchema,
 } from '@hydra/web-contracts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -1395,5 +1398,615 @@ describe('checkpoint contract validation', () => {
     const result = projectCheckpoints(task);
     const parsed = CheckpointRecordViewSchema.safeParse(result[0]);
     assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+});
+
+// ── Routing History Projection ─────────────────────────────────────────────
+
+describe('projectWorkItemDetail routing history', () => {
+  it('projects routing from task routingHistory into RoutingDecisionView', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          status: 'in_progress',
+          routingHistory: [
+            {
+              route: 'claude',
+              mode: 'council',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'Architecture analysis needed',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.ok(result.routing !== null, 'routing should not be null when routingHistory exists');
+    assert.equal(result.routing.currentRoute, 'claude');
+    assert.equal(result.routing.currentMode, 'council');
+    assert.equal(result.routing.changedAt, '2025-06-01T10:00:00.000Z');
+    assert.equal(result.routing.history.length, 1);
+  });
+
+  it('uses the latest entry as currentRoute/currentMode', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'claude',
+              mode: 'auto',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'Initial routing',
+            },
+            {
+              route: 'codex',
+              mode: 'smart',
+              changedAt: '2025-06-01T11:00:00.000Z',
+              reason: 'Re-routed for implementation',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.routing !== null);
+    assert.equal(result.routing.currentRoute, 'codex');
+    assert.equal(result.routing.currentMode, 'smart');
+    assert.equal(result.routing.changedAt, '2025-06-01T11:00:00.000Z');
+    assert.equal(result.routing.history.length, 2);
+  });
+
+  it('assigns deterministic IDs to routing history entries', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-42',
+          routingHistory: [
+            {
+              route: 'gemini',
+              mode: 'auto',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-42');
+    assert.ok(result !== null && result.routing !== null);
+    assert.equal(result.routing.history[0].id, 'task-42-rt-0');
+  });
+
+  it('returns null routing when task has no routingHistory', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null);
+  });
+
+  it('returns null routing when routingHistory is empty array', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', routingHistory: [] })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null);
+  });
+
+  it('handles null reason in routing entry', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            { route: 'codex', mode: 'auto', changedAt: '2025-06-01T10:00:00.000Z', reason: null },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.routing !== null);
+    assert.equal(result.routing.history[0].reason, null);
+  });
+
+  it('ignores malformed routing entries instead of throwing', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', routingHistory: [null] })],
+    });
+    assert.doesNotThrow(() => projectWorkItemDetail(state, 'task-1'));
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.routing, null);
+  });
+
+  it('falls back invalid routing timestamps to the epoch', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'claude',
+              mode: 'council',
+              changedAt: '2025-06-01 10:00:00Z',
+              reason: 'Non-ISO timestamp',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.routing !== null);
+    assert.equal(result.routing.changedAt, '1970-01-01T00:00:00.000Z');
+  });
+
+  it('validates projected routing against RoutingDecisionView schema', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'claude',
+              mode: 'council',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'Complex analysis required',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.routing !== null);
+    const parsed = RoutingDecisionViewSchema.safeParse(result.routing);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+});
+
+// ── Assignment History Projection ──────────────────────────────────────────
+
+describe('projectWorkItemDetail assignment history', () => {
+  it('projects assignments from task assignmentHistory', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          assignmentHistory: [
+            {
+              agent: 'claude',
+              role: 'architect',
+              state: 'completed',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: '2025-06-01T11:00:00.000Z',
+            },
+            {
+              agent: 'codex',
+              role: 'implementer',
+              state: 'active',
+              startedAt: '2025-06-01T11:00:00.000Z',
+              endedAt: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.assignments.length, 2);
+    assert.equal(result.assignments[0].participantId, 'claude');
+    assert.equal(result.assignments[0].label, 'claude');
+    assert.equal(result.assignments[0].role, 'architect');
+    assert.equal(result.assignments[0].state, 'completed');
+    assert.equal(result.assignments[1].participantId, 'codex');
+    assert.equal(result.assignments[1].state, 'active');
+  });
+
+  it('returns empty assignments when task has no assignmentHistory', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.deepStrictEqual(result.assignments, []);
+  });
+
+  it('returns empty assignments when assignmentHistory is empty array', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', assignmentHistory: [] })],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.deepStrictEqual(result.assignments, []);
+  });
+
+  it('handles null role and endedAt in assignment entry', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          assignmentHistory: [
+            {
+              agent: 'gemini',
+              role: null,
+              state: 'active',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.assignments[0].role, null);
+    assert.equal(result.assignments[0].endedAt, null);
+  });
+
+  it('ignores malformed assignment entries instead of throwing', () => {
+    const state = makeState({
+      tasks: [makeTask({ id: 'task-1', assignmentHistory: [null] })],
+    });
+    assert.doesNotThrow(() => projectWorkItemDetail(state, 'task-1'));
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.deepStrictEqual(result.assignments, []);
+  });
+
+  it('drops invalid assignment timestamps instead of returning contract-invalid strings', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          assignmentHistory: [
+            {
+              agent: 'codex',
+              role: 'implementer',
+              state: 'active',
+              startedAt: '2025-06-01 10:00:00Z',
+              endedAt: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.assignments[0].startedAt, null);
+  });
+
+  it('validates each assignment against AgentAssignmentView schema', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          assignmentHistory: [
+            {
+              agent: 'claude',
+              role: 'architect',
+              state: 'completed',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: '2025-06-01T11:00:00.000Z',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    for (const assignment of result.assignments) {
+      const parsed = AgentAssignmentViewSchema.safeParse(assignment);
+      assert.ok(
+        parsed.success,
+        `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`,
+      );
+    }
+  });
+});
+
+// ── Council Execution Projection ───────────────────────────────────────────
+
+describe('projectWorkItemDetail council history', () => {
+  it('projects council from task councilHistory', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          councilHistory: {
+            status: 'completed',
+            participants: [
+              {
+                agent: 'claude',
+                role: 'architect',
+                state: 'completed',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: '2025-06-01T11:00:00.000Z',
+              },
+              {
+                agent: 'gemini',
+                role: 'analyst',
+                state: 'completed',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: '2025-06-01T11:00:00.000Z',
+              },
+            ],
+            transitions: [
+              {
+                label: 'Round 1',
+                status: 'completed',
+                timestamp: '2025-06-01T10:30:00.000Z',
+                detail: 'Initial analysis',
+              },
+            ],
+            finalOutcome: 'Consensus reached on API design',
+          },
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.ok(result.council !== null, 'council should not be null when councilHistory exists');
+    assert.equal(result.council.status, 'completed');
+    assert.equal(result.council.participants.length, 2);
+    assert.equal(result.council.transitions.length, 1);
+    assert.equal(result.council.finalOutcome, 'Consensus reached on API design');
+  });
+
+  it('returns null council when task has no councilHistory', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.council, null);
+  });
+
+  it('ignores malformed council participants and transitions instead of throwing', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          councilHistory: {
+            status: 'completed',
+            participants: [null],
+            transitions: [null],
+            finalOutcome: 'Finished',
+          },
+        }),
+      ],
+    });
+    assert.doesNotThrow(() => projectWorkItemDetail(state, 'task-1'));
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.council !== null);
+    assert.deepStrictEqual(result.council.participants, []);
+    assert.deepStrictEqual(result.council.transitions, []);
+  });
+
+  it('falls back invalid council transition timestamps to the epoch', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          councilHistory: {
+            status: 'completed',
+            participants: [],
+            transitions: [
+              {
+                label: 'Round 1',
+                status: 'completed',
+                timestamp: '2025-06-01 10:00:00Z',
+                detail: 'Non-ISO timestamp',
+              },
+            ],
+            finalOutcome: 'Finished',
+          },
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.council !== null);
+    assert.equal(result.council.transitions[0].timestamp, '1970-01-01T00:00:00.000Z');
+  });
+
+  it('projects council participants as AgentAssignmentView entries', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          councilHistory: {
+            status: 'active',
+            participants: [
+              {
+                agent: 'codex',
+                role: 'implementer',
+                state: 'active',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: null,
+              },
+            ],
+            transitions: [],
+            finalOutcome: null,
+          },
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.council !== null);
+    assert.equal(result.council.participants[0].participantId, 'codex');
+    assert.equal(result.council.participants[0].label, 'codex');
+    assert.equal(result.council.participants[0].role, 'implementer');
+  });
+
+  it('assigns deterministic IDs to council transition entries', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-7',
+          councilHistory: {
+            status: 'completed',
+            participants: [],
+            transitions: [
+              {
+                label: 'Round 1',
+                status: 'completed',
+                timestamp: '2025-06-01T10:00:00.000Z',
+                detail: null,
+              },
+              {
+                label: 'Round 2',
+                status: 'completed',
+                timestamp: '2025-06-01T10:30:00.000Z',
+                detail: 'Final vote',
+              },
+            ],
+            finalOutcome: 'Agreed',
+          },
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-7');
+    assert.ok(result !== null && result.council !== null);
+    assert.equal(result.council.transitions[0].id, 'task-7-ct-0');
+    assert.equal(result.council.transitions[1].id, 'task-7-ct-1');
+  });
+
+  it('validates projected council against CouncilExecutionView schema', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          councilHistory: {
+            status: 'completed',
+            participants: [
+              {
+                agent: 'claude',
+                role: 'architect',
+                state: 'completed',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: '2025-06-01T11:00:00.000Z',
+              },
+            ],
+            transitions: [
+              {
+                label: 'Round 1',
+                status: 'completed',
+                timestamp: '2025-06-01T10:30:00.000Z',
+                detail: 'Reviewed design approach',
+              },
+            ],
+            finalOutcome: 'Design approved',
+          },
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.council !== null);
+    const parsed = CouncilExecutionViewSchema.safeParse(result.council);
+    assert.ok(parsed.success, `Schema validation failed: ${JSON.stringify(parsed.error?.issues)}`);
+  });
+});
+
+// ── Detail Availability with History ───────────────────────────────────────
+
+describe('projectWorkItemDetail availability with history', () => {
+  it('returns ready availability when routing, assignments, and council are all populated', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'claude',
+              mode: 'council',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'Council mode',
+            },
+          ],
+          assignmentHistory: [
+            {
+              agent: 'claude',
+              role: 'architect',
+              state: 'active',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: null,
+            },
+          ],
+          councilHistory: {
+            status: 'active',
+            participants: [
+              {
+                agent: 'claude',
+                role: 'architect',
+                state: 'active',
+                startedAt: '2025-06-01T10:00:00.000Z',
+                endedAt: null,
+              },
+            ],
+            transitions: [],
+            finalOutcome: null,
+          },
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.availability, 'ready');
+  });
+
+  it('returns ready availability without council when the task was not routed through council', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'codex',
+              mode: 'auto',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'Fast path',
+            },
+          ],
+          assignmentHistory: [
+            {
+              agent: 'codex',
+              role: 'implementer',
+              state: 'active',
+              startedAt: '2025-06-01T10:00:00.000Z',
+              endedAt: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.availability, 'ready');
+  });
+
+  it('returns partial when only routing is populated', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'codex',
+              mode: 'auto',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: null,
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.availability, 'partial');
+  });
+
+  it('returns partial when nothing is populated', () => {
+    const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null);
+    assert.equal(result.availability, 'partial');
   });
 });
