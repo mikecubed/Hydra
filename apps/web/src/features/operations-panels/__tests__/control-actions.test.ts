@@ -418,4 +418,53 @@ describe('submitControl', () => {
     assert.equal(detailRefetched, true);
     assert.equal(snapshotRefetched, true);
   });
+
+  // ─── Issue 2: caller catch pattern (unhandled rejection guard) ──────────
+
+  it('rejection is catchable by caller after state reconciliation completes', async () => {
+    const dispatched: OperationsAction[] = [];
+    const client = createMockClient(async () => {
+      throw new Error('Network failure');
+    });
+
+    // Mirrors the fixed component pattern: .catch() after submitControl
+    let caughtError: unknown = null;
+    await submitControl({
+      client,
+      dispatch: (action) => dispatched.push(action),
+      workItemId: 'wq-1',
+      controlId: 'ctrl-1',
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+    }).catch((err: unknown) => {
+      caughtError = err;
+    });
+
+    // State reconciliation must have occurred before the catch handler
+    assert.ok(dispatched.some((a) => a.type === 'controls/submit-resolved'));
+    // The error must be available to the caller for reporting
+    assert.ok(caughtError instanceof Error);
+    assert.match(caughtError.message, /Network failure/u);
+  });
+
+  it('rejection does not call onRefetchSnapshot even when caller catches', async () => {
+    let snapshotRefetched = false;
+    const client = createMockClient(async () => {
+      throw new Error('Server error');
+    });
+
+    await submitControl({
+      client,
+      dispatch: () => {},
+      workItemId: 'wq-1',
+      controlId: 'ctrl-1',
+      requestedOptionId: 'opt-1',
+      expectedRevision: 'rev-1',
+      onRefetchSnapshot: () => { snapshotRefetched = true; },
+    }).catch(() => {
+      // Caller catches rejection — mirrors component fix
+    });
+
+    assert.equal(snapshotRefetched, false, 'snapshot refetch must not fire on HTTP error');
+  });
 });

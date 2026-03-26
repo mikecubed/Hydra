@@ -53,29 +53,14 @@ function useOperationsPanelState() {
     dispatch,
   });
 
-  const fetchSnapshot = useCallback(async () => {
-    dispatch({ type: 'snapshot/request' });
-    try {
-      const snapshot = await operationsClient.getSnapshot();
-      dispatch({ type: 'snapshot/success', snapshot });
-
-      const workItemIds = snapshot.queue.map((item) => item.id);
-      if (workItemIds.length > 0) {
-        syncControllerRef.current?.syncControlDiscovery(workItemIds);
-      }
-    } catch {
-      dispatch({ type: 'snapshot/failure' });
-    }
-  }, [operationsClient]);
-
   useEffect(() => {
-    void fetchSnapshot();
+    syncControllerRef.current?.fetchSnapshot();
 
     return () => {
       syncControllerRef.current?.dispose();
       syncControllerRef.current = null;
     };
-  }, [fetchSnapshot]);
+  }, []);
 
   const selectedWorkItemId = state.selection.selectedWorkItemId;
   const selectedDetail = state.selection.detail;
@@ -99,7 +84,7 @@ function useOperationsPanelState() {
     (controlId: string, optionId: string, expectedRevision: string) => {
       if (selectedWorkItemId === null) return;
 
-      void submitControl({
+      submitControl({
         client: operationsClient,
         dispatch,
         workItemId: selectedWorkItemId,
@@ -110,11 +95,15 @@ function useOperationsPanelState() {
           syncControllerRef.current?.reconcileDetail(id, selectedWorkItemIdRef.current);
         },
         onRefetchSnapshot: () => {
-          void fetchSnapshot();
+          syncControllerRef.current?.fetchSnapshot();
         },
+      }).catch((err: unknown) => {
+        // State is already reconciled (controls/submit-resolved dispatched)
+        // inside submitControl before it rethrows — report without re-throwing.
+        console.error('[operations] control submission failed:', err);
       });
     },
-    [fetchSnapshot, operationsClient, selectedWorkItemId],
+    [operationsClient, selectedWorkItemId],
   );
 
   return { state, dispatch, handleSelectItem, handleSubmitControl };

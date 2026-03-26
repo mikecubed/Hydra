@@ -30,15 +30,19 @@ export interface SyncController {
   cancelSync(): void;
   /** Fetch batch control discovery for the given work item IDs. */
   syncControlDiscovery(workItemIds: readonly string[]): void;
+  /** Fetch the operations snapshot with stale-response protection. */
+  fetchSnapshot(): void;
   /** Dispose the controller — aborts in-flight and prevents future fetches. */
   dispose(): void;
 }
 
+// eslint-disable-next-line max-lines-per-function -- cohesive factory sharing closure state
 export function createSyncController(options: SyncControllerOptions): SyncController {
   const { client, dispatch } = options;
   let currentRequestId = 0;
   let currentAbortController: AbortController | null = null;
   let discoveryRequestId = 0;
+  let snapshotRequestId = 0;
   const lifecycle = { disposed: false };
 
   function abortCurrent(): void {
@@ -97,6 +101,31 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     currentRequestId += 1;
   }
 
+  function fetchSnapshot(): void {
+    if (lifecycle.disposed) return;
+
+    snapshotRequestId += 1;
+    const requestId = snapshotRequestId;
+
+    dispatch({ type: 'snapshot/request' });
+
+    void (async () => {
+      try {
+        const snapshot = await client.getSnapshot();
+        if (lifecycle.disposed || requestId !== snapshotRequestId) return;
+        dispatch({ type: 'snapshot/success', snapshot });
+
+        const workItemIds = snapshot.queue.map((item) => item.id);
+        if (workItemIds.length > 0) {
+          syncControlDiscovery(workItemIds);
+        }
+      } catch {
+        if (lifecycle.disposed || requestId !== snapshotRequestId) return;
+        dispatch({ type: 'snapshot/failure' });
+      }
+    })();
+  }
+
   function reconcileDetail(workItemId: string, currentSelectedId: string | null): void {
     if (lifecycle.disposed) return;
     if (currentSelectedId !== workItemId) return;
@@ -108,7 +137,8 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     abortCurrent();
     currentRequestId += 1;
     discoveryRequestId += 1;
+    snapshotRequestId += 1;
   }
 
-  return { syncDetail, reconcileDetail, cancelSync, syncControlDiscovery, dispose };
+  return { syncDetail, reconcileDetail, cancelSync, syncControlDiscovery, fetchSnapshot, dispose };
 }
