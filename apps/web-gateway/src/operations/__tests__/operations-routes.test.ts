@@ -258,6 +258,106 @@ describe('Operations snapshot routes (T009/T010 — US1)', () => {
   });
 });
 
+// ── Unit tests: work-item detail route (T018/T019 — US2) ──────────────────────
+
+describe('Work-item detail routes (T018/T019 — US2)', () => {
+  let mockClient: MockOpsClient;
+  let app: Hono;
+
+  beforeEach(() => {
+    mockClient = createMockOpsClient();
+    app = buildTestApp(mockClient);
+  });
+
+  describe('GET /operations/work-items/:workItemId', () => {
+    it('returns work-item detail from daemon client', async () => {
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1'));
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { item: { id: string }; availability: string };
+      assert.equal(body.item.id, 'wi-1');
+      assert.equal(body.availability, 'ready');
+      assert.equal(mockClient.getWorkItemDetail.mock.callCount(), 1);
+    });
+
+    it('passes decoded workItemId to daemon client', async () => {
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1'));
+      assert.equal(res.status, 200);
+      const callArgs = mockClient.getWorkItemDetail.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'wi-1');
+    });
+
+    it('forwards daemon error response with correct status', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'DAEMON_UNREACHABLE',
+          category: 'daemon',
+          message: 'Daemon unreachable',
+        },
+      };
+      mockClient.getWorkItemDetail.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-1'));
+      assert.equal(res.status, 503);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'daemon');
+    });
+
+    it('returns 400 for empty workItemId', async () => {
+      const res = await app.request(buildRequest('GET', '/operations/work-items/'));
+      // Hono treats trailing-slash as a different route — expect 404 (no match)
+      // OR the validation should catch empty param
+      assert.ok(res.status === 400 || res.status === 404);
+    });
+
+    it('returns full detail payload including checkpoints and controls', async () => {
+      const detail = {
+        item: makeQueueItem({ id: 'wi-42' }),
+        checkpoints: [],
+        routing: null,
+        assignments: [],
+        council: null,
+        controls: [makeControl()],
+        itemBudget: null,
+        availability: 'ready' as const,
+      };
+      mockClient.getWorkItemDetail.mock.mockImplementation(() => Promise.resolve({ data: detail }));
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/wi-42'));
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as typeof detail;
+      assert.equal(body.item.id, 'wi-42');
+      assert.equal(body.controls.length, 1);
+    });
+
+    it('handles URL-encoded workItemId with special characters', async () => {
+      const res = await app.request(buildRequest('GET', '/operations/work-items/task%2F123'));
+      assert.equal(res.status, 200);
+      const callArgs = mockClient.getWorkItemDetail.mock.calls[0].arguments;
+      assert.equal(callArgs[0], 'task/123');
+    });
+
+    it('returns daemon 404 error as validation category', async () => {
+      const daemonErr: DaemonOperationsResult<never> = {
+        error: {
+          ok: false,
+          code: 'NOT_FOUND',
+          category: 'validation',
+          message: 'Work item not found',
+          httpStatus: 404,
+        },
+      };
+      mockClient.getWorkItemDetail.mock.mockImplementation(() => Promise.resolve(daemonErr));
+
+      const res = await app.request(buildRequest('GET', '/operations/work-items/nonexistent'));
+      assert.equal(res.status, 404);
+      const body = (await res.json()) as GatewayErrorResponse;
+      assert.equal(body.category, 'validation');
+      assert.equal(body.code, 'NOT_FOUND');
+    });
+  });
+});
+
 // ── Wiring tests: auth + CSRF protection ──────────────────────────────────────
 
 function gwRequest(
@@ -347,6 +447,59 @@ describe('Operations route wiring — auth/CSRF (T009/T010)', () => {
   afterEach(() => {
     gw.heartbeat.stop();
     fetchMock.mock.resetCalls();
+  });
+
+  it('rejects unauthenticated GET /operations/work-items/:workItemId', async () => {
+    const req = gwRequest('GET', '/operations/work-items/wi-1', { headers: { origin: ORIGIN } });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 401);
+    const body = (await res.json()) as { ok: boolean; code: string; category: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.code, 'SESSION_NOT_FOUND');
+    assert.equal(body.category, 'auth');
+  });
+
+  it('GET /operations/work-items/:workItemId with valid session succeeds', async () => {
+    const cookies = await login(gw);
+    fetchMock.mock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            item: {
+              id: 'wi-1',
+              title: 'Test Item',
+              status: 'active',
+              position: 0,
+              relatedConversationId: null,
+              relatedSessionId: null,
+              ownerLabel: null,
+              lastCheckpointSummary: null,
+              updatedAt: NOW,
+              riskSignals: [],
+              detailAvailability: 'ready',
+            },
+            checkpoints: [],
+            routing: null,
+            assignments: [],
+            council: null,
+            controls: [],
+            itemBudget: null,
+            availability: 'ready',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const req = gwRequest('GET', '/operations/work-items/wi-1', {
+      cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
+      headers: { origin: ORIGIN },
+    });
+    const res = await gw.app.request(req);
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { item: { id: string }; availability: string };
+    assert.equal(body.item.id, 'wi-1');
+    assert.equal(body.availability, 'ready');
   });
 
   it('rejects unauthenticated GET /operations/snapshot', async () => {

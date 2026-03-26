@@ -157,7 +157,7 @@ describe('DaemonOperationsClient', () => {
     });
   });
 
-  // ─── getWorkItemDetail ──────────────────────────────────────────────────────
+  // ─── getWorkItemDetail (US2 — selected work-item reads) ─────────────────────
 
   describe('getWorkItemDetail', () => {
     it('sends GET /operations/work-items/:workItemId', async () => {
@@ -187,6 +187,100 @@ describe('DaemonOperationsClient', () => {
 
       const [url] = fetchMock.mock.calls[0].arguments;
       assert.ok((url as string).includes('a%2Fb'));
+    });
+
+    it('returns full detail payload on success', async () => {
+      const detail = {
+        item: { id: 'wi-42' },
+        checkpoints: [
+          {
+            id: 'cp-1',
+            sequence: 0,
+            label: 'init',
+            status: 'reached',
+            timestamp: '2026-03-22T10:00:00.000Z',
+            detail: null,
+          },
+        ],
+        routing: {
+          currentMode: 'auto',
+          currentRoute: 'claude',
+          changedAt: '2026-03-22T10:00:00.000Z',
+          history: [],
+        },
+        assignments: [
+          {
+            participantId: 'claude',
+            label: 'Claude',
+            role: 'architect',
+            state: 'active',
+            startedAt: '2026-03-22T10:00:00.000Z',
+            endedAt: null,
+          },
+        ],
+        council: null,
+        controls: [],
+        itemBudget: null,
+        availability: 'ready',
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse(detail)));
+
+      const result = await client.getWorkItemDetail('wi-42');
+
+      assert.ok('data' in result);
+      assert.deepStrictEqual(result.data, detail);
+    });
+
+    it('sends GET method with no request body', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(
+          okResponse({
+            item: { id: 'wi-1' },
+            checkpoints: [],
+            routing: null,
+            assignments: [],
+            council: null,
+            controls: [],
+            itemBudget: null,
+            availability: 'ready',
+          }),
+        ),
+      );
+
+      await client.getWorkItemDetail('wi-1');
+
+      const [, opts] = fetchMock.mock.calls[0].arguments;
+      assert.equal(opts?.method, 'GET');
+      assert.equal(opts?.body, undefined);
+    });
+
+    it('returns translated error on daemon 404', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(404, 'NOT_FOUND', 'Work item not found')),
+      );
+
+      const result = await client.getWorkItemDetail('nonexistent');
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'validation');
+    });
+
+    it('returns translated error on daemon 500', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(daemonError(500, 'INTERNAL_ERROR', 'Server error')),
+      );
+
+      const result = await client.getWorkItemDetail('wi-1');
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'daemon');
+    });
+
+    it('translates network failure into daemon-unreachable', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
+
+      const result = await client.getWorkItemDetail('wi-1');
+      assert.ok('error' in result);
+      assert.equal(result.error.category, 'daemon');
+      assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
     });
   });
 
