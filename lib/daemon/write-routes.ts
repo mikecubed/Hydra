@@ -992,7 +992,12 @@ async function handleTaskCheckpoint(ctx: WriteRouteCtx): Promise<boolean> {
 
 async function handleTaskHeartbeat(ctx: WriteRouteCtx): Promise<boolean> {
   const { req, res, route, sendJson, sendError, enqueueMutation, nowIso } = ctx;
-  const taskId = route.slice('/task/'.length, -'/heartbeat'.length);
+  let taskId = route.slice('/task/'.length, -'/heartbeat'.length);
+  try {
+    taskId = decodeURIComponent(taskId);
+  } catch {
+    // malformed percent-encoding — use raw value
+  }
   if (taskId === '') {
     sendError(res, 400, 'Task ID required in URL.');
     return true;

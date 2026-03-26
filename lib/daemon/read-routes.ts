@@ -176,7 +176,12 @@ function handleNext(ctx: ReadRouteCtx): boolean {
 
 function handleTaskCheckpoints(ctx: ReadRouteCtx): boolean {
   const { res, sendJson, sendError, route, readState } = ctx;
-  const taskId = route.slice('/task/'.length, -'/checkpoints'.length);
+  let taskId = route.slice('/task/'.length, -'/checkpoints'.length);
+  try {
+    taskId = decodeURIComponent(taskId);
+  } catch {
+    // malformed percent-encoding — use raw value
+  }
   const state = readState();
   const task = state.tasks.find((t: TaskEntry) => t.id === taskId);
   if (!task) {
