@@ -17,7 +17,6 @@ import {
 } from './web-operations-projection.ts';
 import {
   discoverControls,
-  computeRevisionToken,
   type ControlContext,
 } from './web-operations-controls.ts';
 import type { WorkItemStatus, ControlKind } from '@hydra/web-contracts';
@@ -209,12 +208,9 @@ function handleWorkItemControls(ctx: ReadRouteCtx, workItemId: string): boolean 
     controls = controls.filter((c) => c.kind === kindParam);
   }
 
-  const revision = computeRevisionToken(task);
-
   sendJson(res, 200, {
     workItemId,
     controls,
-    revision,
     availability: 'ready',
   });
   return true;

@@ -13,6 +13,7 @@ import { EventEmitter } from 'node:events';
 import type { ReadRouteCtx, HydraStateShape, TaskEntry, UsageCheckResult } from '../lib/types.ts';
 import { handleOperationsReadRoute } from '../lib/daemon/web-operations-routes.ts';
 import { handleWriteRoute } from '../lib/daemon/write-routes.ts';
+import { projectWorkItemDetail } from '../lib/daemon/web-operations-projection.ts';
 import {
   discoverControls,
   computeRevisionToken,
@@ -1607,7 +1608,7 @@ describe('Control Discovery (T038/T039)', () => {
       assert.equal(data['workItemId'], 'task-1');
       const controls = data['controls'] as unknown[];
       assert.ok(controls.length > 0);
-      assert.ok(typeof data['revision'] === 'string');
+      assert.ok(!('revision' in data));
       assert.equal(data['availability'], 'ready');
     });
 
@@ -1756,6 +1757,9 @@ describe('Control Mutations (T038/T040)', () => {
       assert.equal(result.outcome, 'accepted');
       assert.equal(result.workItemId, 'task-1');
       assert.ok(result.resolvedAt !== '');
+      const detail = projectWorkItemDetail(state, 'task-1', config);
+      assert.ok(detail?.routing != null);
+      assert.equal(detail.routing.currentMode, 'auto');
       const selected = result.control.options.find((option) => option.selected);
       assert.ok(selected != null);
       assert.equal(selected.optionId, 'routing-performance');
@@ -1909,6 +1913,7 @@ describe('Control Mutations (T038/T040)', () => {
       );
       assert.equal(result.outcome, 'rejected');
       assert.ok(result.message?.includes('Unknown option'));
+      assert.equal(result.control.kind, 'routing');
     });
 
     it('rejects invalid control ID', () => {
@@ -1951,6 +1956,24 @@ describe('Control Mutations (T038/T040)', () => {
       const selected = result.control.options.find((o) => o.selected);
       assert.ok(selected != null);
       assert.equal(selected.optionId, 'agent-gemini');
+    });
+
+    it('preserves rejected control kind for agent mutations', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-unknown',
+          expectedRevision: computeRevisionToken(task),
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'rejected');
+      assert.equal(result.control.kind, 'agent');
     });
 
     it('requests council deliberation', () => {

@@ -136,6 +136,16 @@ function appendAssignmentHistory(task: TaskEntry, now: string, agent: string, st
 
 function buildRoutingModeOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
   const modes = ['auto', 'smart', 'council', 'dispatch', 'chat'];
+  const currentMode = getCurrentMode(task, config);
+  return modes.map((mode) => ({
+    optionId: `mode-${mode}`,
+    label: mode.charAt(0).toUpperCase() + mode.slice(1),
+    selected: mode === currentMode,
+    available: !isTerminalTask(task),
+  }));
+}
+
+function getCurrentMode(task: TaskEntry, config: ControlContext): string {
   const routingHistory = (task as Record<string, unknown>)['routingHistory'];
   let currentMode: string | null = null;
   if (Array.isArray(routingHistory) && routingHistory.length > 0) {
@@ -154,13 +164,7 @@ function buildRoutingModeOptions(task: TaskEntry, config: ControlContext): Contr
       currentMode = 'auto';
     }
   }
-
-  return modes.map((mode) => ({
-    optionId: `mode-${mode}`,
-    label: mode.charAt(0).toUpperCase() + mode.slice(1),
-    selected: mode === currentMode,
-    available: !isTerminalTask(task),
-  }));
+  return currentMode;
 }
 
 function buildAgentOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
@@ -304,6 +308,23 @@ function findCurrentControl(
   return discoverControls(task, config).find((c) => c.controlId === controlId);
 }
 
+function buildRejectedResult(
+  controlId: string,
+  kind: ControlKind,
+  workItemId: string,
+  resolvedAt: string,
+  reason: string,
+  message: string,
+): ControlMutationResult {
+  return buildResult(
+    'rejected',
+    buildRejectedControl(controlId, kind, reason),
+    workItemId,
+    resolvedAt,
+    message,
+  );
+}
+
 /**
  * Execute a control mutation against daemon state.
  * Validates revision token, eligibility, and option availability.
@@ -318,49 +339,34 @@ export function executeControlMutation(
   const now = config.nowIso();
 
   const task = state.tasks.find((t) => t.id === workItemId);
-  if (task == null) {
-    return buildResult('rejected', buildRejectedControl(controlId, 'Work item not found'), workItemId, now, `Work item ${workItemId} not found`);
-  }
-
+  if (task == null) return buildRejectedResult(controlId, 'routing', workItemId, now, 'Work item not found', `Work item ${workItemId} not found`);
   const kind = extractKindFromControlId(controlId, workItemId);
-  if (kind == null) {
-    return buildResult('rejected', buildRejectedControl(controlId, 'Invalid control ID'), workItemId, now, `Invalid control ID: ${controlId}`);
-  }
-
+  if (kind == null) return buildRejectedResult(controlId, 'routing', workItemId, now, 'Invalid control ID', `Invalid control ID: ${controlId}`);
   if (expectedRevision !== computeRevisionToken(task)) {
     const ctrl = findCurrentControl(task, controlId, config) ?? buildStaleControl(controlId, kind);
     return buildResult('stale', ctrl, workItemId, now, 'Revision token mismatch — the work item state has changed since the last read');
   }
 
   if (isTerminalTask(task)) {
-    const ctrl = findCurrentControl(task, controlId, config) ?? buildRejectedControl(controlId, `Work item is ${task.status}`);
+    const ctrl =
+      findCurrentControl(task, controlId, config) ??
+      buildRejectedControl(controlId, kind, `Work item is ${task.status}`);
     return buildResult('rejected', ctrl, workItemId, now, `Work item is ${task.status} and cannot be mutated`);
   }
-
   const spec = CONTROL_SPECS.find((s) => s.kind === kind);
-  if (spec == null) {
-    return buildResult('rejected', buildRejectedControl(controlId, 'Unknown control kind'), workItemId, now, `Unknown control kind: ${kind}`);
-  }
+  if (spec == null) return buildRejectedResult(controlId, kind, workItemId, now, 'Unknown control kind', `Unknown control kind: ${kind}`);
 
   const options = spec.buildOptions(task, config);
   const requestedOption = options.find((o) => o.optionId === requestedOptionId);
-  if (requestedOption == null) {
-    return buildResult('rejected', buildRejectedControl(controlId, 'Unknown option'), workItemId, now, `Unknown option: ${requestedOptionId}`);
-  }
-
-  if (!requestedOption.available) {
-    return buildResult('rejected', buildRejectedControl(controlId, 'Option not available'), workItemId, now, `Option ${requestedOptionId} is not available`);
-  }
+  if (requestedOption == null) return buildRejectedResult(controlId, kind, workItemId, now, 'Unknown option', `Unknown option: ${requestedOptionId}`);
+  if (!requestedOption.available) return buildRejectedResult(controlId, kind, workItemId, now, 'Option not available', `Option ${requestedOptionId} is not available`);
 
   if (requestedOption.selected) {
     const ctrl = findCurrentControl(task, controlId, config) ?? buildAcceptedControl(controlId, kind, now);
     return buildResult('superseded', ctrl, workItemId, now, 'Requested option is already the current value');
   }
-
   applyControlMutation(task, kind, requestedOptionId, config);
-
   const updatedControl = findCurrentControl(task, controlId, config);
-
   return buildResult(
     'accepted',
     updatedControl ?? buildAcceptedControl(controlId, kind, now),
@@ -397,11 +403,12 @@ function applyControlMutation(
     case 'routing': {
       const strategy = optionId.replace('routing-', '');
       (task as Record<string, unknown>)['routingStrategy'] = strategy;
+      const currentMode = getCurrentMode(task, config);
       appendRoutingHistoryEntry(
         task,
         now,
         task.owner,
-        null,
+        currentMode,
         `Routing strategy changed to ${strategy}`,
       );
       break;
@@ -450,10 +457,14 @@ function extractKindFromControlId(
   return kind as ControlKind;
 }
 
-function buildRejectedControl(controlId: string, reason: string): OperationalControlView {
+function buildRejectedControl(
+  controlId: string,
+  kind: ControlKind,
+  reason: string,
+): OperationalControlView {
   return {
     controlId,
-    kind: 'routing',
+    kind,
     label: 'Unknown',
     availability: 'rejected',
     authority: 'unavailable',
