@@ -37,17 +37,17 @@ product walkthrough.
   - close the panel to return to the normal transcript/composer flow
 - **Connection/session banners**
   - visible status for reconnecting, daemon recovery, expired sessions, and related issues
-- **Operations sidebar (Phase 1)**
-  - authoritative queue visibility
+- **Operations panels (Phase 2)**
+  - authoritative queue visibility in the sidebar
   - work-item ordering and status labels
   - queue selection state
+  - read-only checkpoint detail/progress panel for the selected work item
   - empty/loading/live sidebar states
 
 ### What is not there yet
 
 - no dedicated browser login screen
-- no browser-side operational controls for checkpoints beyond read-only detail/progress
-- no browser-side operational controls yet
+- no browser-side operational controls beyond the current read-only checkpoint detail/progress view
 - no complete end-user walkthrough in the product itself
 
 ### How to run it
@@ -110,9 +110,10 @@ Notes:
 5. Use the **Composer** panel to send a new instruction.
    - Click **Send**, or press `Ctrl+Enter` / `Cmd+Enter`.
 6. If a transcript entry exposes artifacts, open them in the **Artifact Inspector** side panel.
-7. Use the **Operations** sidebar to monitor the current work queue.
-   - It is read-only in the current phase.
-   - It reflects loading, empty, and live states based on the latest snapshot.
+7. Use the **Operations** sidebar to monitor the current work queue and select a work item to
+   inspect its checkpoint detail and progress.
+   - The panels are read-only in the current phase.
+   - They reflect loading, empty, and live states based on the latest snapshot.
 
 ### Current operator expectations
 
