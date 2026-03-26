@@ -713,7 +713,7 @@ describe('createSyncController', () => {
       assert.equal(dispatched[1].type, 'snapshot/failure');
     });
 
-    it('triggers control discovery for queue items on success', async () => {
+    it('does not trigger control discovery as a side effect of snapshot success', async () => {
       const snapshot = makeSnapshotResponse({
         queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],
       });
@@ -730,16 +730,32 @@ describe('createSyncController', () => {
         setTimeout(r, 0);
       });
 
-      // Control discovery should have been triggered — look for discovery-loaded
-      // (the mock resolves immediately with { controls: {} })
+      const discoveryActions = dispatched.filter(
+        (a) => a.type === 'controls/discovery-loaded',
+      );
+      assert.equal(discoveryActions.length, 0);
+      assert.equal(client.discoverControls.mock.calls.length, 0);
+    });
+
+    it('hydrates control discovery only when requested explicitly', async () => {
+      const client = createSnapshotMockClient(() => Promise.resolve(makeSnapshotResponse()));
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.syncControlDiscovery(['wq-1', 'wq-2']);
       await new Promise<void>((r) => {
-        setTimeout(r, 10);
+        setTimeout(r, 0);
       });
 
       const discoveryActions = dispatched.filter(
         (a) => a.type === 'controls/discovery-loaded',
       );
       assert.equal(discoveryActions.length, 1);
+      assert.equal(client.discoverControls.mock.calls.length, 1);
     });
 
     it('is a no-op after dispose', async () => {

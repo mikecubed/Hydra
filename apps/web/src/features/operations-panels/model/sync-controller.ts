@@ -1,7 +1,6 @@
 /**
- * Detail-sync controller — orchestrates work-item detail fetching
- * when the browser selection changes, and control discovery hydration
- * for the visible queue.
+ * Detail-sync controller — orchestrates work-item detail fetching,
+ * explicit control discovery hydration, and snapshot refreshes.
  *
  * Pure orchestration: accepts an OperationsClient and a dispatch callback,
  * tracks the current fetch to prevent stale responses from racing, and
@@ -114,11 +113,6 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
         const snapshot = await client.getSnapshot();
         if (lifecycle.disposed || requestId !== snapshotRequestId) return;
         dispatch({ type: 'snapshot/success', snapshot });
-
-        const workItemIds = snapshot.queue.map((item) => item.id);
-        if (workItemIds.length > 0) {
-          syncControlDiscovery(workItemIds);
-        }
       } catch {
         if (lifecycle.disposed || requestId !== snapshotRequestId) return;
         dispatch({ type: 'snapshot/failure' });
