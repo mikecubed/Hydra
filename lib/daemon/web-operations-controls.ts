@@ -75,6 +75,65 @@ interface ControlOption {
   available: boolean;
 }
 
+const ASSIGNMENT_STATE_BY_TASK_STATUS: Readonly<Record<string, string>> = {
+  todo: 'waiting',
+  in_progress: 'active',
+  blocked: 'waiting',
+  done: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+};
+
+function getRoutingStrategy(task: TaskEntry, config: ControlContext): string {
+  const taskValue = (task as Record<string, unknown>)['routingStrategy'];
+  if (typeof taskValue === 'string' && taskValue !== '') {
+    return taskValue;
+  }
+
+  try {
+    return config.loadConfig().routing.mode;
+  } catch {
+    return 'balanced';
+  }
+}
+
+function ensureHistoryList(task: TaskEntry, key: string): Record<string, unknown>[] {
+  const existing = (task as Record<string, unknown>)[key];
+  if (Array.isArray(existing)) {
+    return existing.filter(
+      (entry): entry is Record<string, unknown> =>
+        entry != null && typeof entry === 'object' && !Array.isArray(entry),
+    );
+  }
+
+  return [];
+}
+
+function closeLatestAssignment(task: TaskEntry, now: string, state: string): void {
+  const history = ensureHistoryList(task, 'assignmentHistory');
+  const latest = history.at(-1);
+  if (latest == null) {
+    (task as Record<string, unknown>)['assignmentHistory'] = history;
+    return;
+  }
+
+  latest['state'] = state;
+  latest['endedAt'] = now;
+  (task as Record<string, unknown>)['assignmentHistory'] = history;
+}
+
+function appendAssignmentHistory(task: TaskEntry, now: string, agent: string, state: string): void {
+  const history = ensureHistoryList(task, 'assignmentHistory');
+  history.push({
+    agent,
+    role: null,
+    state,
+    startedAt: now,
+    endedAt: ['completed', 'failed', 'cancelled'].includes(state) ? now : null,
+  });
+  (task as Record<string, unknown>)['assignmentHistory'] = history;
+}
+
 function buildRoutingModeOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
   const modes = ['auto', 'smart', 'council', 'dispatch', 'chat'];
   const routingHistory = (task as Record<string, unknown>)['routingHistory'];
@@ -116,12 +175,7 @@ function buildAgentOptions(task: TaskEntry, config: ControlContext): ControlOpti
 
 function buildRoutingStrategyOptions(task: TaskEntry, config: ControlContext): ControlOption[] {
   const strategies = ['economy', 'balanced', 'performance'];
-  let current = 'balanced';
-  try {
-    current = config.loadConfig().routing.mode;
-  } catch {
-    // Use default when config is unavailable
-  }
+  const current = getRoutingStrategy(task, config);
   return strategies.map((s) => ({
     optionId: `routing-${s}`,
     label: s.charAt(0).toUpperCase() + s.slice(1),
@@ -333,12 +387,16 @@ function applyControlMutation(
     }
     case 'agent': {
       const agent = optionId.replace('agent-', '');
+      const assignmentState = ASSIGNMENT_STATE_BY_TASK_STATUS[task.status] ?? 'waiting';
+      closeLatestAssignment(task, now, assignmentState);
       task.owner = agent;
       appendRoutingHistoryEntry(task, now, agent, null, `Agent reassigned to ${agent}`);
+      appendAssignmentHistory(task, now, agent, assignmentState);
       break;
     }
     case 'routing': {
       const strategy = optionId.replace('routing-', '');
+      (task as Record<string, unknown>)['routingStrategy'] = strategy;
       appendRoutingHistoryEntry(
         task,
         now,

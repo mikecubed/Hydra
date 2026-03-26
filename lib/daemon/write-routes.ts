@@ -12,8 +12,13 @@ import {
   updateSession as hubUpdate,
 } from '../hydra-hub.ts';
 import { exit } from '../hydra-process.ts';
-import { executeControlMutation, type ControlContext } from './web-operations-controls.ts';
+import {
+  discoverControlsBatch,
+  executeControlMutation,
+  type ControlContext,
+} from './web-operations-controls.ts';
 import { loadHydraConfig as loadConfig } from '../hydra-config.ts';
+import type { ControlKind } from '@hydra/web-contracts';
 
 // ── Mutation helpers ──────────────────────────────────────────────────────────
 
@@ -1444,13 +1449,8 @@ function buildWriteControlContext(ctx: WriteRouteCtx): ControlContext {
 async function handleOperationsControlAction(ctx: WriteRouteCtx): Promise<boolean> {
   const { req, res, sendJson, sendError } = ctx;
   const body = await ctx.readJsonBody(req);
-
-  const workItemId = ((body['workItemId'] as string | null | undefined) ?? '').trim();
-  const controlId = ((body['controlId'] as string | null | undefined) ?? '').trim();
-  const requestedOptionId = ((body['requestedOptionId'] as string | null | undefined) ?? '').trim();
-  const expectedRevision = ((body['expectedRevision'] as string | null | undefined) ?? '').trim();
-  const requestIdRaw = ((body['requestId'] as string | null | undefined) ?? '').trim();
-  const requestId = requestIdRaw === '' ? undefined : requestIdRaw;
+  const { workItemId, controlId, requestedOptionId, expectedRevision, requestId } =
+    parseOperationsControlActionInput(ctx.route, body);
 
   if (workItemId === '') {
     sendError(res, 400, 'Field "workItemId" is required');
@@ -1491,6 +1491,97 @@ async function handleOperationsControlAction(ctx: WriteRouteCtx): Promise<boolea
   return true;
 }
 
+function readTrimmedStringField(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseOperationsControlActionInput(
+  route: string,
+  body: Record<string, unknown>,
+): {
+  workItemId: string;
+  controlId: string;
+  requestedOptionId: string;
+  expectedRevision: string;
+  requestId: string | undefined;
+} {
+  const routeMatch = matchOperationsControlActionRoute(route);
+  const requestIdRaw = readTrimmedStringField(body, 'requestId');
+  return {
+    workItemId: routeMatch?.workItemId ?? readTrimmedStringField(body, 'workItemId'),
+    controlId: routeMatch?.controlId ?? readTrimmedStringField(body, 'controlId'),
+    requestedOptionId: readTrimmedStringField(body, 'requestedOptionId'),
+    expectedRevision: readTrimmedStringField(body, 'expectedRevision'),
+    requestId: requestIdRaw === '' ? undefined : requestIdRaw,
+  };
+}
+
+function isControlKind(value: string): value is ControlKind {
+  return value === 'routing' || value === 'mode' || value === 'agent' || value === 'council';
+}
+
+async function handleBatchControlDiscovery(ctx: WriteRouteCtx): Promise<boolean> {
+  const { req, res, sendJson, sendError, readState } = ctx;
+  const body = await ctx.readJsonBody(req);
+
+  const workItemIdsRaw = body['workItemIds'];
+  if (!Array.isArray(workItemIdsRaw)) {
+    sendError(res, 400, 'Field "workItemIds" must be a non-empty array');
+    return true;
+  }
+
+  const workItemIds = workItemIdsRaw
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter((value) => value !== '');
+  if (workItemIds.length === 0) {
+    sendError(res, 400, 'Field "workItemIds" must contain at least one non-empty ID');
+    return true;
+  }
+
+  const kindFilterRaw = body['kindFilter'];
+  let kindFilter: ControlKind | undefined;
+  if (typeof kindFilterRaw === 'string' && kindFilterRaw.trim() !== '') {
+    const normalized = kindFilterRaw.trim();
+    if (!isControlKind(normalized)) {
+      sendError(res, 400, `Invalid kindFilter: ${normalized}`);
+      return true;
+    }
+    kindFilter = normalized;
+  }
+
+  const items = discoverControlsBatch(readState(), workItemIds, buildWriteControlContext(ctx), kindFilter);
+  sendJson(res, 200, { items });
+  return true;
+}
+
+function matchOperationsControlActionRoute(
+  route: string,
+): { workItemId: string; controlId: string } | null {
+  const prefix = '/operations/work-items/';
+  if (!route.startsWith(prefix)) {
+    return null;
+  }
+
+  const rest = route.slice(prefix.length);
+  const parts = rest.split('/');
+  if (parts.length !== 3 || parts[1] !== 'controls' || parts[2] === '') {
+    return null;
+  }
+
+  try {
+    return {
+      workItemId: decodeURIComponent(parts[0] ?? ''),
+      controlId: decodeURIComponent(parts[2] ?? ''),
+    };
+  } catch {
+    return {
+      workItemId: parts[0] ?? '',
+      controlId: parts[2] ?? '',
+    };
+  }
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 const POST_ROUTES: Partial<Record<string, (ctx: WriteRouteCtx) => Promise<boolean>>> = {
@@ -1515,7 +1606,7 @@ const POST_ROUTES: Partial<Record<string, (ctx: WriteRouteCtx) => Promise<boolea
   '/dead-letter/retry': handleDeadLetterRetry,
   '/admin/compact': handleAdminCompact,
   '/shutdown': handleShutdown,
-  '/operations/control': handleOperationsControlAction,
+  '/operations/controls/discover': handleBatchControlDiscovery,
 };
 
 export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
@@ -1533,6 +1624,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST') {
     const handler = POST_ROUTES[route];
     if (handler != null) return handler(ctx);
+    if (matchOperationsControlActionRoute(route) != null) {
+      return handleOperationsControlAction(ctx);
+    }
     if (route.startsWith('/task/') && route.endsWith('/heartbeat')) return handleTaskHeartbeat(ctx);
   }
 

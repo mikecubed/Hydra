@@ -17,7 +17,6 @@ import {
 } from './web-operations-projection.ts';
 import {
   discoverControls,
-  discoverControlsBatch,
   computeRevisionToken,
   type ControlContext,
 } from './web-operations-controls.ts';
@@ -164,7 +163,9 @@ function buildControlContext(ctx: ReadRouteCtx): ControlContext {
         return { mode: 'auto', routing: { mode: 'balanced' } };
       }
     },
-    agentNames: Object.keys(ctx.getModelSummary()),
+    agentNames: Object.keys(ctx.getModelSummary()).filter(
+      (agentName) => agentName !== '' && !agentName.startsWith('_'),
+    ),
     nowIso: () => new Date().toISOString(),
   };
 }
@@ -219,39 +220,6 @@ function handleWorkItemControls(ctx: ReadRouteCtx, workItemId: string): boolean 
   return true;
 }
 
-function handleBatchControlDiscovery(ctx: ReadRouteCtx): boolean {
-  const { res, sendJson, sendError, readState, requestUrl } = ctx;
-
-  const idsParam = requestUrl.searchParams.get('workItemIds');
-  if (idsParam == null || idsParam.trim() === '') {
-    sendError(res, 400, 'Query parameter "workItemIds" is required');
-    return true;
-  }
-
-  const workItemIds = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
-  if (workItemIds.length === 0) {
-    sendError(res, 400, 'Query parameter "workItemIds" must contain at least one ID');
-    return true;
-  }
-
-  const kindParam = requestUrl.searchParams.get('kindFilter');
-  let kindFilter: ControlKind | undefined;
-  if (kindParam != null && kindParam !== '') {
-    if (!isValidControlKind(kindParam)) {
-      sendError(res, 400, `Invalid kindFilter: ${kindParam}`);
-      return true;
-    }
-    kindFilter = kindParam;
-  }
-
-  const state = readState();
-  const controlConfig = buildControlContext(ctx);
-  const items = discoverControlsBatch(state, workItemIds, controlConfig, kindFilter);
-
-  sendJson(res, 200, { items });
-  return true;
-}
-
 function handleWorkItemCheckpoints(ctx: ReadRouteCtx, workItemId: string): boolean {
   const { res, sendJson, sendError, readState } = ctx;
   const state = readState();
@@ -275,7 +243,6 @@ function handleWorkItemCheckpoints(ctx: ReadRouteCtx, workItemId: string): boole
 
 const OPERATIONS_ROUTES: ReadonlyMap<string, (ctx: ReadRouteCtx) => boolean> = new Map([
   ['/operations/snapshot', handleSnapshot],
-  ['/operations/controls', handleBatchControlDiscovery],
 ]);
 
 const WORK_ITEMS_PREFIX = '/operations/work-items/';

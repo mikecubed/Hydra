@@ -1642,20 +1642,42 @@ describe('Control Discovery (T038/T039)', () => {
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 400);
     });
-  });
 
-  describe('GET /operations/controls (batch discovery)', () => {
-    it('returns controls for multiple work items', () => {
-      const state = makeState({
-        tasks: [makeTask({ id: 'task-1' }), makeTask({ id: 'task-2', status: 'done' })],
-      });
-      const ctx = makeReadCtx('GET', '/operations/controls', state, {
-        workItemIds: 'task-1,task-2',
-      });
+    it('filters control options to assignable agent names only', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1', owner: 'claude' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/controls', state);
+      ctx.getModelSummary = () =>
+        ({
+          claude: { active: 'claude-opus-4-6', isDefault: true },
+          gemini: { active: 'gemini-3-pro', isDefault: false },
+          _mode: { active: 'balanced', isDefault: false },
+        }) as ReturnType<typeof ctx.getModelSummary>;
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 200);
       const data = ctx.captured.data as Record<string, unknown>;
+      const controls = data['controls'] as Array<Record<string, unknown>>;
+      const agentControl = controls.find((control) => control['kind'] === 'agent');
+      assert.ok(agentControl != null);
+      const options = agentControl['options'] as Array<Record<string, unknown>>;
+      assert.ok(options.some((option) => option['optionId'] === 'agent-claude'));
+      assert.ok(options.some((option) => option['optionId'] === 'agent-gemini'));
+      assert.ok(options.every((option) => option['optionId'] !== 'agent-_mode'));
+    });
+  });
+
+  describe('POST /operations/controls/discover', () => {
+    it('returns controls for multiple work items', async () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-1' }), makeTask({ id: 'task-2', status: 'done' })],
+      });
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['task-1', 'task-2'],
+      });
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
       const items = data['items'] as Array<Record<string, unknown>>;
       assert.equal(items.length, 2);
       assert.equal(items[0]['workItemId'], 'task-1');
@@ -1663,53 +1685,53 @@ describe('Control Discovery (T038/T039)', () => {
       assert.equal(items[1]['workItemId'], 'task-2');
     });
 
-    it('returns unavailable for missing work items', () => {
+    it('returns unavailable for missing work items', async () => {
       const state = makeState({ tasks: [] });
-      const ctx = makeReadCtx('GET', '/operations/controls', state, {
-        workItemIds: 'missing',
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['missing'],
       });
-      const handled = handleOperationsReadRoute(ctx);
+      const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
-      assert.equal(ctx.captured.statusCode, 200);
-      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
       const items = data['items'] as Array<Record<string, unknown>>;
       assert.equal(items.length, 1);
       assert.equal(items[0]['availability'], 'unavailable');
     });
 
-    it('returns 400 when workItemIds is missing', () => {
+    it('returns 400 when workItemIds is missing', async () => {
       const state = makeState();
-      const ctx = makeReadCtx('GET', '/operations/controls', state);
-      const handled = handleOperationsReadRoute(ctx);
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {});
+      const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
-      assert.equal(ctx.captured.statusCode, 400);
+      assert.equal(captured.statusCode, 400);
     });
 
-    it('supports kindFilter query parameter', () => {
+    it('supports kindFilter body parameter', async () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/controls', state, {
-        workItemIds: 'task-1',
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['task-1'],
         kindFilter: 'agent',
       });
-      const handled = handleOperationsReadRoute(ctx);
+      const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
-      assert.equal(ctx.captured.statusCode, 200);
-      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
       const items = data['items'] as Array<Record<string, unknown>>;
       const controls = items[0]['controls'] as Array<Record<string, unknown>>;
       assert.equal(controls.length, 1);
       assert.equal(controls[0]['kind'], 'agent');
     });
 
-    it('rejects invalid kindFilter', () => {
+    it('rejects invalid kindFilter', async () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
-      const ctx = makeReadCtx('GET', '/operations/controls', state, {
-        workItemIds: 'task-1',
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['task-1'],
         kindFilter: 'bogus',
       });
-      const handled = handleOperationsReadRoute(ctx);
+      const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
-      assert.equal(ctx.captured.statusCode, 400);
+      assert.equal(captured.statusCode, 400);
     });
   });
 });
@@ -1734,10 +1756,26 @@ describe('Control Mutations (T038/T040)', () => {
       assert.equal(result.outcome, 'accepted');
       assert.equal(result.workItemId, 'task-1');
       assert.ok(result.resolvedAt !== '');
+      const selected = result.control.options.find((option) => option.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'routing-performance');
     });
 
     it('accepts an agent reassignment', () => {
-      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const task = makeTask({
+        id: 'task-1',
+        status: 'todo',
+        owner: 'claude',
+        assignmentHistory: [
+          {
+            agent: 'claude',
+            role: null,
+            state: 'waiting',
+            startedAt: '2025-01-15T12:00:00.000Z',
+            endedAt: null,
+          },
+        ],
+      });
       const state = makeState({ tasks: [task] });
       const config = makeControlConfig();
       const revision = computeRevisionToken(task);
@@ -1753,6 +1791,13 @@ describe('Control Mutations (T038/T040)', () => {
       );
       assert.equal(result.outcome, 'accepted');
       assert.equal(task.owner, 'gemini');
+      const history = (task as Record<string, unknown>)['assignmentHistory'] as Array<
+        Record<string, unknown>
+      >;
+      assert.equal(history.length, 2);
+      assert.equal(history[0]?.['agent'], 'claude');
+      assert.equal(history[0]?.['endedAt'], result.resolvedAt);
+      assert.equal(history[1]?.['agent'], 'gemini');
     });
 
     it('accepts a mode change', () => {
@@ -1932,17 +1977,20 @@ describe('Control Mutations (T038/T040)', () => {
     });
   });
 
-  describe('POST /operations/control', () => {
+  describe('POST /operations/work-items/:workItemId/controls/:controlId', () => {
     it('accepts a valid control mutation via route', async () => {
       const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
       const state = makeState({ tasks: [task] });
       const revision = computeRevisionToken(task);
-      const { captured, ctx } = makeWriteCtx('POST', '/operations/control', state, {
-        workItemId: 'task-1',
-        controlId: 'task-1:agent',
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
         requestedOptionId: 'agent-gemini',
         expectedRevision: revision,
-      });
+        },
+      );
       const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
       assert.equal(captured.statusCode, 200);
@@ -1953,12 +2001,15 @@ describe('Control Mutations (T038/T040)', () => {
     it('returns 409 for stale revision', async () => {
       const task = makeTask({ id: 'task-1', status: 'todo' });
       const state = makeState({ tasks: [task] });
-      const { captured, ctx } = makeWriteCtx('POST', '/operations/control', state, {
-        workItemId: 'task-1',
-        controlId: 'task-1:routing',
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Arouting',
+        state,
+        {
         requestedOptionId: 'routing-economy',
         expectedRevision: 'stale-revision',
-      });
+        },
+      );
       const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
       assert.equal(captured.statusCode, 409);
@@ -1969,12 +2020,15 @@ describe('Control Mutations (T038/T040)', () => {
     it('returns 200 for rejected mutation', async () => {
       const task = makeTask({ id: 'task-1', status: 'done' });
       const state = makeState({ tasks: [task] });
-      const { captured, ctx } = makeWriteCtx('POST', '/operations/control', state, {
-        workItemId: 'task-1',
-        controlId: 'task-1:routing',
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Arouting',
+        state,
+        {
         requestedOptionId: 'routing-economy',
         expectedRevision: computeRevisionToken(task),
-      });
+        },
+      );
       const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
       assert.equal(captured.statusCode, 200);
@@ -1985,12 +2039,15 @@ describe('Control Mutations (T038/T040)', () => {
     it('returns 200 for superseded mutation', async () => {
       const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
       const state = makeState({ tasks: [task] });
-      const { captured, ctx } = makeWriteCtx('POST', '/operations/control', state, {
-        workItemId: 'task-1',
-        controlId: 'task-1:agent',
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
         requestedOptionId: 'agent-claude',
         expectedRevision: computeRevisionToken(task),
-      });
+        },
+      );
       const handled = await handleWriteRoute(ctx);
       assert.equal(handled, true);
       assert.equal(captured.statusCode, 200);
@@ -2001,20 +2058,18 @@ describe('Control Mutations (T038/T040)', () => {
     it('validates required fields', async () => {
       const state = makeState();
       const full: Record<string, string> = {
-        workItemId: 'task-1',
-        controlId: 'task-1:routing',
         requestedOptionId: 'routing-economy',
         expectedRevision: 'some-rev',
       };
-      for (const missingField of [
-        'workItemId',
-        'controlId',
-        'requestedOptionId',
-        'expectedRevision',
-      ]) {
+      for (const missingField of ['requestedOptionId', 'expectedRevision']) {
         const body = { ...full };
         body[missingField] = '';
-        const { captured, ctx } = makeWriteCtx('POST', '/operations/control', state, body);
+        const { captured, ctx } = makeWriteCtx(
+          'POST',
+          '/operations/work-items/task-1/controls/task-1%3Arouting',
+          state,
+          body,
+        );
         await handleWriteRoute(ctx);
         assert.equal(captured.statusCode, 400, `Missing ${missingField} should return 400`);
       }
@@ -2024,12 +2079,15 @@ describe('Control Mutations (T038/T040)', () => {
       const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
       const state = makeState({ tasks: [task] });
       const revision = computeRevisionToken(task);
-      const { captured, ctx } = makeWriteCtx('POST', '/operations/control', state, {
-        workItemId: 'task-1',
-        controlId: 'task-1:agent',
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
         requestedOptionId: 'agent-codex',
         expectedRevision: revision,
-      });
+        },
+      );
       await handleWriteRoute(ctx);
       const data = captured.data as Record<string, unknown>;
       assert.equal(data['outcome'], 'accepted');
@@ -2044,12 +2102,15 @@ describe('Control Mutations (T038/T040)', () => {
       const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
       const state = makeState({ tasks: [task] });
       const revision = computeRevisionToken(task);
-      const { ctx } = makeWriteCtx('POST', '/operations/control', state, {
-        workItemId: 'task-1',
-        controlId: 'task-1:agent',
+      const { ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
         requestedOptionId: 'agent-gemini',
         expectedRevision: revision,
-      });
+        },
+      );
       await handleWriteRoute(ctx);
       assert.equal(task.owner, 'gemini', 'Task owner should be mutated to gemini');
     });
