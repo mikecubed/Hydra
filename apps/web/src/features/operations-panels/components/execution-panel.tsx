@@ -233,6 +233,15 @@ function AssignmentEntry({
   );
 }
 
+function buildAssignmentKey(assignment: AgentAssignmentView): string {
+  return [
+    assignment.participantId,
+    assignment.startedAt ?? 'open',
+    assignment.endedAt ?? 'current',
+    assignment.state,
+  ].join(':');
+}
+
 function CouncilStatusBadge({ status }: { readonly status: CouncilExecutionStatus }): JSX.Element {
   const palette = councilStatusColors[status];
   return (
@@ -298,7 +307,7 @@ function CouncilSection({ council }: { readonly council: CouncilExecutionView })
           <span style={subHeadingStyle}>Participants</span>
           <ol aria-label="Council participants" style={listStyle}>
             {council.participants.map((participant) => (
-              <li key={participant.participantId}>
+              <li key={buildAssignmentKey(participant)}>
                 <AssignmentEntry assignment={participant} />
               </li>
             ))}
@@ -349,7 +358,7 @@ export function ExecutionPanel({
       {assignments.length > 0 && (
         <ol aria-label="Agent assignments" style={listStyle}>
           {assignments.map((a) => (
-            <li key={a.participantId}>
+            <li key={buildAssignmentKey(a)}>
               <AssignmentEntry assignment={a} />
             </li>
           ))}

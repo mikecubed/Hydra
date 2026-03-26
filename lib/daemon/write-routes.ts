@@ -404,7 +404,7 @@ function mutateTaskClaim(
   body: Record<string, unknown>,
   agent: string,
   ctx: WriteRouteCtx,
-): (state: HydraStateShape) => Record<string, unknown> {
+): (state: HydraStateShape) => TaskEntry {
   const { parseList, nextId, nowIso } = ctx;
   return (state: HydraStateShape) => {
     const taskId = ((body['taskId'] as string | null | undefined) ?? '').trim();
@@ -459,23 +459,24 @@ function mutateTaskClaim(
       existing.owner = agent;
       existing.status = 'in_progress';
       appendAssignmentHistory(existing, nowIso(), agent, 'active');
-      return existing as unknown as Record<string, unknown>;
+      return existing;
     }
     if (title === '') throw new Error('Either taskId or title is required.');
     const claimBlockedBy = parseList(body['blockedBy'] ?? []);
-    const newTask: Record<string, unknown> = {
+    const newTask: TaskEntry = {
       id: nextId('T', state.tasks),
       title,
       owner: agent,
       status: 'in_progress',
+      type: '',
       claimToken: crypto.randomUUID(),
       files,
       notes,
       blockedBy: claimBlockedBy,
       updatedAt: nowIso(),
     };
-    annotateTaskHistory(newTask as TaskEntry, body, 'Task created via claim', nowIso());
-    state.tasks.push(newTask as unknown as TaskEntry);
+    annotateTaskHistory(newTask, body, 'Task created via claim', nowIso());
+    state.tasks.push(newTask);
     return newTask;
   };
 }
@@ -865,7 +866,7 @@ async function handleTaskClaim(ctx: WriteRouteCtx): Promise<boolean> {
     mutateTaskClaim(body, agent, ctx),
     { event: 'task_claim', agent, title: claimTitle.slice(0, 80) },
   );
-  const taskId = task['id'] as string;
+  const taskId = task.id;
   const dispatchMode = ((body['mode'] as string | null | undefined) ?? '').toLowerCase();
   const isNewTask = body['taskId'] == null || body['taskId'] === '';
   if (checkClaimWorktreeCondition(isNewTask, createTaskWorktree, body, dispatchMode)) {
@@ -894,13 +895,14 @@ async function handleTaskClaim(ctx: WriteRouteCtx): Promise<boolean> {
     }
   }
   try {
+    const hubCwd = projectRoot ?? process.cwd();
     hubRegister({
       id: `daemon_${taskId}`,
-      agent: task['owner'] as string,
-      cwd: projectRoot as string,
-      project: path.basename(projectRoot as string),
-      focus: task['title'] as string,
-      files: task['files'] as string[],
+      agent: task.owner,
+      cwd: hubCwd,
+      project: path.basename(hubCwd),
+      focus: task.title,
+      files: task.files,
       taskId,
       status: 'working',
     });
