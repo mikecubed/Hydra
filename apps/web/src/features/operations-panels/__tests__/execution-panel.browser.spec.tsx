@@ -222,7 +222,7 @@ describe('ExecutionPanel agent assignments', () => {
       />,
     );
 
-    const entry = screen.getByTestId('assignment-p-1');
+    const entry = screen.getByTestId(`assignment-p-1:${EARLIER}:current:active:0`);
     expect(entry).toHaveTextContent('codex');
     expect(entry).toHaveTextContent('implementer');
   });
@@ -258,7 +258,7 @@ describe('ExecutionPanel agent assignments', () => {
       />,
     );
 
-    const entry = screen.getByTestId('assignment-p-1');
+    const entry = screen.getByTestId(`assignment-p-1:${EARLIER}:current:active:0`);
     expect(entry).toHaveTextContent('local');
   });
 
@@ -277,8 +277,10 @@ describe('ExecutionPanel agent assignments', () => {
       />,
     );
 
-    expect(screen.getByTestId('assignment-p-alpha')).toBeInTheDocument();
-    expect(screen.getByTestId('assignment-p-beta')).toBeInTheDocument();
+    expect(
+      screen.getByTestId(`assignment-p-alpha:${EARLIER}:current:active:0`),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId(`assignment-p-beta:${EARLIER}:current:active:1`)).toBeInTheDocument();
   });
 
   it('does not render assignment list when assignments is empty', () => {
@@ -292,6 +294,32 @@ describe('ExecutionPanel agent assignments', () => {
     );
 
     expect(screen.queryByRole('list', { name: /agent assignments/i })).not.toBeInTheDocument();
+  });
+
+  it('produces unique data-testid when identical assignments repeat', () => {
+    const assignments = [makeAssignment(), makeAssignment()];
+
+    render(
+      <ExecutionPanel
+        assignments={assignments}
+        council={null}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    const list = screen.getByRole('list', { name: /agent assignments/i });
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+
+    const testIds = items.map((item) => {
+      const entry = item.querySelector('[data-testid^="assignment-"]');
+      return entry?.getAttribute('data-testid');
+    });
+
+    // All testids must be defined and unique even when entries are otherwise identical.
+    expect(testIds.every((id) => id != null)).toBe(true);
+    expect(new Set(testIds).size).toBe(2);
   });
 });
 /* eslint-enable max-lines-per-function */
@@ -405,6 +433,25 @@ describe('ExecutionPanel council execution', () => {
     expect(participants).toHaveTextContent('gemini');
   });
 
+  it('renders duplicate identical council participants with unique identities', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={makeCouncil({
+          participants: [
+            makeAssignment({ participantId: 'p-dup' }),
+            makeAssignment({ participantId: 'p-dup' }),
+          ],
+        })}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    expect(screen.getByTestId(`assignment-p-dup:${EARLIER}:current:active:0`)).toBeInTheDocument();
+    expect(screen.getByTestId(`assignment-p-dup:${EARLIER}:current:active:1`)).toBeInTheDocument();
+  });
+
   it('renders transition detail text when present', () => {
     const transitions = [makeTransition({ id: 'ct-1', detail: 'Agents reached consensus' })];
 
@@ -506,7 +553,7 @@ describe('ExecutionPanel stale-data indicators', () => {
     );
 
     expect(screen.getByTestId('execution-panel')).toHaveTextContent(/loading execution data/i);
-    expect(screen.getByTestId('assignment-p-1')).toBeInTheDocument();
+    expect(screen.getByTestId(`assignment-p-1:${EARLIER}:current:active:0`)).toBeInTheDocument();
   });
 
   it('shows error notice when refetch failed with existing council data', () => {

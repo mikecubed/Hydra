@@ -27,10 +27,12 @@ const ASSIGNMENT_STATE_BY_TASK_STATUS: Readonly<Record<string, string>> = {
 function ensureHistoryList(task: TaskEntry, key: string): Record<string, unknown>[] {
   const existing = (task as Record<string, unknown>)[key];
   if (Array.isArray(existing)) {
-    return existing.filter(
-      (entry): entry is Record<string, unknown> =>
-        entry != null && typeof entry === 'object' && !Array.isArray(entry),
-    );
+    const isValid = (entry: unknown): entry is Record<string, unknown> =>
+      entry != null && typeof entry === 'object' && !Array.isArray(entry);
+    if (existing.every(isValid)) return existing;
+    const cleaned = existing.filter(isValid);
+    (task as Record<string, unknown>)[key] = cleaned;
+    return cleaned;
   }
 
   const next: Record<string, unknown>[] = [];

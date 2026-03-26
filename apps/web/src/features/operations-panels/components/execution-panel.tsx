@@ -204,8 +204,10 @@ function AssignmentStateBadge({ state }: { readonly state: AgentAssignmentState 
 
 function AssignmentEntry({
   assignment,
+  occurrence,
 }: {
   readonly assignment: AgentAssignmentView;
+  readonly occurrence: number;
 }): JSX.Element {
   const palette = agentStateColors[assignment.state];
   const assignmentEntryStyle: CSSProperties = {
@@ -218,7 +220,10 @@ function AssignmentEntry({
   };
 
   return (
-    <div style={assignmentEntryStyle} data-testid={`assignment-${assignment.participantId}`}>
+    <div
+      style={assignmentEntryStyle}
+      data-testid={`assignment-${buildAssignmentIdentity(assignment, occurrence)}`}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#e2e8f0' }}>
           {assignment.label}
@@ -240,6 +245,10 @@ function buildAssignmentKey(assignment: AgentAssignmentView): string {
     assignment.endedAt ?? 'current',
     assignment.state,
   ].join(':');
+}
+
+function buildAssignmentIdentity(assignment: AgentAssignmentView, occurrence: number): string {
+  return `${buildAssignmentKey(assignment)}:${String(occurrence)}`;
 }
 
 function CouncilStatusBadge({ status }: { readonly status: CouncilExecutionStatus }): JSX.Element {
@@ -306,9 +315,9 @@ function CouncilSection({ council }: { readonly council: CouncilExecutionView })
         <div style={{ display: 'grid', gap: '0.25rem' }}>
           <span style={subHeadingStyle}>Participants</span>
           <ol aria-label="Council participants" style={listStyle}>
-            {council.participants.map((participant) => (
-              <li key={buildAssignmentKey(participant)}>
-                <AssignmentEntry assignment={participant} />
+            {council.participants.map((participant, index) => (
+              <li key={buildAssignmentIdentity(participant, index)}>
+                <AssignmentEntry assignment={participant} occurrence={index} />
               </li>
             ))}
           </ol>
@@ -357,9 +366,9 @@ export function ExecutionPanel({
       )}
       {assignments.length > 0 && (
         <ol aria-label="Agent assignments" style={listStyle}>
-          {assignments.map((a) => (
-            <li key={buildAssignmentKey(a)}>
-              <AssignmentEntry assignment={a} />
+          {assignments.map((a, index) => (
+            <li key={buildAssignmentIdentity(a, index)}>
+              <AssignmentEntry assignment={a} occurrence={index} />
             </li>
           ))}
         </ol>

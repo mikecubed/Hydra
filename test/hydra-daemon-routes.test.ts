@@ -988,6 +988,111 @@ describe('handleWriteRoute', () => {
     assert.equal((state.activeSession as { status: string }).status, 'active');
   });
 
+  it('ensureHistoryList persists cleaned assignmentHistory when malformed entries exist', async () => {
+    const task = makeTask({
+      id: 't_malformed_ah',
+      title: 'Task with malformed assignment history',
+      status: 'in_progress',
+      owner: 'claude',
+      assignmentHistory: [
+        {
+          agent: 'claude',
+          role: 'architect',
+          state: 'active',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+        null,
+        'garbage-string',
+        42,
+        [1, 2, 3],
+        {
+          agent: 'gemini',
+          role: 'analyst',
+          state: 'waiting',
+          startedAt: '2026-03-01T01:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+      routingHistory: [
+        {
+          route: 'claude',
+          mode: 'auto',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+      ],
+    } as Partial<TaskEntry>);
+    const state = makeState({ tasks: [task] });
+
+    // /task/update triggers syncAssignmentState which calls ensureHistoryList
+    const ctx = makeWriteCtx('POST', '/task/update', state, {
+      taskId: 't_malformed_ah',
+      status: 'done',
+    });
+    await handleWriteRoute(ctx);
+
+    const persisted = state.tasks[0] as Record<string, unknown>;
+    const assignmentHistory = persisted['assignmentHistory'] as Array<Record<string, unknown>>;
+    // Malformed entries (null, string, number, array) must be removed from persisted state
+    for (const entry of assignmentHistory) {
+      assert.equal(typeof entry, 'object');
+      assert.ok(entry != null, 'null entries should be cleaned');
+      assert.ok(!Array.isArray(entry), 'array entries should be cleaned');
+    }
+    assert.equal(assignmentHistory.length, 2, 'only valid record entries should remain');
+    assert.equal(assignmentHistory[0]?.['agent'], 'claude');
+    assert.equal(assignmentHistory[1]?.['agent'], 'gemini');
+  });
+
+  it('ensureHistoryList persists cleaned routingHistory when malformed entries exist', async () => {
+    const task = makeTask({
+      id: 't_malformed_rh',
+      title: 'Task with malformed routing history',
+      status: 'todo',
+      owner: 'codex',
+      routingHistory: [
+        {
+          route: 'codex',
+          mode: 'auto',
+          changedAt: '2026-03-01T00:00:00.000Z',
+          reason: 'Task created',
+        },
+        null,
+        'stale-string',
+      ],
+      assignmentHistory: [
+        {
+          agent: 'codex',
+          role: null,
+          state: 'waiting',
+          startedAt: '2026-03-01T00:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    } as Partial<TaskEntry>);
+    const state = makeState({ tasks: [task] });
+
+    const ctx = makeWriteCtx('POST', '/task/claim', state, {
+      taskId: 't_malformed_rh',
+      agent: 'gemini',
+      mode: 'balanced',
+    });
+    await handleWriteRoute(ctx);
+
+    const persisted = state.tasks[0] as Record<string, unknown>;
+    const routingHistory = persisted['routingHistory'] as Array<Record<string, unknown>>;
+    // All entries in persisted state must be valid objects
+    for (const entry of routingHistory) {
+      assert.equal(typeof entry, 'object');
+      assert.ok(entry != null);
+      assert.ok(!Array.isArray(entry));
+    }
+    // Original had 1 valid + 2 malformed; after claim appends 1 more = 2 valid total
+    assert.equal(routingHistory[0]?.['route'], 'codex');
+    assert.equal(routingHistory.at(-1)?.['route'], 'gemini');
+  });
+
   it('POST /handoff + POST /handoff/ack round-trip', async () => {
     const state = makeState();
 
