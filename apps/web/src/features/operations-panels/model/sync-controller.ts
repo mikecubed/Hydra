@@ -1,6 +1,6 @@
 /**
- * Detail-sync controller — orchestrates work-item detail fetching
- * when the browser selection changes.
+ * Detail-sync controller — orchestrates work-item detail fetching,
+ * explicit control discovery hydration, and snapshot refreshes.
  *
  * Pure orchestration: accepts an OperationsClient and a dispatch callback,
  * tracks the current fetch to prevent stale responses from racing, and
@@ -18,16 +18,30 @@ export interface SyncControllerOptions {
 export interface SyncController {
   /** Trigger detail fetch for the given work item. Aborts any in-flight fetch. */
   syncDetail(workItemId: string): void;
+  /**
+   * Post-control reconciliation: refetch detail only if the controlled item
+   * is still the selected item. Never aborts an in-flight fetch for a
+   * different item — prevents stale control responses from clobbering the
+   * active detail view.
+   */
+  reconcileDetail(workItemId: string, currentSelectedId: string | null): void;
   /** Cancel any in-flight detail fetch (e.g. on deselect). */
   cancelSync(): void;
+  /** Fetch batch control discovery for the given work item IDs. */
+  syncControlDiscovery(workItemIds: readonly string[]): void;
+  /** Fetch the operations snapshot with stale-response protection. */
+  fetchSnapshot(): void;
   /** Dispose the controller — aborts in-flight and prevents future fetches. */
   dispose(): void;
 }
 
+// eslint-disable-next-line max-lines-per-function -- cohesive factory sharing closure state
 export function createSyncController(options: SyncControllerOptions): SyncController {
   const { client, dispatch } = options;
   let currentRequestId = 0;
   let currentAbortController: AbortController | null = null;
+  let discoveryRequestId = 0;
+  let snapshotRequestId = 0;
   const lifecycle = { disposed: false };
 
   function abortCurrent(): void {
@@ -64,16 +78,61 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
     })();
   }
 
+  function syncControlDiscovery(workItemIds: readonly string[]): void {
+    if (lifecycle.disposed || workItemIds.length === 0) return;
+
+    discoveryRequestId += 1;
+    const myRequestId = discoveryRequestId;
+
+    void (async () => {
+      try {
+        const discovery = await client.discoverControls({ workItemIds });
+        if (lifecycle.disposed || myRequestId !== discoveryRequestId) return;
+        dispatch({ type: 'controls/discovery-loaded', discovery });
+      } catch {
+        // Discovery is best-effort — silently drop errors
+      }
+    })();
+  }
+
   function cancelSync(): void {
     abortCurrent();
     currentRequestId += 1;
+  }
+
+  function fetchSnapshot(): void {
+    if (lifecycle.disposed) return;
+
+    snapshotRequestId += 1;
+    const requestId = snapshotRequestId;
+
+    dispatch({ type: 'snapshot/request' });
+
+    void (async () => {
+      try {
+        const snapshot = await client.getSnapshot();
+        if (lifecycle.disposed || requestId !== snapshotRequestId) return;
+        dispatch({ type: 'snapshot/success', snapshot });
+      } catch {
+        if (lifecycle.disposed || requestId !== snapshotRequestId) return;
+        dispatch({ type: 'snapshot/failure' });
+      }
+    })();
+  }
+
+  function reconcileDetail(workItemId: string, currentSelectedId: string | null): void {
+    if (lifecycle.disposed) return;
+    if (currentSelectedId !== workItemId) return;
+    syncDetail(workItemId);
   }
 
   function dispose(): void {
     lifecycle.disposed = true;
     abortCurrent();
     currentRequestId += 1;
+    discoveryRequestId += 1;
+    snapshotRequestId += 1;
   }
 
-  return { syncDetail, cancelSync, dispose };
+  return { syncDetail, reconcileDetail, cancelSync, syncControlDiscovery, fetchSnapshot, dispose };
 }
