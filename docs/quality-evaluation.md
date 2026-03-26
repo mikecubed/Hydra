@@ -73,7 +73,7 @@ All Prettier-supported files in the repo (`.ts`, `.json`, `.md`, `.yml`, etc.) p
 ### CI enforcement
 
 - `test:coverage` runs in the coverage CI job
-- `test:coverage:check` (78% statements/lines/branches, 79% functions) — **blocking** (`continue-on-error: false`)
+- `test:coverage:check` (78% statements/lines, 76% branches, 79% functions) — **blocking** (`continue-on-error: false`)
 - `test:coverage:per-file` — **blocking** per-module floor enforcement (daemon: 85%, shared: 73%)
 - `test:mutation` (Stryker, hydra-shared + daemon) — **blocking** (`break: 60%`)
 - `new-file-policy` — **blocking** on PRs (new `.ts` files require corresponding tests)

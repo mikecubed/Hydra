@@ -187,7 +187,7 @@ describe('extractHandoffAgents — type coercion edge cases', () => {
 });
 
 describe('findPowerShell — extended non-Windows tests', () => {
-  it('always returns null on Linux/macOS', { skip: process.platform === 'win32' }, () => {
+  it('always returns null on non-Windows', { skip: process.platform === 'win32' }, () => {
     // Call multiple times to ensure consistent behavior
     assert.equal(findPowerShell(), null);
     assert.equal(findPowerShell(), null);
@@ -195,7 +195,7 @@ describe('findPowerShell — extended non-Windows tests', () => {
 });
 
 describe('findWindowsTerminal — extended non-Windows tests', () => {
-  it('always returns null on Linux/macOS', { skip: process.platform === 'win32' }, () => {
+  it('always returns null on non-Windows', { skip: process.platform === 'win32' }, () => {
     assert.equal(findWindowsTerminal(), null);
     assert.equal(findWindowsTerminal(), null);
   });

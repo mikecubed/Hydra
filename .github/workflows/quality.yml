@@ -196,7 +196,7 @@ jobs:
         run: npm run test:coverage:check
         env:
           HUSKY: '0'
-        # Gate: 78% lines/statements/branches, 79% functions — blocking.
+        # Gate: 78% lines/statements, 76% branches, 79% functions — blocking.
         # Ultimate target: 80% (see docs/quality-evaluation.md roadmap).
 
       - name: Check per-file coverage floors
