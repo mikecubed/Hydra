@@ -11,6 +11,7 @@ import {
   projectCheckpoints,
   projectWorkItemDetail,
   type QueueSnapshotOptions,
+  type HealthBudgetContext,
 } from './web-operations-projection.ts';
 import type { WorkItemStatus } from '@hydra/web-contracts';
 
@@ -66,8 +67,24 @@ function parseLimit(raw: string | null): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function tryReadStatus(readStatus: ReadRouteCtx['readStatus']): Record<string, unknown> | null {
+  try {
+    return readStatus();
+  } catch {
+    return null;
+  }
+}
+
+function tryCheckUsage(checkUsage: ReadRouteCtx['checkUsage']): ReturnType<ReadRouteCtx['checkUsage']> | null {
+  try {
+    return checkUsage();
+  } catch {
+    return null;
+  }
+}
+
 function handleSnapshot(ctx: ReadRouteCtx): boolean {
-  const { res, sendJson, sendError, readState, requestUrl } = ctx;
+  const { res, sendJson, sendError, readState, requestUrl, readStatus, checkUsage } = ctx;
 
   const statusResult = parseStatusFilters(requestUrl.searchParams);
   if ('invalid' in statusResult) {
@@ -83,7 +100,12 @@ function handleSnapshot(ctx: ReadRouteCtx): boolean {
     cursor: requestUrl.searchParams.get('cursor') ?? undefined,
   };
 
-  const snapshot = projectQueueSnapshot(state, options);
+  const statusData = tryReadStatus(readStatus);
+  const usage = tryCheckUsage(checkUsage);
+  const healthBudgetCtx: HealthBudgetContext | null =
+    statusData === null || usage === null ? null : { statusData, usage };
+
+  const snapshot = projectQueueSnapshot(state, options, healthBudgetCtx);
 
   sendJson(res, 200, snapshot);
   return true;

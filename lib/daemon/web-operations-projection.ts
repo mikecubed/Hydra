@@ -8,6 +8,7 @@
  */
 
 import type { ActiveSessionEntry, HydraStateShape, TaskEntry, TaskStatus } from '../types.ts';
+import type { UsageCheckResult } from '../types.ts';
 import type {
   WorkItemStatus,
   WorkQueueItemView,
@@ -15,6 +16,11 @@ import type {
   CheckpointStatus,
   CheckpointRecordView,
   DetailAvailability,
+  DaemonHealthView,
+  DaemonHealthStatus,
+  HealthDetailsAvailability,
+  BudgetStatusView,
+  BudgetSeverity,
 } from '@hydra/web-contracts';
 
 // ── Status Normalization ───────────────────────────────────────────────────
@@ -99,6 +105,124 @@ function buildRiskSignals(task: TaskEntry, normalized: WorkItemStatus): readonly
   return signals;
 }
 
+// ── Health Projection ──────────────────────────────────────────────────────
+
+export function projectDaemonHealth(
+  statusData: Record<string, unknown> | null,
+): DaemonHealthView {
+  const observedAt = new Date().toISOString();
+
+  if (statusData === null) {
+    return {
+      status: 'unavailable',
+      scope: 'global',
+      observedAt,
+      message: 'Daemon status is not available',
+      detailsAvailability: 'unavailable',
+    };
+  }
+
+  const running = statusData['running'];
+
+  let status: DaemonHealthStatus;
+  let message: string | null = null;
+  let detailsAvailability: HealthDetailsAvailability = 'ready';
+
+  if (running === true) {
+    status = 'healthy';
+  } else if (running === false) {
+    status = 'unavailable';
+    message = 'Daemon is not running';
+    detailsAvailability = 'partial';
+  } else {
+    status = 'unavailable';
+    message = 'Daemon status could not be determined';
+    detailsAvailability = 'unavailable';
+  }
+
+  return { status, scope: 'global', observedAt, message, detailsAvailability };
+}
+
+// ── Budget Projection ──────────────────────────────────────────────────────
+
+const USAGE_LEVEL_TO_SEVERITY: Readonly<Record<string, BudgetSeverity>> = {
+  normal: 'normal',
+  warning: 'warning',
+  critical: 'warning',
+};
+
+function resolveBudgetSeverity(
+  usage: UsageCheckResult,
+  used: number | null,
+  limit: number | null,
+  percent: number | null,
+): BudgetSeverity {
+  const isExceeded =
+    (used !== null && limit !== null && used >= limit) || (percent !== null && percent >= 100);
+
+  if (isExceeded) {
+    return 'exceeded';
+  }
+
+  return USAGE_LEVEL_TO_SEVERITY[usage.level] ?? 'unavailable';
+}
+
+function resolveBudgetSummary(severity: BudgetSeverity, percent: number | null): string {
+  if (severity === 'unavailable') {
+    return 'Budget data is not available';
+  }
+
+  if (severity === 'exceeded') {
+    return 'Daily token budget exceeded';
+  }
+
+  if (severity === 'warning') {
+    return `Budget usage at ${String(percent ?? '?')}%`;
+  }
+
+  return 'Budget usage is within normal limits';
+}
+
+export function projectGlobalBudget(usage: UsageCheckResult): BudgetStatusView {
+  const used = typeof usage.used === 'number' ? usage.used : null;
+  const limit = typeof usage.budget === 'number' ? usage.budget : null;
+  const percent = typeof usage.percent === 'number' ? usage.percent : null;
+  const hasNumericData = used !== null && limit !== null;
+  const severity = resolveBudgetSeverity(usage, used, limit, percent);
+  const summary = resolveBudgetSummary(severity, percent);
+
+  return {
+    status: severity,
+    scope: 'global',
+    scopeId: null,
+    summary,
+    used,
+    limit,
+    unit: hasNumericData ? 'tokens' : null,
+    complete: hasNumericData,
+  };
+}
+
+export function projectItemBudget(workItemId: string): BudgetStatusView {
+  return {
+    status: 'unavailable',
+    scope: 'work-item',
+    scopeId: workItemId,
+    summary: 'Per-item budget attribution is not yet available',
+    used: null,
+    limit: null,
+    unit: null,
+    complete: false,
+  };
+}
+
+// ── Health/Budget Context ──────────────────────────────────────────────────
+
+export interface HealthBudgetContext {
+  statusData: Record<string, unknown>;
+  usage: UsageCheckResult;
+}
+
 // ── Projection ─────────────────────────────────────────────────────────────
 
 /** Deterministic epoch fallback when neither task nor daemon state carry a timestamp. */
@@ -150,8 +274,8 @@ export interface QueueSnapshotOptions {
 
 export interface QueueSnapshotResult {
   queue: readonly WorkQueueItemView[];
-  health: null;
-  budget: null;
+  health: DaemonHealthView | null;
+  budget: BudgetStatusView | null;
   availability: 'ready' | 'empty' | 'partial' | 'unavailable';
   lastSynchronizedAt: string | null;
   nextCursor: string | null;
@@ -211,9 +335,21 @@ function assignQueuePositions(items: WorkQueueItemView[]): void {
   }
 }
 
+function resolveHealthBudgetContext(
+  statusData: Record<string, unknown> | null,
+  usage: UsageCheckResult | null,
+): HealthBudgetContext | null {
+  if (statusData === null || usage === null) {
+    return null;
+  }
+
+  return { statusData, usage };
+}
+
 export function projectQueueSnapshot(
   state: HydraStateShape,
   options: QueueSnapshotOptions = {},
+  healthBudgetCtx?: HealthBudgetContext | null,
 ): QueueSnapshotResult {
   const stateUpdatedAt = resolveStateUpdatedAt(state.updatedAt);
 
@@ -238,10 +374,22 @@ export function projectQueueSnapshot(
 
   const availability = pagedItems.length > 0 || state.tasks.length > 0 ? 'ready' : 'empty';
 
+  const resolvedHealthBudgetCtx = resolveHealthBudgetContext(
+    healthBudgetCtx?.statusData ?? null,
+    healthBudgetCtx?.usage ?? null,
+  );
+  let health: DaemonHealthView | null = null;
+  let budget: BudgetStatusView | null = null;
+
+  if (resolvedHealthBudgetCtx !== null) {
+    health = projectDaemonHealth(resolvedHealthBudgetCtx.statusData);
+    budget = projectGlobalBudget(resolvedHealthBudgetCtx.usage);
+  }
+
   return {
     queue: pagedItems,
-    health: null, // daemon health projection is a later US
-    budget: null, // budget projection is a later US
+    health,
+    budget,
     availability,
     lastSynchronizedAt: resolveLastSynchronizedAt(state.updatedAt),
     nextCursor,
@@ -319,7 +467,7 @@ export interface WorkItemDetailResult {
   assignments: readonly [];
   council: null;
   controls: readonly [];
-  itemBudget: null;
+  itemBudget: BudgetStatusView;
   availability: DetailAvailability;
 }
 
@@ -351,7 +499,7 @@ export function projectWorkItemDetail(
     assignments: [], // not yet tracked in daemon state
     council: null, // not yet tracked in daemon state
     controls: [], // not yet tracked in daemon state
-    itemBudget: null, // not yet tracked in daemon state
+    itemBudget: projectItemBudget(workItemId),
     availability: 'partial', // routing/assignments/council are untracked → partial
   };
 }

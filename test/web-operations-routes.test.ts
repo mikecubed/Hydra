@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { EventEmitter } from 'node:events';
-import type { ReadRouteCtx, HydraStateShape, TaskEntry } from '../lib/types.ts';
+import type { ReadRouteCtx, HydraStateShape, TaskEntry, UsageCheckResult } from '../lib/types.ts';
 import { handleOperationsReadRoute } from '../lib/daemon/web-operations-routes.ts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -48,6 +48,10 @@ function makeReadCtx(
   routePath: string,
   state: HydraStateShape,
   searchParams: Record<string, string> = {},
+  ctxOverrides: {
+    checkUsage?: () => UsageCheckResult;
+    readStatus?: () => Record<string, unknown>;
+  } = {},
 ): ReadRouteCtx & { captured: { statusCode: number; data: unknown } } {
   const url = new URL(
     `http://localhost${routePath}${
@@ -91,8 +95,8 @@ function makeReadCtx(
     sendJson,
     sendError,
     writeStatus: () => {},
-    readStatus: () => ({ ok: true }),
-    checkUsage: () => ({
+    readStatus: ctxOverrides.readStatus ?? (() => ({ running: true })),
+    checkUsage: ctxOverrides.checkUsage ?? (() => ({
       level: 'normal',
       percent: 10,
       todayTokens: 100,
@@ -105,7 +109,7 @@ function makeReadCtx(
       resetAt: '',
       resetInMs: 0,
       agents: {},
-    }),
+    })),
     getModelSummary: () => ({
       claude: { active: 'claude-opus-4-6', isDefault: true },
     }),
@@ -209,6 +213,149 @@ describe('handleOperationsReadRoute', () => {
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
       assert.equal(data['nextCursor'], null);
+    });
+  });
+
+  describe('snapshot health and budget fields', () => {
+    it('snapshot includes populated health from daemon status', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const health = data['health'] as Record<string, unknown>;
+      assert.notEqual(health, null);
+      assert.equal(health['status'], 'healthy');
+      assert.equal(health['scope'], 'global');
+    });
+
+    it('snapshot includes populated budget from usage check', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const budget = data['budget'] as Record<string, unknown>;
+      assert.notEqual(budget, null);
+      assert.equal(budget['scope'], 'global');
+      assert.equal(budget['status'], 'normal');
+    });
+
+    it('snapshot budget reflects warning usage level', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        checkUsage: () => ({
+          level: 'warning',
+          percent: 85,
+          todayTokens: 850,
+          message: 'approaching limit',
+          confidence: 1,
+          model: 'test',
+          budget: 1000,
+          used: 850,
+          remaining: 150,
+          resetAt: '',
+          resetInMs: 0,
+          agents: {},
+        }),
+      });
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const budget = data['budget'] as Record<string, unknown>;
+      assert.equal(budget['status'], 'warning');
+    });
+
+    it('snapshot health reflects unavailable daemon', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        readStatus: () => ({ running: false }),
+      });
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const health = data['health'] as Record<string, unknown>;
+      assert.equal(health['status'], 'unavailable');
+    });
+
+    it('snapshot budget keeps critical-threshold usage as warning while budget remains', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        checkUsage: () => ({
+          level: 'critical',
+          percent: 95,
+          todayTokens: 9500,
+          message: 'over budget',
+          confidence: 1,
+          model: 'test',
+          budget: 10000,
+          used: 9500,
+          remaining: 500,
+          resetAt: '',
+          resetInMs: 0,
+          agents: {},
+        }),
+      });
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const budget = data['budget'] as Record<string, unknown>;
+      assert.equal(budget['status'], 'warning');
+    });
+
+    it('snapshot budget reflects exceeded status when budget is fully consumed', () => {
+      const state = makeState({ tasks: [makeTask()] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        checkUsage: () => ({
+          level: 'critical',
+          percent: 100,
+          todayTokens: 10_000,
+          message: 'budget exhausted',
+          confidence: 1,
+          model: 'test',
+          budget: 10_000,
+          used: 10_000,
+          remaining: 0,
+          resetAt: '',
+          resetInMs: 0,
+          agents: {},
+        }),
+      });
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const budget = data['budget'] as Record<string, unknown>;
+      assert.equal(budget['status'], 'exceeded');
+    });
+
+    it('still returns queue data when readStatus throws', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        readStatus: () => {
+          throw new Error('status failed');
+        },
+      });
+
+      handleOperationsReadRoute(ctx);
+
+      const data = ctx.captured.data as Record<string, unknown>;
+      const queue = data['queue'] as Array<Record<string, unknown>>;
+      assert.equal(ctx.captured.statusCode, 200);
+      assert.equal(queue[0]['id'], 'task-1');
+      assert.equal(data['health'], null);
+      assert.ok(data['budget'] !== undefined);
+    });
+
+    it('still returns queue data when checkUsage throws', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/snapshot', state, {}, {
+        checkUsage: () => {
+          throw new Error('usage failed');
+        },
+      });
+
+      handleOperationsReadRoute(ctx);
+
+      const data = ctx.captured.data as Record<string, unknown>;
+      const queue = data['queue'] as Array<Record<string, unknown>>;
+      assert.equal(ctx.captured.statusCode, 200);
+      assert.equal(queue[0]['id'], 'task-1');
+      assert.equal(data['budget'], null);
+      assert.ok(data['health'] !== undefined);
     });
   });
 
@@ -519,12 +666,16 @@ describe('handleOperationsReadRoute', () => {
       assert.deepStrictEqual(data['controls'], []);
     });
 
-    it('returns itemBudget as null', () => {
+    it('returns unavailable item budget for work item', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
-      assert.equal(data['itemBudget'], null);
+      const itemBudget = data['itemBudget'] as Record<string, unknown>;
+      assert.notEqual(itemBudget, null);
+      assert.equal(itemBudget['status'], 'unavailable');
+      assert.equal(itemBudget['scope'], 'work-item');
+      assert.equal(itemBudget['scopeId'], 'task-1');
     });
 
     it('returns availability as partial', () => {
