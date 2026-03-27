@@ -1,5 +1,16 @@
 # Hydra quality tasks
 
+## Web Interface — Login Page (Complete)
+
+- [x] T1: `auth-client.ts` — login(), getSessionInfo(), logout() with CSRF double-submit
+- [x] T2: `login-form.tsx` — controlled form with ACCOUNT_DISABLED/INVALID_CREDENTIALS/RATE_LIMITED mapping
+- [x] T3: `login.tsx` — LoginRoute with session-check on mount and same-origin redirectTo guard
+- [x] T4: `router.tsx` — loginRoute + beforeLoad session guard redirecting unauthenticated to /login
+- [x] T5: `auth-client.test.ts` — 8 node:test unit tests
+- [x] T6: `login-form.browser.spec.tsx` — 9 Vitest browser specs
+- [x] T7: README updates replacing browser-console fetch workaround with /login instructions
+- PR #210: `feat/web-session-auth-login` → main
+
 ## Phase 2 — Coverage push (Complete)
 
 - [x] Convert mid-size `.mjs` test files and `test/helpers/mock-agent.mjs` to `.ts`
