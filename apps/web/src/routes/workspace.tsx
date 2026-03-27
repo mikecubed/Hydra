@@ -73,6 +73,7 @@ import {
   hydrateConversationArtifacts,
   fetchArtifactContent,
 } from '../features/chat-workspace/model/artifact-hydration.ts';
+import { OperationsErrorBoundary } from '../features/operations-panels/components/operations-error-boundary.tsx';
 import { WorkspaceOperationsPanel } from '../features/operations-panels/components/workspace-operations-panel.tsx';
 
 function useWorkspaceState(store: WorkspaceStore) {
@@ -1697,7 +1698,11 @@ export function WorkspaceRoute(): JSX.Element {
             onSubmit={composer.onSubmit}
           />
         }
-        operationsPanelSlot={<WorkspaceOperationsPanel />}
+        operationsPanelSlot={
+          <OperationsErrorBoundary>
+            <WorkspaceOperationsPanel />
+          </OperationsErrorBoundary>
+        }
       />
     </ConnectionStateContext.Provider>
   );

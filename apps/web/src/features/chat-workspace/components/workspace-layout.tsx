@@ -172,7 +172,9 @@ export function WorkspaceLayout({
         alignItems: 'start',
       }}
     >
-      {chatSection}
+      {/* minWidth: 0 prevents the chat column from blowing out the grid when
+          the operations panel reflows or loads content asynchronously. */}
+      <div style={{ minWidth: 0 }}>{chatSection}</div>
       <aside aria-label="Operations sidebar">{operationsPanelSlot}</aside>
     </div>
   );
