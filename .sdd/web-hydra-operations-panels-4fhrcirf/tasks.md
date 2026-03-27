@@ -163,9 +163,9 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 ## Phase 7 — Docs, Final Validation & Release Readiness
 
-- [ ] T053 [P] Update browser workspace and architecture docs for operations panels in `apps/web/README.md` and `docs/web-interface/03-architecture.md`.
-- [ ] T054 [P] Update protocol, phase-roadmap, and boundary documentation for operations snapshot/detail/control routes in `docs/web-interface/04-protocol.md`, `docs/web-interface/06-phases-and-sdd.md`, and `docs/web-interface/07-boundaries-and-governance.md`.
-- [ ] T055 Run final validation with `npm run quality`, `npm test`, and `npm run test:browser -w @hydra/web`, then reconcile any last operations-panels doc or regression gaps.
+- [x] T053 [P] Update browser workspace and architecture docs for operations panels in `apps/web/README.md` and `docs/web-interface/03-architecture.md`.
+- [x] T054 [P] Update protocol, phase-roadmap, and boundary documentation for operations snapshot/detail/control routes in `docs/web-interface/04-protocol.md`, `docs/web-interface/06-phases-and-sdd.md`, and `docs/web-interface/07-boundaries-and-governance.md`.
+- [x] T055 Run final validation with `npm run quality`, `npm test`, and `npm run test:browser -w @hydra/web`, then reconcile any last operations-panels doc or regression gaps.
 
 ---
 
