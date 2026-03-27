@@ -172,7 +172,8 @@ function tick(): Promise<void> {
 let lastCreatedWs: FakeWebSocket | null = null;
 
 function makeWsCtor(): SessionManagerDeps['WebSocketCtor'] {
-  const Ctor = class TrackedWs extends FakeWebSocket {} as unknown as SessionManagerDeps['WebSocketCtor'];
+  const Ctor =
+    class TrackedWs extends FakeWebSocket {} as unknown as SessionManagerDeps['WebSocketCtor'];
   return new Proxy(Ctor, {
     construct(Target, args: [string]) {
       const instance = Reflect.construct(Target, args) as FakeWebSocket;

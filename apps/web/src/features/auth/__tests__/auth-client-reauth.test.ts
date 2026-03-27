@@ -104,10 +104,7 @@ describe('reauth()', () => {
 
     await reauth();
 
-    assert.equal(
-      (lastFetchInit?.headers as Record<string, string>)?.['x-csrf-token'],
-      undefined,
-    );
+    assert.equal((lastFetchInit?.headers as Record<string, string>)?.['x-csrf-token'], undefined);
   });
 
   it('throws with correct .code on non-2xx response', async () => {
