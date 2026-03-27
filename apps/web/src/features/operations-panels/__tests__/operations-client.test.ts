@@ -640,6 +640,64 @@ describe('OperationsClient', () => {
     assert.equal(result.outcome, 'superseded');
   });
 
+  it('throws OperationsResponseValidationError on invalid work item controls payloads', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        workItemId: 'wq-1',
+        controls: [],
+      }),
+    );
+
+    await assert.rejects(
+      () => client.getWorkItemControls('wq-1'),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /Invalid work item controls response/u);
+        return true;
+      },
+    );
+  });
+
+  it('throws OperationsResponseValidationError on invalid control submit payloads', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        outcome: 'accepted',
+        workItemId: 'wq-1',
+        resolvedAt: NOW,
+      }),
+    );
+
+    await assert.rejects(
+      () =>
+        client.submitControlAction('wq-1', 'ctrl-1', {
+          requestedOptionId: 'opt-1',
+          expectedRevision: 'rev-1',
+        }),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /Invalid control submit response/u);
+        return true;
+      },
+    );
+  });
+
+  it('throws OperationsResponseValidationError on invalid control discovery payloads', async () => {
+    const client = buildClient(async () =>
+      jsonResponse({
+        items: [{ workItemId: 'wq-1' }],
+      }),
+    );
+
+    await assert.rejects(
+      () => client.discoverControls({ workItemIds: ['wq-1'] }),
+      (err: unknown) => {
+        assert.ok(err instanceof OperationsResponseValidationError);
+        assert.match(err.message, /Invalid control discovery response/u);
+        return true;
+      },
+    );
+  });
+
   it('throws OperationsRequestError on control discovery HTTP errors', async () => {
     const client = buildClient(async () =>
       errorResponse(

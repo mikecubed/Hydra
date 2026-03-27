@@ -7,17 +7,23 @@
  */
 import type {
   BatchControlDiscoveryRequest,
-  BatchControlDiscoveryResponse,
+  BatchControlDiscoveryResponse as BatchControlDiscoveryResponseType,
   GetOperationsSnapshotResponse as GetOperationsSnapshotResponseType,
   GetOperationsSnapshotRequest,
-  GetWorkItemControlsResponse,
+  GetWorkItemControlsResponse as GetWorkItemControlsResponseType,
   GetWorkItemDetailResponse as GetWorkItemDetailResponseType,
   GetWorkItemExecutionResponse,
   GetWorkItemCheckpointsResponse,
   SubmitControlActionBody,
+  SubmitControlActionResponse as SubmitControlActionResponseType,
+} from '@hydra/web-contracts';
+import {
+  BatchControlDiscoveryResponse,
+  GetOperationsSnapshotResponse,
+  GetWorkItemControlsResponse,
+  GetWorkItemDetailResponse,
   SubmitControlActionResponse,
 } from '@hydra/web-contracts';
-import { GetOperationsSnapshotResponse, GetWorkItemDetailResponse } from '@hydra/web-contracts';
 import { type GatewayErrorBody, parseGatewayError } from '../../../shared/gateway-errors.ts';
 
 export interface OperationsClientOptions {
@@ -81,6 +87,39 @@ function parseDetailResponseForId(
   };
 }
 
+function parseControlsResponse(body: unknown): GetWorkItemControlsResponseType {
+  const parsed = GetWorkItemControlsResponse.safeParse(body);
+  if (!parsed.success) {
+    throw new OperationsResponseValidationError(
+      `Invalid work item controls response: ${parsed.error.message}`,
+    );
+  }
+
+  return parsed.data;
+}
+
+function parseSubmitControlResponse(body: unknown): SubmitControlActionResponseType {
+  const parsed = SubmitControlActionResponse.safeParse(body);
+  if (!parsed.success) {
+    throw new OperationsResponseValidationError(
+      `Invalid control submit response: ${parsed.error.message}`,
+    );
+  }
+
+  return parsed.data;
+}
+
+function parseDiscoveryResponse(body: unknown): BatchControlDiscoveryResponseType {
+  const parsed = BatchControlDiscoveryResponse.safeParse(body);
+  if (!parsed.success) {
+    throw new OperationsResponseValidationError(
+      `Invalid control discovery response: ${parsed.error.message}`,
+    );
+  }
+
+  return parsed.data;
+}
+
 export interface OperationsClient {
   getSnapshot(
     query?: Partial<GetOperationsSnapshotRequest>,
@@ -91,13 +130,13 @@ export interface OperationsClient {
   ): Promise<GetWorkItemDetailResponseType>;
   getWorkItemCheckpoints(workItemId: string): Promise<GetWorkItemCheckpointsResponse>;
   getWorkItemExecution(workItemId: string): Promise<GetWorkItemExecutionResponse>;
-  getWorkItemControls(workItemId: string): Promise<GetWorkItemControlsResponse>;
+  getWorkItemControls(workItemId: string): Promise<GetWorkItemControlsResponseType>;
   submitControlAction(
     workItemId: string,
     controlId: string,
     body: SubmitControlActionBody,
-  ): Promise<SubmitControlActionResponse>;
-  discoverControls(body: BatchControlDiscoveryRequest): Promise<BatchControlDiscoveryResponse>;
+  ): Promise<SubmitControlActionResponseType>;
+  discoverControls(body: BatchControlDiscoveryRequest): Promise<BatchControlDiscoveryResponseType>;
 }
 
 type QueryValue = string | number | boolean | null | undefined | readonly string[];
@@ -177,12 +216,16 @@ function buildRequestUrl(
   return queryString === '' ? url : `${url}?${queryString}`;
 }
 
-export function createOperationsClient(options: OperationsClientOptions): OperationsClient {
-  const baseUrl = options.baseUrl.replace(/\/$/, '');
-  const fetchFn = options.fetch ?? globalThis.fetch;
-  const getCsrfToken = options.getCsrfToken ?? readCsrfTokenFromDocument;
+interface RequestHelperDeps {
+  readonly baseUrl: string;
+  readonly fetchFn: typeof globalThis.fetch;
+  readonly getCsrfToken: () => string | null | undefined;
+}
 
-  async function request<T>(
+function createRequestHelper(deps: RequestHelperDeps) {
+  const { baseUrl, fetchFn, getCsrfToken } = deps;
+
+  return async function request<T>(
     path: string,
     init: RequestInit = {},
     query?: Record<string, QueryValue>,
@@ -210,7 +253,14 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
 
     const body = (await response.json()) as unknown;
     return parse == null ? (body as T) : parse(body);
-  }
+  };
+}
+
+export function createOperationsClient(options: OperationsClientOptions): OperationsClient {
+  const baseUrl = options.baseUrl.replace(/\/$/, '');
+  const fetchFn = options.fetch ?? globalThis.fetch;
+  const getCsrfToken = options.getCsrfToken ?? readCsrfTokenFromDocument;
+  const request = createRequestHelper({ baseUrl, fetchFn, getCsrfToken });
 
   return {
     getSnapshot(query = {}) {
@@ -242,22 +292,31 @@ export function createOperationsClient(options: OperationsClientOptions): Operat
       );
     },
     getWorkItemControls(workItemId) {
-      return request<GetWorkItemControlsResponse>(
+      return request<GetWorkItemControlsResponseType>(
         `/operations/work-items/${encodeURIComponent(workItemId)}/controls`,
         { method: 'GET' },
+        undefined,
+        parseControlsResponse,
       );
     },
     submitControlAction(workItemId, controlId, body) {
-      return request<SubmitControlActionResponse>(
+      return request<SubmitControlActionResponseType>(
         `/operations/work-items/${encodeURIComponent(workItemId)}/controls/${encodeURIComponent(controlId)}`,
         { method: 'POST', body: JSON.stringify(body) },
+        undefined,
+        parseSubmitControlResponse,
       );
     },
     discoverControls(body) {
-      return request<BatchControlDiscoveryResponse>('/operations/controls/discover', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
+      return request<BatchControlDiscoveryResponseType>(
+        '/operations/controls/discover',
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+        undefined,
+        parseDiscoveryResponse,
+      );
     },
   };
 }

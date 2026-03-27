@@ -355,6 +355,17 @@ describe('DaemonOperationsClient', () => {
       assert.ok('error' in result);
       assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
     });
+
+    it('returns daemon-invalid-response error on malformed controls payload', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(okResponse({ workItemId: 'wi-1', controls: [] })),
+      );
+
+      const result = await client.getWorkItemControls('wi-1');
+      assert.ok('error' in result);
+      assert.equal(result.error.code, 'DAEMON_INVALID_RESPONSE');
+      assert.equal(result.error.httpStatus, 502);
+    });
   });
 
   // ─── submitControlAction (US5 — control mutations) ─────────────────────────
@@ -466,6 +477,32 @@ describe('DaemonOperationsClient', () => {
       assert.equal(result.data.outcome, 'stale');
     });
 
+    it('passes through structured stale outcome from daemon 409 responses', async () => {
+      const stale = {
+        outcome: 'stale',
+        control: {
+          controlId: 'ctrl-1',
+          kind: 'routing',
+          label: 'Route override',
+          availability: 'stale',
+          authority: 'granted',
+          reason: 'Revision has been superseded',
+          options: [],
+          expectedRevision: 'rev-3',
+          lastResolvedAt: null,
+        },
+        workItemId: 'wi-1',
+        resolvedAt: '2026-03-22T10:00:00.000Z',
+      };
+      fetchMock.mock.mockImplementation(() => Promise.resolve(jsonResponse(409, stale)));
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+
+      assert.ok('data' in result);
+      assert.equal(result.data.outcome, 'stale');
+      assert.equal(result.data.workItemId, 'wi-1');
+    });
+
     it('encodes special characters in workItemId and controlId', async () => {
       fetchMock.mock.mockImplementation(() =>
         Promise.resolve(
@@ -520,6 +557,17 @@ describe('DaemonOperationsClient', () => {
       const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
       assert.ok('error' in result);
       assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
+    });
+
+    it('returns daemon-invalid-response error on malformed submit payload', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(okResponse({ outcome: 'accepted', workItemId: 'wi-1' })),
+      );
+
+      const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.code, 'DAEMON_INVALID_RESPONSE');
+      assert.equal(result.error.httpStatus, 502);
     });
   });
 
@@ -609,6 +657,17 @@ describe('DaemonOperationsClient', () => {
       const result = await client.discoverControls(discoveryBody);
       assert.ok('error' in result);
       assert.equal(result.error.category, 'validation');
+    });
+
+    it('returns daemon-invalid-response error on malformed discovery payload', async () => {
+      fetchMock.mock.mockImplementation(() =>
+        Promise.resolve(okResponse({ items: [{ workItemId: 'wi-1' }] })),
+      );
+
+      const result = await client.discoverControls(discoveryBody);
+      assert.ok('error' in result);
+      assert.equal(result.error.code, 'DAEMON_INVALID_RESPONSE');
+      assert.equal(result.error.httpStatus, 502);
     });
   });
 

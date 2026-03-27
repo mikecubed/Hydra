@@ -6,17 +6,23 @@
  */
 import type {
   BatchControlDiscoveryRequest,
-  BatchControlDiscoveryResponse,
+  BatchControlDiscoveryResponse as BatchControlDiscoveryResponseType,
   GetOperationsSnapshotRequest,
   GetOperationsSnapshotResponse,
-  GetWorkItemControlsResponse,
+  GetWorkItemControlsResponse as GetWorkItemControlsResponseType,
   GetWorkItemDetailResponse,
   GetWorkItemExecutionResponse,
   GetWorkItemCheckpointsResponse,
   SubmitControlActionBody,
+  SubmitControlActionResponse as SubmitControlActionResponseType,
+} from '@hydra/web-contracts';
+import {
+  BatchControlDiscoveryResponse,
+  GetWorkItemControlsResponse,
   SubmitControlActionResponse,
 } from '@hydra/web-contracts';
 import type { GatewayErrorResponse } from '../shared/gateway-error-response.ts';
+import { createGatewayErrorResponse } from '../shared/gateway-error-response.ts';
 import {
   translateOperationsDaemonResponse,
   translateOperationsFetchFailure,
@@ -31,6 +37,43 @@ export interface DaemonOperationsClientOptions {
 }
 
 type QueryValue = string | number | boolean | null | undefined | readonly string[];
+
+function extractStructuredStaleOutcome(payload: unknown): SubmitControlActionResponse | null {
+  if (payload === null || typeof payload !== 'object') return null;
+
+  const body = payload as Record<string, unknown>;
+  if (body['outcome'] !== 'stale') return null;
+  if (typeof body['workItemId'] !== 'string' || typeof body['resolvedAt'] !== 'string') return null;
+  if (body['control'] === null || typeof body['control'] !== 'object') return null;
+
+  return payload as SubmitControlActionResponse;
+}
+
+interface SafeParseSchema<T> {
+  safeParse(
+    data: unknown,
+  ): { success: true; data: T } | { success: false; error: { message: string } };
+}
+
+function parseDaemonPayload<T>(
+  payload: unknown,
+  schema: SafeParseSchema<T>,
+  label: string,
+): DaemonOperationsResult<T> {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    return {
+      error: createGatewayErrorResponse({
+        code: 'DAEMON_INVALID_RESPONSE',
+        category: 'daemon',
+        message: `Invalid daemon ${label} response: ${parsed.error.message}`,
+        httpStatus: 502,
+      }),
+    };
+  }
+
+  return { data: parsed.data };
+}
 
 function appendQuery(search: URLSearchParams, key: string, value: QueryValue): void {
   if (value == null) return;
@@ -82,50 +125,70 @@ export class DaemonOperationsClient {
 
   getWorkItemControls(
     workItemId: string,
-  ): Promise<DaemonOperationsResult<GetWorkItemControlsResponse>> {
-    return this.get(`/operations/work-items/${encodeURIComponent(workItemId)}/controls`);
+  ): Promise<DaemonOperationsResult<GetWorkItemControlsResponseType>> {
+    return this.get(
+      `/operations/work-items/${encodeURIComponent(workItemId)}/controls`,
+      undefined,
+      (payload) => parseDaemonPayload(payload, GetWorkItemControlsResponse, 'work item controls'),
+    );
   }
 
   submitControlAction(
     workItemId: string,
     controlId: string,
     body: SubmitControlActionBody,
-  ): Promise<DaemonOperationsResult<SubmitControlActionResponse>> {
+  ): Promise<DaemonOperationsResult<SubmitControlActionResponseType>> {
     return this.post(
       `/operations/work-items/${encodeURIComponent(workItemId)}/controls/${encodeURIComponent(controlId)}`,
       body,
+      (payload) => parseDaemonPayload(payload, SubmitControlActionResponse, 'control submit'),
     );
   }
 
   discoverControls(
     body: BatchControlDiscoveryRequest,
-  ): Promise<DaemonOperationsResult<BatchControlDiscoveryResponse>> {
-    return this.post('/operations/controls/discover', body);
+  ): Promise<DaemonOperationsResult<BatchControlDiscoveryResponseType>> {
+    return this.post('/operations/controls/discover', body, (payload) =>
+      parseDaemonPayload(payload, BatchControlDiscoveryResponse, 'control discovery'),
+    );
   }
 
   private async get<T>(
     path: string,
     query: Record<string, QueryValue> = {},
+    parse?: (payload: unknown) => DaemonOperationsResult<T>,
   ): Promise<DaemonOperationsResult<T>> {
     const url = new URL(`${this.baseUrl}${path}`);
     for (const [key, value] of Object.entries(query)) {
       appendQuery(url.searchParams, key, value);
     }
-    return this.request<T>(url.toString(), { method: 'GET' });
+    return this.request<T>(url.toString(), { method: 'GET' }, parse);
   }
 
-  private post<T>(path: string, body: unknown): Promise<DaemonOperationsResult<T>> {
-    return this.request<T>(`${this.baseUrl}${path}`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+  private post<T>(
+    path: string,
+    body: unknown,
+    parse?: (payload: unknown) => DaemonOperationsResult<T>,
+  ): Promise<DaemonOperationsResult<T>> {
+    return this.request<T>(
+      `${this.baseUrl}${path}`,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-    });
+      parse,
+    );
   }
 
-  private async request<T>(url: string, init: RequestInit): Promise<DaemonOperationsResult<T>> {
+  private async request<T>(
+    url: string,
+    init: RequestInit,
+    parse?: (payload: unknown) => DaemonOperationsResult<T>,
+  ): Promise<DaemonOperationsResult<T>> {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
@@ -134,7 +197,16 @@ export class DaemonOperationsClient {
       const response = await this.fetchFn(url, { ...init, signal: controller.signal });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
+        if (response.status === 409 && parse != null) {
+          const staleOutcome = extractStructuredStaleOutcome(payload);
+          if (staleOutcome !== null) {
+            return parse(staleOutcome);
+          }
+        }
         return { error: translateOperationsDaemonResponse(response.status, payload) };
+      }
+      if (parse != null) {
+        return parse(payload);
       }
       return { data: payload as T };
     } catch (err) {
