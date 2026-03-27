@@ -117,7 +117,21 @@ export function jsonResponse(body: unknown, status = 200, statusText?: string): 
 export function installFetchStub(
   handler: (url: string, init: RequestInit | undefined) => Response,
 ): void {
-  fetchSpy.mockImplementation((input, init) => Promise.resolve(handler(requestUrl(input), init)));
+  fetchSpy.mockImplementation((input, init) => {
+    const url = requestUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        jsonResponse({
+          operatorId: 'test-operator',
+          state: 'active',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        }),
+      );
+    }
+    return Promise.resolve(handler(url, init));
+  });
   vi.stubGlobal('fetch', fetchSpy);
 }
 

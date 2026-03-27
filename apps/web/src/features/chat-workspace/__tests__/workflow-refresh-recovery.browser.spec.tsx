@@ -276,6 +276,20 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     fetchSpy.mockImplementation((input: string | URL | Request) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
 
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
@@ -462,6 +476,20 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     fetchSpy.mockImplementation((input: string | URL | Request) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
           jsonResponse({
@@ -578,6 +606,20 @@ describe('workspace refresh/reconnect recovery workflows', () => {
         url = input.toString();
       } else {
         url = input.url;
+      }
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
       }
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(

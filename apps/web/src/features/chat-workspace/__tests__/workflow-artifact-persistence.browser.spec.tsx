@@ -97,6 +97,20 @@ function requestUrl(input: string | URL | Request): string {
 function installArtifactScenario(): void {
   fetchSpy.mockImplementation((input: string | URL | Request) => {
     const url = requestUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
 
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(
@@ -141,6 +155,20 @@ function installArtifactScenario(): void {
 function installTwoConversationScenario(): void {
   fetchSpy.mockImplementation((input: string | URL | Request) => {
     const url = requestUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
 
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(
@@ -202,6 +230,20 @@ function installTwoConversationScenario(): void {
 function installRefreshReopenScenario(): void {
   fetchSpy.mockImplementation((input: string | URL | Request) => {
     const url = requestUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
 
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(
@@ -434,6 +476,20 @@ describe('workspace artifact persistence workflows', () => {
 
     fetchSpy.mockImplementation((input: string | URL | Request) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
 
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(

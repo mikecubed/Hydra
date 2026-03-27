@@ -49,7 +49,24 @@ function requestUrl(input: RequestInfo | URL): string {
 }
 
 function installFetchStub(handler: (url: string, init: RequestInit | undefined) => Response): void {
-  fetchSpy.mockImplementation((input, init) => Promise.resolve(handler(requestUrl(input), init)));
+  fetchSpy.mockImplementation((input, init) => {
+    const url = requestUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
+    return Promise.resolve(handler(url, init));
+  });
   vi.stubGlobal('fetch', fetchSpy);
 }
 
@@ -127,12 +144,22 @@ describe('workspace conversation browsing', () => {
       totalCount: 0,
     };
 
-    fetchSpy.mockImplementation(
-      () =>
-        new Promise<Response>((resolve) => {
-          resolveList = resolve;
-        }),
-    );
+    fetchSpy.mockImplementation((input) => {
+      if (requestUrl(input) === '/session/info') {
+        return Promise.resolve(
+          jsonResponse({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+        );
+      }
+      return new Promise<Response>((resolve) => {
+        resolveList = resolve;
+      });
+    });
     vi.stubGlobal('fetch', fetchSpy);
 
     render(<AppProviders />);

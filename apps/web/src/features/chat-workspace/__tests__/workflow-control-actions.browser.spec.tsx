@@ -84,6 +84,18 @@ function installDeferredCancelFetchStub(
   let transcriptReloadCount = 0;
 
   const handler = (url: string, init: RequestInit | undefined): Response | Promise<Response> => {
+    if (url === '/session/info') {
+      return new Response(
+        JSON.stringify({
+          operatorId: 'test-operator',
+          state: 'active',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     if (url === '/conversations?status=active&limit=20') {
       return jsonResponse({
         conversations: [conversation('conv-1', title)],
