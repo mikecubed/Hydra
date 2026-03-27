@@ -7,8 +7,9 @@
 import type {
   LoginResponse as LoginResponseType,
   SessionInfo as SessionInfoType,
+  ExtendResponse as ExtendResponseType,
 } from '@hydra/web-contracts';
-import { LoginResponse, SessionInfo, AuthError } from '@hydra/web-contracts';
+import { LoginResponse, SessionInfo, AuthError, ExtendResponse } from '@hydra/web-contracts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,35 @@ export async function getSessionInfo(): Promise<SessionInfoType | null> {
  * header for the double-submit check. Swallows all errors so callers can
  * fire-and-forget.
  */
+/**
+ * Re-authenticate (extend) the current session. Sends the CSRF
+ * double-submit token when present. Returns the new expiry on success.
+ */
+export async function reauth(): Promise<ExtendResponseType> {
+  const csrfToken = getCsrfToken();
+  const headers: Record<string, string> = {};
+  if (csrfToken !== null) {
+    headers['x-csrf-token'] = csrfToken;
+  }
+
+  const res = await fetch('/auth/reauth', {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+  });
+
+  if (!res.ok) {
+    const body: unknown = await res.json();
+    const parsed = AuthError.parse(body);
+    const err = new Error(parsed.message) as Error & { code: string };
+    err.code = parsed.code;
+    throw err;
+  }
+
+  const body: unknown = await res.json();
+  return ExtendResponse.parse(body);
+}
+
 export async function logout(): Promise<void> {
   try {
     const csrfToken = getCsrfToken();

@@ -72,18 +72,8 @@ npm --workspace @hydra/web-gateway run start:with-web
 
 After the gateway starts, log in from any browser on the network:
 
-```javascript
-// Run in the browser console at http://truenas-2.example.com:4174
-fetch('/auth/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
-})
-  .then((r) => r.json())
-  .then(console.log);
-```
-
-Then navigate to `/workspace`.
+Navigate to `http://truenas-2.example.com:4174/login` in your browser, enter your credentials,
+and the workspace will open automatically.
 
 > **`HYDRA_WEB_GATEWAY_HOST` vs `HYDRA_WEB_GATEWAY_ORIGIN`**
 >
@@ -123,6 +113,45 @@ That factory is the live runtime surface used by tests and production wiring.
 `GatewayConfig` / `loadGatewayConfig()` in `src/config.ts` is a **standalone validation schema**
 with defaults and range checks. It is not consumed by `createGatewayApp()` directly. Use it when
 you want one flat validated object, but treat `GatewayAppDeps` as the authoritative runtime API.
+
+## Session Lifecycle
+
+Once an operator is authenticated, the browser client manages the session automatically.
+
+### Polling
+
+`useSession` polls `GET /session/info` every **60 seconds** (±5% random jitter) to keep local
+session state current. Polling pauses when the browser tab is hidden and resumes on visibility.
+It stops entirely on terminal states (`expired`, `invalidated`, `logged-out`).
+
+### WebSocket real-time events
+
+The browser subscribes to the `/ws` WebSocket endpoint. The gateway broadcasts `SessionEvent`
+frames (`state-change`, `expiry-warning`, `forced-logout`) so state transitions take effect
+immediately without waiting for the next poll cycle.
+
+On unexpected WebSocket close the client reconnects with binary exponential back-off
+(1 s base, 2× per attempt, 30 s cap, ±500 ms jitter).
+
+### Expiry warning
+
+When `session.state` reaches `'expiring-soon'` (default: 15 minutes before expiry), the workspace
+shows an amber expiry banner. Operators can:
+
+- **Extend Session** — calls `POST /auth/reauth` (double-submit CSRF cookie required). The gateway
+  resets the expiry clock and broadcasts a `state-change` event.
+- **Dismiss** — hides the banner locally (session continues to count down).
+
+### Daemon-unreachable state
+
+If the gateway loses connectivity to the Hydra daemon it emits `session.state = 'daemon-unreachable'`.
+The workspace shows a full-width error screen with a **Check again** button. There is no redirect
+to `/login` — the session is still valid; only the daemon is temporarily unavailable.
+
+### Logout
+
+`POST /auth/logout` invalidates the `__session` and `__csrf` cookies. The browser's **Log out**
+button calls this endpoint and redirects to `/login`.
 
 ## Session and Lifecycle
 
@@ -165,6 +194,18 @@ Additional notes:
 | `authRoutesConfig.secureCookies`  | Derived from TLS when not provided | Controls the `Secure` flag on `__session` and `__csrf` cookies.                        |
 | `hardenedHeadersConfig.tlsActive` | Derived from TLS when not provided | Controls HSTS/header hardening behavior.                                               |
 | `tlsConfig`                       | unset                              | Optional TLS validation and secure-cookie/HSTS inference for non-loopback deployments. |
+
+## HTTP Auth Endpoints
+
+| Endpoint        | Method | Description                                                                                                                                                                     |
+| --------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/auth/login`   | `POST` | Authenticate operator. Sets `__session` (HttpOnly) and `__csrf` (JS-readable) cookies on success.                                                                               |
+| `/auth/logout`  | `POST` | Invalidate current session. Requires `__session` cookie + `x-csrf-token` header (double-submit CSRF).                                                                           |
+| `/auth/reauth`  | `POST` | Extend current session clock. Requires `__session` cookie + `x-csrf-token` header. Returns `ExtendResponse` with `newExpiresAt`. Subject to `maxExtensions` limit (default: 3). |
+| `/session/info` | `GET`  | Returns `SessionInfo` for current session, or `401` if session missing/expired.                                                                                                 |
+
+The `__csrf` cookie is set alongside `__session` on login. Read it from `document.cookie` and
+send it as the `x-csrf-token` request header on all mutating auth calls.
 
 ## Rate Limiting
 

@@ -6,6 +6,9 @@
  *
  * This test renders through AppProviders → Router → AppShell → WorkspaceRoute
  * so any hierarchy bugs surface immediately.
+ *
+ * useSession is mocked globally in test-setup.ts — no session WebSocket is
+ * created, so latestSocket() always returns the chat-protocol WebSocket.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

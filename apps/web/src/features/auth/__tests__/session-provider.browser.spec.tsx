@@ -1,0 +1,181 @@
+import React from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
+
+vi.mock('../hooks/use-session.ts', () => ({
+  useSession: vi.fn(),
+}));
+
+import { useSession } from '../hooks/use-session.ts';
+import type { UseSessionResult } from '../hooks/use-session.ts';
+import { SessionProvider } from '../components/session-provider.tsx';
+import { useSessionContext } from '../context/session-context.ts';
+
+const mockUseSession = useSession as ReturnType<typeof vi.fn>;
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function makeSessionResult(overrides: Partial<UseSessionResult> = {}): UseSessionResult {
+  return {
+    session: null,
+    isLoading: false,
+    extend: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+    ...overrides,
+  };
+}
+
+function SessionConsumer() {
+  const ctx = useSessionContext();
+  return (
+    <div>
+      <span data-testid="operator-id">{ctx.session?.operatorId ?? 'none'}</span>
+      <span data-testid="loading-state">{ctx.isLoading ? 'loading' : 'ready'}</span>
+    </div>
+  );
+}
+
+function ExtendConsumer() {
+  const ctx = useSessionContext();
+  return (
+    <button data-testid="extend-btn" onClick={() => void ctx.extend()}>
+      Extend
+    </button>
+  );
+}
+
+function LogoutConsumer() {
+  const ctx = useSessionContext();
+  return (
+    <button data-testid="logout-btn" onClick={() => void ctx.logout()}>
+      Logout
+    </button>
+  );
+}
+
+function BareConsumer() {
+  useSessionContext();
+  return <div>Should not render</div>;
+}
+
+class TestErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  override state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override render() {
+    if (this.state.error) {
+      return <div data-testid="error-message">{this.state.error.message}</div>;
+    }
+    return this.props.children;
+  }
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  mockUseSession.mockReturnValue(makeSessionResult());
+});
+
+describe('SessionProvider', () => {
+  it('useSessionContext() throws with descriptive message outside provider', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <TestErrorBoundary>
+        <BareConsumer />
+      </TestErrorBoundary>,
+    );
+
+    expect(screen.getByTestId('error-message')).toHaveTextContent(
+      'useSessionContext() must be called inside a <SessionProvider>.',
+    );
+
+    spy.mockRestore();
+  });
+
+  it('useSessionContext() returns session value inside provider', () => {
+    const now = new Date().toISOString();
+    mockUseSession.mockReturnValue(
+      makeSessionResult({
+        session: {
+          operatorId: 'op-99',
+          state: 'active',
+          expiresAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      }),
+    );
+
+    render(
+      <SessionProvider>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    expect(screen.getByTestId('operator-id')).toHaveTextContent('op-99');
+  });
+
+  it('useSessionContext() returns isLoading=true during initial fetch', () => {
+    mockUseSession.mockReturnValue(makeSessionResult({ isLoading: true, session: null }));
+
+    render(
+      <SessionProvider>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    expect(screen.getByTestId('loading-state')).toHaveTextContent('loading');
+  });
+
+  it('extend() callable from consumer', async () => {
+    const extend = vi.fn();
+    mockUseSession.mockReturnValue(makeSessionResult({ extend }));
+    const user = userEvent.setup();
+
+    render(
+      <SessionProvider>
+        <ExtendConsumer />
+      </SessionProvider>,
+    );
+
+    await user.click(screen.getByTestId('extend-btn'));
+    expect(extend).toHaveBeenCalledOnce();
+  });
+
+  it('logout() callable from consumer', async () => {
+    const logout = vi.fn();
+    mockUseSession.mockReturnValue(makeSessionResult({ logout }));
+    const user = userEvent.setup();
+
+    render(
+      <SessionProvider>
+        <LogoutConsumer />
+      </SessionProvider>,
+    );
+
+    await user.click(screen.getByTestId('logout-btn'));
+    expect(logout).toHaveBeenCalledOnce();
+  });
+
+  it('pollInterval prop is forwarded to useSession', () => {
+    render(
+      <SessionProvider pollInterval={5000}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    expect(mockUseSession).toHaveBeenCalledWith(5000);
+  });
+});
