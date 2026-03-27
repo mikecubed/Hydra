@@ -7,7 +7,7 @@
  * Run: node --test --experimental-test-module-mocks test/hydra-operator-commands-deep.test.ts
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- test file uses dynamic mocks */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument -- test file uses dynamic mocks */
 
 import { describe, it, mock, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

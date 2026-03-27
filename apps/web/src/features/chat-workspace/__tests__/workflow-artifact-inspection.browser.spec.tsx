@@ -35,9 +35,7 @@ afterEach(() => {
   cleanup();
 });
 
-// eslint-disable-next-line max-lines-per-function -- compact single-scenario regression file
 describe('workspace artifact hydration workflows', () => {
-  // eslint-disable-next-line max-lines-per-function -- multi-step route hydration regression
   it('does not duplicate in-flight artifact hydration requests across rerenders', async () => {
     const listCounts = new Map<string, number>();
     let resolveSecondTurnArtifacts = (_response: Response): void => {
@@ -46,6 +44,20 @@ describe('workspace artifact hydration workflows', () => {
 
     fetchSpy.mockImplementation((input) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
           jsonResponse({
@@ -146,13 +158,25 @@ describe('workspace artifact hydration workflows', () => {
     expect(listCounts.get('turn-2')).toBe(1);
   });
 
-  // eslint-disable-next-line max-lines-per-function -- mixed success/failure retry regression
   it('retries failed hydration turns after sibling turns succeed', async () => {
     let turn2Attempts = 0;
 
-    // eslint-disable-next-line max-lines-per-function -- focused route fetch scenario
     fetchSpy.mockImplementation((input) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
           jsonResponse({

@@ -84,6 +84,18 @@ function installDeferredCancelFetchStub(
   let transcriptReloadCount = 0;
 
   const handler = (url: string, init: RequestInit | undefined): Response | Promise<Response> => {
+    if (url === '/session/info') {
+      return new Response(
+        JSON.stringify({
+          operatorId: 'test-operator',
+          state: 'active',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     if (url === '/conversations?status=active&limit=20') {
       return jsonResponse({
         conversations: [conversation('conv-1', title)],
@@ -286,9 +298,7 @@ describe('cancel in-progress turn', () => {
 
 // ─── 2. Retry failed turn ──────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function
 describe('retry failed turn', () => {
-  // eslint-disable-next-line max-lines-per-function
   it('sends retry POST, appends new turn, and streaming continues on retried turn', async () => {
     let retryPosted = false;
     let retryPostCount = 0;
@@ -507,7 +517,6 @@ describe('branch completed turn', () => {
 
 // ─── 4. Follow-up action ────────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function
 describe('follow-up action', () => {
   it('routes operator back to composer with follow-up context label', async () => {
     installFetchStub((url) => {

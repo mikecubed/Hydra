@@ -50,7 +50,6 @@ product walkthrough.
 
 ### What is not there yet
 
-- no dedicated browser login screen
 - no browser-side settings or operator preferences UI
 - no end-user product walkthrough
 
@@ -89,22 +88,11 @@ session:
 
 3. Open `http://127.0.0.1:4174` in your browser.
 
-4. **Log in** — there is no browser login screen yet. Open the browser developer console (F12)
-   on that page and run:
+4. **Log in** — Navigate to `http://127.0.0.1:4174/login` in your browser, enter your
+   credentials, and the workspace will open automatically.
 
-   ```javascript
-   fetch('/auth/login', {
-     method: 'POST',
-     headers: { 'Content-Type': 'application/json' },
-     body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
-   })
-     .then((r) => r.json())
-     .then(console.log);
-   ```
-
-   The server sets an HttpOnly `__session` cookie and a browser-readable `__csrf` cookie (used as
-   the `x-csrf-token` header for double-submit CSRF protection) automatically. Reload the page
-   and the workspace initialises normally.
+   The `HYDRA_WEB_OPERATOR_ID` / `HYDRA_WEB_OPERATOR_SECRET` values seed a local operator
+   record on first start — use those same values as your identity and secret on the login screen.
 
 5. Open `http://127.0.0.1:4174/workspace` (or let the index redirect take you there).
 
@@ -113,10 +101,10 @@ Notes:
 - The gateway serves the built frontend from `apps/web/dist`, proxies browser API calls to the
   daemon at `http://127.0.0.1:4173`, and owns the WebSocket endpoint at `/ws`.
 - The seeded `HYDRA_WEB_OPERATOR_ID` / `HYDRA_WEB_OPERATOR_SECRET` values seed a local operator
-  record in `~/.hydra/web-gateway/operators.json` at startup. They are **not** an automatic
-  session — you still need to POST to `/auth/login` to create one.
-- **`Gateway 401: No valid session found`** always means no `__session` cookie. Follow the login
-  step above.
+  record in `~/.hydra/web-gateway/operators.json` at startup. Use those values as your identity
+  and secret on the `/login` screen to create a session.
+- **`Gateway 401: No valid session found`** always means no `__session` cookie. Navigate to
+  `/login` to create a session.
 
 ### Remote host setup
 
@@ -141,20 +129,9 @@ Key differences from the local command:
 - Do **not** set `HYDRA_WEB_GATEWAY_HOST` to a remote hostname — it is a bind address, not a
   public URL. Use `0.0.0.0` or a specific local interface IP instead.
 
-After starting, log in from any browser via the developer console at
-`http://truenas-2.example.com:4174`:
-
-```javascript
-fetch('/auth/login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
-})
-  .then((r) => r.json())
-  .then(console.log);
-```
-
-Then navigate to `/workspace`.
+After starting, log in from any browser by navigating to
+`http://truenas-2.example.com:4174/login`, entering your credentials, and the workspace will
+open automatically.
 
 ### How to use it in its current state
 

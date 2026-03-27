@@ -73,6 +73,17 @@ it('shows loading state on first paint before snapshot resolves', async () => {
 
   fetchSpy.mockImplementation((input: RequestInfo | URL) => {
     const url = resolveUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        jsonResponse({
+          operatorId: 'test-operator',
+          state: 'active',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        }),
+      );
+    }
     if (url === '/conversations?status=active&limit=20') {
       return Promise.resolve(jsonResponse({ conversations: [], totalCount: 0 }));
     }

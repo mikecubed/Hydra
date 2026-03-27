@@ -155,7 +155,6 @@ describe('RoutingPanel current route and mode', () => {
 
 // ─── History entries ────────────────────────────────────────────────────────
 
-/* eslint-disable max-lines-per-function -- broad DOM coverage for routing history states is kept in one scenario block */
 describe('RoutingPanel history entries', () => {
   it('renders history entries in a list', () => {
     const history = [
@@ -280,7 +279,6 @@ describe('RoutingPanel history entries', () => {
     expect(screen.getByTestId('routing-history-rh-beta')).toBeInTheDocument();
   });
 });
-/* eslint-enable max-lines-per-function */
 
 // ─── Loading with existing data ─────────────────────────────────────────────
 

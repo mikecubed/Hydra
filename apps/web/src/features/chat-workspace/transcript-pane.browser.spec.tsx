@@ -72,7 +72,24 @@ function requestUrl(input: RequestInfo | URL): string {
 }
 
 function installFetchStub(handler: (url: string, init: RequestInit | undefined) => Response): void {
-  fetchSpy.mockImplementation((input, init) => Promise.resolve(handler(requestUrl(input), init)));
+  fetchSpy.mockImplementation((input, init) => {
+    const url = requestUrl(input);
+    if (url === '/session/info') {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
+    return Promise.resolve(handler(url, init));
+  });
   vi.stubGlobal('fetch', fetchSpy);
 }
 
@@ -632,6 +649,7 @@ describe('TranscriptPane', () => {
     );
   });
 
+  // eslint-disable-next-line max-lines-per-function
   it('surfaces a stale-control banner after authoritative convergence invalidates controls', async () => {
     const conversations = createSingleConversationList();
     const authoritativeHistory: LoadTurnHistoryResponse = {
@@ -658,6 +676,20 @@ describe('TranscriptPane', () => {
 
     fetchSpy.mockImplementation((input) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
           new Response(JSON.stringify(conversations), {
@@ -935,6 +967,20 @@ describe('TranscriptPane', () => {
 
     fetchSpy.mockImplementation((input) => {
       const url = requestUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              operatorId: 'test-operator',
+              state: 'active',
+              expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+              lastActivityAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
       if (url === '/conversations?status=active&limit=20') {
         return Promise.resolve(
           new Response(JSON.stringify(conversations), {

@@ -32,21 +32,8 @@ daemon:
 
 3. Open `http://127.0.0.1:4174/workspace` in your browser.
 
-4. **Log in** — there is no browser login screen yet. Open your browser's developer console
-   (F12) and run:
-
-   ```javascript
-   fetch('/auth/login', {
-     method: 'POST',
-     headers: { 'Content-Type': 'application/json' },
-     body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
-   })
-     .then((r) => r.json())
-     .then(console.log);
-   ```
-
-   A successful response sets the `__session` and `__csrf` cookies. Reload the page and the
-   workspace will initialise.
+4. **Log in** — Navigate to `http://127.0.0.1:4174/login` in your browser, enter your
+   credentials, and the workspace will open automatically.
 
 This starts the gateway on `http://127.0.0.1:4174`, serves the built browser bundle from
 `apps/web/dist`, points daemon-facing calls at `http://127.0.0.1:4173`, and seeds a local operator
@@ -112,7 +99,7 @@ Then navigate to `/workspace`.
 ### Session errors
 
 **`Gateway 401: No valid session found`** means the browser has no `__session` cookie.  
-This always happens before you have logged in. Follow the login step above to create a session.
+This always happens before you have logged in. Navigate to `/login` to create a session.
 
 Environment variables supported by `src/server.ts`:
 
