@@ -679,6 +679,20 @@ Requires an authenticated session. CSRF validation applies to the mutating route
 | GET    | `/artifacts/:artifactId`           | Get artifact content            |
 | GET    | `/turns/:turnId/activities`        | Get activity entries            |
 
+### Operations
+
+Read-only snapshot and work-item detail routes plus daemon-authorized control mutations. All routes
+require an authenticated session; mutation routes additionally require a CSRF token and a
+daemon-issued revision token.
+
+| Method | Path                                  | Description                                                                  |
+| ------ | ------------------------------------- | ---------------------------------------------------------------------------- |
+| GET    | `/operations/snapshot`                | Full operations snapshot (task queue, agent status, budgets, daemon health)  |
+| GET    | `/operations/work-items/:id`          | Work-item detail: checkpoints, routing, assignments, council, and controls   |
+| GET    | `/operations/controls`                | Batch control discovery — all actionable controls across active work items   |
+| GET    | `/operations/work-items/:id/controls` | Per-item control discovery — actionable controls for a single work item      |
+| POST   | `/operations/control`                 | Daemon-authorized control mutation; requires revision token (CSRF-protected) |
+
 ---
 
 ## Constants and Defaults
