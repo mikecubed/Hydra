@@ -1889,6 +1889,28 @@ describe('Control Mutations (T038/T040)', () => {
       assert.ok(result.message?.includes('Revision'));
     });
 
+    it('stale outcome control has availability "stale" and lastResolvedAt set', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:routing',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: 'stale-token',
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'stale');
+      assert.equal(result.control.availability, 'stale');
+      assert.equal(result.control.lastResolvedAt, result.resolvedAt);
+      // Discovered options and kind are preserved
+      assert.equal(result.control.kind, 'routing');
+      assert.ok(result.control.options.length > 0);
+    });
+
     it('returns superseded when option is already selected', () => {
       const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
       const state = makeState({ tasks: [task] });
@@ -1906,6 +1928,32 @@ describe('Control Mutations (T038/T040)', () => {
       );
       assert.equal(result.outcome, 'superseded');
       assert.ok(result.message?.includes('already'));
+    });
+
+    it('superseded outcome control has availability "superseded" and lastResolvedAt set', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-claude',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'superseded');
+      assert.equal(result.control.availability, 'superseded');
+      assert.equal(result.control.lastResolvedAt, result.resolvedAt);
+      // Discovered options and kind are preserved
+      assert.equal(result.control.kind, 'agent');
+      assert.ok(result.control.options.length > 0);
+      const selected = result.control.options.find((o) => o.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'agent-claude');
     });
 
     it('rejects unknown option', () => {
@@ -1964,6 +2012,8 @@ describe('Control Mutations (T038/T040)', () => {
       assert.equal(result.outcome, 'accepted');
       assert.ok(result.control != null);
       assert.equal(result.control.kind, 'agent');
+      assert.equal(result.control.availability, 'accepted');
+      assert.equal(result.control.lastResolvedAt, result.resolvedAt);
       // After mutation, the control should show the new state
       const selected = result.control.options.find((o) => o.selected);
       assert.ok(selected != null);

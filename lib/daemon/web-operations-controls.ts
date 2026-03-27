@@ -53,7 +53,7 @@ export function computeRevisionToken(task: TaskEntry): string {
     task.updatedAt,
     JSON.stringify((task as Record<string, unknown>)['routingHistory'] ?? ''),
   ];
-  // Use a fast non-crypto hash for revision — deterministic is key, not secrecy.
+  // Use a deterministic SHA-256 hash for revision tokens — we care about stability, not secrecy.
   // crypto.createHash is available in Node.js without external deps.
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16);
 }
@@ -308,6 +308,20 @@ function findCurrentControl(
   return discoverControls(task, config).find((c) => c.controlId === controlId);
 }
 
+function buildOutcomeControl(
+  outcome: ControlOutcome,
+  control: OperationalControlView,
+  resolvedAt: string,
+  reason?: string,
+): OperationalControlView {
+  return {
+    ...control,
+    availability: outcome,
+    reason: reason ?? control.reason,
+    lastResolvedAt: resolvedAt,
+  };
+}
+
 function buildRejectedResult(
   controlId: string,
   kind: ControlKind,
@@ -363,8 +377,11 @@ function resolveMutationSetup(
   }
 
   if (expectedRevision !== computeRevisionToken(task)) {
+    const currentControl = findCurrentControl(task, controlId, config);
     const control =
-      findCurrentControl(task, controlId, config) ?? buildStaleControl(controlId, kind);
+      currentControl == null
+        ? buildStaleControl(controlId, kind, now)
+        : buildOutcomeControl('stale', currentControl, now, 'Revision mismatch');
     return buildResult(
       'stale',
       control,
@@ -440,8 +457,11 @@ export function executeControlMutation(
     );
 
   if (requestedOption.selected) {
+    const currentControl = findCurrentControl(task, controlId, config);
     const ctrl =
-      findCurrentControl(task, controlId, config) ?? buildAcceptedControl(controlId, kind, now);
+      currentControl == null
+        ? buildAcceptedControl(controlId, kind, now, 'superseded')
+        : buildOutcomeControl('superseded', currentControl, now);
     return buildResult(
       'superseded',
       ctrl,
@@ -454,7 +474,9 @@ export function executeControlMutation(
   const updatedControl = findCurrentControl(task, controlId, config);
   return buildResult(
     'accepted',
-    updatedControl ?? buildAcceptedControl(controlId, kind, now),
+    updatedControl == null
+      ? buildAcceptedControl(controlId, kind, now, 'accepted')
+      : buildOutcomeControl('accepted', updatedControl, now),
     workItemId,
     now,
     `Control ${kind} updated successfully`,
@@ -557,7 +579,11 @@ function buildRejectedControl(
   };
 }
 
-function buildStaleControl(controlId: string, kind: ControlKind): OperationalControlView {
+function buildStaleControl(
+  controlId: string,
+  kind: ControlKind,
+  resolvedAt: string,
+): OperationalControlView {
   return {
     controlId,
     kind,
@@ -567,7 +593,7 @@ function buildStaleControl(controlId: string, kind: ControlKind): OperationalCon
     reason: 'Revision mismatch',
     options: [],
     expectedRevision: null,
-    lastResolvedAt: null,
+    lastResolvedAt: resolvedAt,
   };
 }
 
@@ -575,12 +601,13 @@ function buildAcceptedControl(
   controlId: string,
   kind: ControlKind,
   resolvedAt: string,
+  availability: Extract<ControlOutcome, 'accepted' | 'superseded'> = 'accepted',
 ): OperationalControlView {
   return {
     controlId,
     kind,
     label: 'Unknown',
-    availability: 'accepted',
+    availability,
     authority: 'granted',
     reason: null,
     options: [],
