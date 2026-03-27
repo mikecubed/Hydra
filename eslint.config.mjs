@@ -289,10 +289,17 @@ export default [
 
   // ─── Test files — relax strict TS rules ──────────────────────────────────
   {
-    files: ['test/**/*.ts', 'apps/**/__tests__/**/*.ts', 'packages/**/__tests__/**/*.ts'],
+    files: [
+      'test/**/*.ts',
+      'apps/**/__tests__/**/*.ts',
+      'apps/**/__tests__/**/*.tsx',
+      'packages/**/__tests__/**/*.ts',
+      'packages/**/__tests__/**/*.tsx',
+    ],
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-floating-promises': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
       '@typescript-eslint/strict-boolean-expressions': 'off',

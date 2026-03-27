@@ -4,7 +4,10 @@
  * All calls use `credentials: 'include'` so the gateway's HttpOnly session
  * cookie is sent automatically. Session IDs never touch JS (FR-020).
  */
-import type { LoginResponse as LoginResponseType, SessionInfo as SessionInfoType } from '@hydra/web-contracts';
+import type {
+  LoginResponse as LoginResponseType,
+  SessionInfo as SessionInfoType,
+} from '@hydra/web-contracts';
 import { LoginResponse, SessionInfo, AuthError } from '@hydra/web-contracts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -12,7 +15,8 @@ import { LoginResponse, SessionInfo, AuthError } from '@hydra/web-contracts';
 /** Read the `__csrf` double-submit cookie value set by the gateway. */
 function getCsrfToken(): string {
   const match = document.cookie.split(';').find((c) => c.trim().startsWith('__csrf='));
-  return match ? match.split('=')[1].trim() : '';
+  if (match === undefined) return '';
+  return match.split('=')[1].trim();
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -30,14 +34,14 @@ export async function login(identity: string, secret: string): Promise<LoginResp
   });
 
   if (!res.ok) {
-    const body = await res.json();
+    const body: unknown = await res.json();
     const parsed = AuthError.parse(body);
     const err = new Error(parsed.message) as Error & { code: string };
     err.code = parsed.code;
     throw err;
   }
 
-  const body = await res.json();
+  const body: unknown = await res.json();
   return LoginResponse.parse(body);
 }
 
@@ -52,7 +56,7 @@ export async function getSessionInfo(): Promise<SessionInfoType | null> {
 
   if (res.status === 401) return null;
 
-  const body = await res.json();
+  const body: unknown = await res.json();
   return SessionInfo.parse(body);
 }
 
