@@ -101,6 +101,38 @@ describe('LoginForm', () => {
     });
   });
 
+  it('displays "Account is disabled" message on ACCOUNT_DISABLED', async () => {
+    const user = userEvent.setup();
+    mockLogin.mockRejectedValue({ code: 'ACCOUNT_DISABLED', message: 'Account is disabled' });
+
+    render(<LoginForm onSuccess={() => {}} />);
+
+    await user.type(screen.getByTestId('login-identity'), 'admin');
+    await user.type(screen.getByTestId('login-secret'), 'pass');
+    await user.click(screen.getByTestId('login-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-error')).toHaveTextContent(
+        'Account is disabled — contact your administrator.',
+      );
+    });
+  });
+
+  it('falls back to "Login failed." for unknown error shapes', async () => {
+    const user = userEvent.setup();
+    mockLogin.mockRejectedValue(null);
+
+    render(<LoginForm onSuccess={() => {}} />);
+
+    await user.type(screen.getByTestId('login-identity'), 'admin');
+    await user.type(screen.getByTestId('login-secret'), 'pass');
+    await user.click(screen.getByTestId('login-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-error')).toHaveTextContent('Login failed.');
+    });
+  });
+
   it('clears error message on next submit attempt', async () => {
     const user = userEvent.setup();
     mockLogin.mockRejectedValueOnce({ code: 'INVALID_CREDENTIALS', message: 'bad' });

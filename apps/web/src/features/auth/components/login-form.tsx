@@ -1,13 +1,27 @@
-import { type FormEvent, type CSSProperties, useState } from 'react';
+import { type CSSProperties, type FormEvent, useState } from 'react';
 import { login } from '../api/auth-client.ts';
 
 interface LoginFormProps {
   onSuccess: (operatorId: string) => void;
 }
 
+interface AuthErrorShape {
+  code: string;
+  message: string;
+}
+
+function isAuthError(err: unknown): err is AuthErrorShape {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    typeof (err as Record<string, unknown>).code === 'string' &&
+    typeof (err as Record<string, unknown>).message === 'string'
+  );
+}
+
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_CREDENTIALS: 'Invalid identity or password.',
-  ACCOUNT_LOCKED: 'Account locked — try again in a few minutes.',
+  ACCOUNT_DISABLED: 'Account is disabled — contact your administrator.',
   RATE_LIMITED: 'Too many attempts — please wait before trying again.',
 };
 
@@ -70,9 +84,11 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       const result = await login(identity, secret);
       onSuccess(result.operatorId);
     } catch (err: unknown) {
-      const authErr = err as { code?: string; message?: string };
+      const code = isAuthError(err) ? err.code : undefined;
       const message =
-        (authErr.code && ERROR_MESSAGES[authErr.code]) || authErr.message || 'Login failed.';
+        (code !== undefined && ERROR_MESSAGES[code]) ||
+        (isAuthError(err) ? err.message : undefined) ||
+        'Login failed.';
       setError(message);
     } finally {
       setLoading(false);
@@ -107,7 +123,7 @@ export function LoginForm({ onSuccess }: LoginFormProps) {
       >
         {loading ? 'Signing in…' : 'Sign in'}
       </button>
-      {error && (
+      {error !== null && (
         <div data-testid="login-error" style={styles.error}>
           {error}
         </div>
