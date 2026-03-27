@@ -4,26 +4,40 @@
 # in process-spawning tests due to instrumentation overhead.
 
 # Read push info from stdin (format: <local-ref> <local-sha> <remote-ref> <remote-sha>)
-# Skip tests when there are no changed code files between the remote and local SHA.
+# Skip tests only when every pushed ref contains purely documentation changes.
+# Accumulate a flag across all refs so a multi-ref push is handled correctly.
+has_non_doc_changes=0
+zero_sha="0000000000000000000000000000000000000000"
+
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do
   # All-zeros remote SHA means the remote branch doesn't exist yet (new branch push).
-  # In that case compare against the merge-base with main so we only test genuinely new work.
-  zero_sha="0000000000000000000000000000000000000000"
+  # Compare against the merge-base with origin/main (falling back to main) so we test
+  # genuinely new work rather than comparing a SHA against itself.
   if [ "$remote_sha" = "$zero_sha" ]; then
-    base=$(git merge-base "$local_sha" HEAD 2>/dev/null || echo "")
-    compare_from="${base:-$local_sha}"
+    main_sha=$(git rev-parse "origin/main" 2>/dev/null || git rev-parse "main" 2>/dev/null || echo "")
+    if [ -n "$main_sha" ]; then
+      compare_from=$(git merge-base "$local_sha" "$main_sha" 2>/dev/null || echo "")
+    fi
+    # Fall back to the empty tree if no common ancestor exists
+    compare_from="${compare_from:-$(git hash-object -t tree /dev/null 2>/dev/null || echo "")}"
+    compare_from="${compare_from:-$local_sha}"
   else
     compare_from="$remote_sha"
   fi
 
-  changed=$(git diff --name-only "$compare_from" "$local_sha" -- \
-    '*.ts' '*.tsx' '*.mjs' '*.js' 2>/dev/null)
+  changed=$(git diff --name-only "$compare_from" "$local_sha" 2>/dev/null)
 
-  if [ -z "$changed" ]; then
-    echo "pre-push: no code changes detected — skipping test suite."
-    exit 0
+  # Run tests unless every changed file is documentation (*.md, docs/, HYDRA.md).
+  non_doc=$(printf '%s\n' "$changed" | grep -Ev '\.md$|\.markdown$|^docs/|^HYDRA\.md$' || true)
+  if [ -n "$non_doc" ]; then
+    has_non_doc_changes=1
   fi
 done
+
+if [ "$has_non_doc_changes" -eq 0 ]; then
+  echo "pre-push: only documentation changes detected — skipping test suite."
+  exit 0
+fi
 
 npm test
 TEST_EXIT=$?
