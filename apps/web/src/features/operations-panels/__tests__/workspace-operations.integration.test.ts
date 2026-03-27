@@ -46,6 +46,8 @@ import {
   selectSelectedRouting,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
+  selectSelectedAssignmentCount,
+  selectCouncilTransitionCount,
 } from '../model/selectors.ts';
 import type { OperationsWorkspaceState } from '../model/operations-types.ts';
 
@@ -817,5 +819,78 @@ describe('workspace operations integration', () => {
     ]);
 
     assert.equal(selectDetailFetchStatus(state), 'idle');
+  });
+
+  // ─── Dense assignment and council selectors (T048) ────────────────────
+
+  it('selectSelectedAssignmentCount returns the number of assignments in the selected detail', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const assignments = [
+      makeAssignment({ participantId: 'p-1', state: 'active' }),
+      makeAssignment({ participantId: 'p-2', state: 'waiting' }),
+      makeAssignment({ participantId: 'p-3', state: 'completed' }),
+      makeAssignment({ participantId: 'p-4', state: 'failed' }),
+      makeAssignment({ participantId: 'p-5', state: 'cancelled' }),
+    ];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: makeDetailResponse({ assignments }) },
+    ]);
+
+    assert.equal(selectSelectedAssignmentCount(state), 5);
+  });
+
+  it('selectSelectedAssignmentCount returns 0 when no detail loaded', () => {
+    const state = createInitialOperationsState();
+    assert.equal(selectSelectedAssignmentCount(state), 0);
+  });
+
+  it('selectCouncilTransitionCount returns the count of council transitions', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const council = makeCouncil({
+      transitions: [
+        { id: 'ct-1', label: 'Round 1', status: 'completed', timestamp: '2026-06-01T12:01:00.000Z', detail: null },
+        { id: 'ct-2', label: 'Round 2', status: 'completed', timestamp: '2026-06-01T12:02:00.000Z', detail: null },
+        { id: 'ct-3', label: 'Round 3', status: 'completed', timestamp: '2026-06-01T12:03:00.000Z', detail: null },
+        { id: 'ct-4', label: 'Round 4', status: 'active', timestamp: '2026-06-01T12:04:00.000Z', detail: null },
+        { id: 'ct-5', label: 'Round 5', status: 'waiting', timestamp: '2026-06-01T12:05:00.000Z', detail: null },
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: makeDetailResponse({ council }) },
+    ]);
+
+    assert.equal(selectCouncilTransitionCount(state), 5);
+  });
+
+  it('selectCouncilTransitionCount returns 0 when no council', () => {
+    const state = createInitialOperationsState();
+    assert.equal(selectCouncilTransitionCount(state), 0);
+  });
+
+  // ─── Partial-data availability integration (T048) ─────────────────────
+
+  it('partial availability detail is exposed through selectors for UI affordance', () => {
+    const items = [makeQueueItem({ id: 'wi-1', detailAvailability: 'partial' })];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      {
+        type: 'selection/detail-loaded',
+        detail: makeDetailResponse({ availability: 'partial', assignments: [] }),
+      },
+    ]);
+
+    assert.equal(selectDetailAvailability(state), 'partial');
+    assert.equal(selectDetailFetchStatus(state), 'idle');
+    // The UI should show a partial-availability affordance, not a blank screen.
+    // selectDetailAvailability returns 'partial' so the panel can render accordingly.
+    assert.notEqual(selectDetailAvailability(state), null);
   });
 });

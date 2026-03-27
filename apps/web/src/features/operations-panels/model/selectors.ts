@@ -157,3 +157,13 @@ export function selectHasDetail(state: OperationsWorkspaceState): boolean {
 export function selectDetailFetchStatus(state: OperationsWorkspaceState): DetailFetchStatus {
   return state.selection.detailFetchStatus;
 }
+
+/** Count of agent assignments in the selected work item's detail, or 0. */
+export function selectSelectedAssignmentCount(state: OperationsWorkspaceState): number {
+  return state.selection.detail?.assignments.length ?? 0;
+}
+
+/** Count of council transitions in the selected work item's detail, or 0. */
+export function selectCouncilTransitionCount(state: OperationsWorkspaceState): number {
+  return state.selection.detail?.council?.transitions.length ?? 0;
+}
