@@ -119,6 +119,9 @@ export function installFetchStub(
 ): void {
   fetchSpy.mockImplementation((input, init) => {
     const url = requestUrl(input);
+    // Satisfy the router's beforeLoad session guard so WorkspaceRoute mounts.
+    // useSession is mocked globally in test-setup.ts so no session WebSocket
+    // is actually created despite this response succeeding.
     if (url === '/session/info') {
       return Promise.resolve(
         jsonResponse({
