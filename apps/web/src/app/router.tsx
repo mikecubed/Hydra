@@ -3,11 +3,14 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  redirect,
   type Router,
 } from '@tanstack/react-router';
 import { AppShell } from './app-shell.tsx';
 import { WorkspaceIndexRoute } from '../routes/index.tsx';
 import { WorkspaceRoute } from '../routes/workspace.tsx';
+import { LoginRoute } from '../routes/login.tsx';
+import { getSessionInfo } from '../features/auth/api/auth-client.ts';
 
 export interface AppRouterContext {
   readonly queryClient: QueryClient;
@@ -23,13 +26,23 @@ const indexRoute = createRoute({
   component: WorkspaceIndexRoute,
 });
 
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'login',
+  component: LoginRoute,
+});
+
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'workspace',
   component: WorkspaceRoute,
+  beforeLoad: async () => {
+    const session = await getSessionInfo();
+    if (session === null) throw redirect({ to: '/login' }); // eslint-disable-line @typescript-eslint/only-throw-error -- TanStack Router's redirect() is thrown by design
+  },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, workspaceRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, loginRoute, workspaceRoute]);
 
 export type AppRouter = Router<typeof routeTree>;
 

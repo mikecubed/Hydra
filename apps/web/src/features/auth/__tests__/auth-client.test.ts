@@ -11,7 +11,7 @@ import { login, getSessionInfo, logout } from '../api/auth-client.ts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type FetchMock = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 function stubFetch(status: number, body: unknown): FetchMock {
   return async (_input, _init) =>
@@ -22,7 +22,7 @@ function stubFetch(status: number, body: unknown): FetchMock {
 }
 
 // Track calls for assertion
-let lastFetchInput: RequestInfo | URL | undefined;
+let lastFetchInput: string | URL | undefined;
 let lastFetchInit: RequestInit | undefined;
 
 function stubFetchTracked(status: number, body: unknown): FetchMock {

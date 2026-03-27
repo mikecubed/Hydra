@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any -- mock.module() typing is intentionally loose for test isolation */
+/* eslint-disable @typescript-eslint/no-explicit-any -- mock.module() typing is intentionally loose for test isolation */
 /**
  * Deep coverage tests for lib/hydra-worker.ts
  *

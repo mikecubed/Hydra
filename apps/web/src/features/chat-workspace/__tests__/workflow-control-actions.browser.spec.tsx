@@ -286,9 +286,7 @@ describe('cancel in-progress turn', () => {
 
 // ─── 2. Retry failed turn ──────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function
 describe('retry failed turn', () => {
-  // eslint-disable-next-line max-lines-per-function
   it('sends retry POST, appends new turn, and streaming continues on retried turn', async () => {
     let retryPosted = false;
     let retryPostCount = 0;
@@ -507,7 +505,6 @@ describe('branch completed turn', () => {
 
 // ─── 4. Follow-up action ────────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function
 describe('follow-up action', () => {
   it('routes operator back to composer with follow-up context label', async () => {
     installFetchStub((url) => {

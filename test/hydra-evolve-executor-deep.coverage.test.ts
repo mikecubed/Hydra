@@ -9,7 +9,7 @@
  *
  * Run: node --test --experimental-test-module-mocks test/hydra-evolve-executor-deep.coverage.test.ts
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- test mocking */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return -- test mocking */
 
 import { describe, it, mock, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';

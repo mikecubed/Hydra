@@ -76,7 +76,6 @@ function installCreateFlowStub(): void {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function
 describe('workspace create-flow with deferred subscription', () => {
   it('retains subscription intent when socket is closed during create-flow', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

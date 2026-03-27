@@ -41,7 +41,6 @@ afterEach(() => {
   cleanup();
 });
 
-// eslint-disable-next-line max-lines-per-function -- focused browser regression coverage
 describe('hydration retry timer cleanup on conversation switch', () => {
   it('clears retry timer when switching to a different conversation', async () => {
     let artifactRequestCount = 0;

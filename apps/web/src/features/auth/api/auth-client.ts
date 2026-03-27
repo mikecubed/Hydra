@@ -14,7 +14,8 @@ import { LoginResponse, SessionInfo, AuthError } from '@hydra/web-contracts';
 
 /** Read the `__csrf` double-submit cookie value set by the gateway. */
 function getCsrfToken(): string {
-  const match = document.cookie.split(';').find((c) => c.trim().startsWith('__csrf='));
+  const cookieString = (globalThis as { document?: { cookie: string } }).document?.cookie ?? '';
+  const match = cookieString.split(';').find((c) => c.trim().startsWith('__csrf='));
   if (match === undefined) return '';
   return match.split('=')[1].trim();
 }

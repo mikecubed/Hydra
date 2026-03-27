@@ -8,7 +8,7 @@
  *
  * Requires --experimental-test-module-mocks.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return */
 
 import { describe, it, mock, before } from 'node:test';
 import assert from 'node:assert/strict';

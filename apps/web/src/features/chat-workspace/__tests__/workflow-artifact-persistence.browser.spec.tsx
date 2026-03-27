@@ -283,7 +283,6 @@ async function openArtifactFromTurn(turnOutput = 'First turn output'): Promise<v
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function -- scenario-focused workflow coverage file
 describe('workspace artifact persistence workflows', () => {
   it('hydrates artifacts from listArtifactsForTurn and opens content via getArtifactContent', async () => {
     installArtifactScenario();

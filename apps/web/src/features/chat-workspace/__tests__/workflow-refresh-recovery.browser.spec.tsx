@@ -75,9 +75,7 @@ function requestUrl(input: string | URL | Request): string {
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line max-lines-per-function
 describe('workspace refresh/reconnect recovery workflows', () => {
-  // eslint-disable-next-line max-lines-per-function -- multi-phase workflow test
   it('rehydrates from REST and resumes live streaming after full page refresh mid-turn', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
@@ -272,7 +270,6 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(screen.getByText('streaming…')).toBeInTheDocument();
   });
 
-  // eslint-disable-next-line max-lines-per-function -- multi-phase hydration race coverage
   it('reruns terminal artifact hydration when a live fetch resolves after stream completion', async () => {
     let resolveFirstArtifacts: ((response: Response) => void) | null = null;
     let artifactRequestCount = 0;
@@ -355,7 +352,6 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(await screen.findByText('completed')).toBeInTheDocument();
 
     act(() => {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- controlled by waitFor above
       resolveFirstArtifacts!(
         jsonResponse({
           artifacts: [
@@ -459,7 +455,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
   // Regression: quick switch away/back before hydration Promise settles must not
   // issue a duplicate listArtifactsForTurn request (GitHub PR #175 review thread).
-  // eslint-disable-next-line max-lines-per-function -- deferred-resolve fetch stub spans many lines
+
   it('does not duplicate listArtifactsForTurn on quick switch away/back before hydration settles', async () => {
     let artifactRequestCount = 0;
     let resolveArtifact: ((r: Response) => void) | null = null;
@@ -545,7 +541,6 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     // Resolve the original in-flight hydration
     act(() => {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by expect above
       resolveArtifact!(
         jsonResponse({
           artifacts: [
@@ -633,7 +628,6 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     // Now resolve REST history with authoritative completed turn
     expect(resolveHistory).not.toBeNull();
     act(() => {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- controlled test: resolveHistory is set above
       resolveHistory!(
         jsonResponse({
           turns: [

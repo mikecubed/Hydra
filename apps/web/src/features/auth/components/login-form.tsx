@@ -15,8 +15,8 @@ function isAuthError(err: unknown): err is AuthErrorShape {
   return (
     typeof err === 'object' &&
     err !== null &&
-    typeof (err as Record<string, unknown>).code === 'string' &&
-    typeof (err as Record<string, unknown>).message === 'string'
+    typeof (err as Record<string, unknown>)['code'] === 'string' &&
+    typeof (err as Record<string, unknown>)['message'] === 'string'
   );
 }
 
