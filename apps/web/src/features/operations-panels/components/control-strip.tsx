@@ -167,21 +167,22 @@ function ControlItem({
       {control.options.length > 0 && (
         <div style={optionRowStyle}>
           {control.options.map((option) => {
-            const isDisabled = !interactive || option.selected || !option.available;
+            const isSelected = option.selected;
+            const isDisabled = !interactive || isSelected || !option.available;
 
             let resolvedStyle = optionBtnBase;
-            if (isDisabled) resolvedStyle = optionBtnDisabled;
-            else if (option.selected) resolvedStyle = optionBtnSelected;
+            if (isSelected) resolvedStyle = optionBtnSelected;
+            else if (isDisabled) resolvedStyle = optionBtnDisabled;
 
             return (
               <button
                 key={option.optionId}
                 type="button"
                 disabled={isDisabled}
-                aria-pressed={option.selected}
-                style={option.selected ? optionBtnSelected : resolvedStyle}
+                aria-pressed={isSelected}
+                style={resolvedStyle}
                 onClick={() => {
-                  if (!option.selected && interactive && control.expectedRevision != null) {
+                  if (!isSelected && interactive && control.expectedRevision != null) {
                     onSubmitControl(control.controlId, option.optionId, control.expectedRevision);
                   }
                 }}
