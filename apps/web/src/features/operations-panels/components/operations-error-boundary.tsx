@@ -57,7 +57,12 @@ export class OperationsErrorBoundary extends Component<Props, State> {
   override render(): JSX.Element {
     if (this.state.hasError) {
       return (
-        <div data-testid="operations-panel-error-boundary" style={fallbackStyle}>
+        <div
+          role="alert"
+          aria-live="assertive"
+          data-testid="operations-panel-error-boundary"
+          style={fallbackStyle}
+        >
           <p style={textStyle}>
             Operations panel encountered an error and has been suspended to protect the chat
             workspace.
