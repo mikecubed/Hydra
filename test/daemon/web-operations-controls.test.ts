@@ -84,6 +84,24 @@ describe('web-operations-controls', () => {
     assert.ok(result.control.options.length > 0);
   });
 
+  it('preserves requested kind from controlId when work item is missing', () => {
+    const result = executeControlMutation(
+      makeState([]),
+      {
+        workItemId: 'missing',
+        controlId: 'missing:agent',
+        requestedOptionId: 'agent-gemini',
+        expectedRevision: 'any',
+      },
+      makeControlConfig(),
+    );
+
+    assert.equal(result.outcome, 'rejected');
+    assert.equal(result.control.kind, 'agent');
+    assert.equal(result.workItemId, 'missing');
+    assert.ok(result.message?.includes('not found'));
+  });
+
   it('returns resolved accepted controls after successful mutation', () => {
     const task = makeTask({ owner: 'claude' });
     const result = executeControlMutation(

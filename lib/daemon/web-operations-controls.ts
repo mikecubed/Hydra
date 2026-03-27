@@ -353,10 +353,11 @@ function resolveMutationSetup(
   const now = config.nowIso();
   const { workItemId, controlId, expectedRevision } = request;
   const task = state.tasks.find((entry) => entry.id === workItemId);
+  const kind = extractKindFromControlId(controlId, workItemId);
   if (task == null) {
     return buildRejectedResult(
       controlId,
-      'routing',
+      kind ?? 'routing',
       workItemId,
       now,
       'Work item not found',
@@ -364,7 +365,6 @@ function resolveMutationSetup(
     );
   }
 
-  const kind = extractKindFromControlId(controlId, workItemId);
   if (kind == null) {
     return buildRejectedResult(
       controlId,

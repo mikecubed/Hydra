@@ -111,7 +111,7 @@ function createSnapshotMockClient(getSnapshotImpl: () => Promise<GetOperationsSn
   client: OperationsClient;
   discoverControlsMock: ReturnType<typeof mock.fn>;
 } {
-  const discoverControlsMock = mock.fn(() => Promise.resolve({ controls: {} }));
+  const discoverControlsMock = mock.fn(() => Promise.resolve({ items: [] }));
   return {
     client: {
       getSnapshot: mock.fn(getSnapshotImpl),
