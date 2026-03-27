@@ -26,6 +26,18 @@
 - [x] Raise the blocking coverage gate to 65%
 - [x] Clean up all stale `.mjs` references in docs, config, and package.json
 
+## Web Interface — Session Lifecycle (In Progress)
+
+- [ ] T1: `auth-client.ts` — add `reauth()` (calls POST /auth/reauth with CSRF header)
+- [ ] T2: `use-session.ts` — `useSession` hook with polling, WebSocket subscription, extend/logout/refresh actions
+- [ ] T3: `session-context.ts` + `session-provider.tsx` — React context and provider component
+- [ ] T4: `expiry-banner.tsx` — dismissible expiry warning banner (shown when state === 'expiring-soon')
+- [ ] T5: `daemon-unreachable.tsx` — full-width error screen for daemon-unreachable state
+- [ ] T6: `logout-button.tsx` + `workspace.tsx` wiring — workspace header band with LogoutButton, SessionProvider, ExpiryBanner, DaemonUnreachable
+- [ ] T7: `session-provider.browser.spec.tsx` — SessionProvider integration browser spec
+- [ ] T8: README updates — session lifecycle section in apps/web and apps/web-gateway
+- PR #212: `feat/web-session-auth-lifecycle` → main
+
 ## Phase 4 — Hardening (Next)
 
 - [ ] Push coverage toward the 80% target (requires deep I/O mocking of large modules)
