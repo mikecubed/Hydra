@@ -102,7 +102,8 @@ session:
      .then(console.log);
    ```
 
-   The server sets the `__session` and `__csrf` HttpOnly cookies automatically. Reload the page
+   The server sets an HttpOnly `__session` cookie and a browser-readable `__csrf` cookie (used as
+   the `x-csrf-token` header for double-submit CSRF protection) automatically. Reload the page
    and the workspace initialises normally.
 
 5. Open `http://127.0.0.1:4174/workspace` (or let the index redirect take you there).

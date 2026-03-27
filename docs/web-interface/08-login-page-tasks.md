@@ -84,8 +84,10 @@ Implementation notes:
   from the JSON body).
 - `getSessionInfo()` — `GET /session/info`. Return `null` on `401`. Parse response with
   `SessionInfo.parse()` on success.
-- `logout()` — `POST /auth/logout`. No CSRF token needed (session cookie present, gateway allows
-  logout without double-submit). Swallow errors gracefully.
+- `logout()` — `POST /auth/logout` with `credentials: 'include'`. Read the `__csrf` cookie and
+  send its value as the `x-csrf-token` header (required for browser calls where an `Origin` header
+  is present — the gateway enforces double-submit CSRF on all mutating routes). Swallow errors
+  gracefully.
 
 ---
 
@@ -181,7 +183,7 @@ Use `vi.fn()` / `vi.stubGlobal('fetch', ...)` pattern. Test cases:
 - `login()` throws with `code: 'RATE_LIMITED'` on 429
 - `getSessionInfo()` returns `SessionInfo` on 200
 - `getSessionInfo()` returns `null` on 401
-- `logout()` sends `POST /auth/logout` with `credentials: 'include'`
+- `logout()` sends `POST /auth/logout` with `credentials: 'include'` and the `x-csrf-token` header
 - `logout()` resolves without throwing even when server returns 500
 
 ---
