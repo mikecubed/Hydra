@@ -7,7 +7,10 @@ interface SessionProviderProps {
   children: React.ReactNode;
 }
 
-export function SessionProvider({ pollInterval, children }: SessionProviderProps): JSX.Element {
+export function SessionProvider({
+  pollInterval,
+  children,
+}: SessionProviderProps): React.JSX.Element {
   const session = useSession(pollInterval);
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
 }

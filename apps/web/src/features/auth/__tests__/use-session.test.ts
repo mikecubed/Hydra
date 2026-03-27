@@ -176,7 +176,7 @@ function makeWsCtor(): SessionManagerDeps['WebSocketCtor'] {
     class TrackedWs extends FakeWebSocket {} as unknown as SessionManagerDeps['WebSocketCtor'];
   return new Proxy(Ctor, {
     construct(Target, args: [string]) {
-      const instance = Reflect.construct(Target, args) as FakeWebSocket;
+      const instance = Reflect.construct(Target, args) as unknown as FakeWebSocket;
       lastCreatedWs = instance;
       return instance;
     },

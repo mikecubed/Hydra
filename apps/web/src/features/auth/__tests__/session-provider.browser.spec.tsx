@@ -64,11 +64,11 @@ class TestErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null }
 > {
-  state: { error: Error | null } = { error: null };
+  override state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
-  render() {
+  override render() {
     if (this.state.error) {
       return <div data-testid="error-message">{this.state.error.message}</div>;
     }

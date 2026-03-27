@@ -55,10 +55,16 @@ function jitteredDelay(base: number): number {
   return Math.round(base * (0.95 + Math.random() * 0.1));
 }
 
-function getDocument(): (Document & { visibilityState: string }) | null {
+type VisibilityDoc = {
+  visibilityState: string;
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
+};
+
+function getDocument(): VisibilityDoc | null {
   // globalThis.document may not exist in Node (test/SSR) — guard with Reflect.has
   if (!Reflect.has(globalThis, 'document')) return null;
-  return globalThis.document as Document & { visibilityState: string };
+  return Reflect.get(globalThis, 'document') as VisibilityDoc;
 }
 
 export interface SessionManager {
