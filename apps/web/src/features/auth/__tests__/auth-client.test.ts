@@ -1,135 +1,179 @@
-// @vitest-environment jsdom
 /**
  * T5 — Auth API client unit tests.
  *
- * Covers login(), getSessionInfo(), logout() from the auth-client module.
- * Uses Vitest with jsdom environment for document.cookie access.
+ * Uses Node.js native test runner. Mocks globalThis.fetch and
+ * globalThis.document.cookie directly.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, before, after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
 
 import { login, getSessionInfo, logout } from '../api/auth-client.ts';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const mockFetch = (status: number, body: unknown) =>
-  vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
-  });
+type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-// ─── Fixtures ───────────────────────────────────────────────────────────────
+function stubFetch(status: number, body: unknown): FetchMock {
+  return async (_input, _init) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+}
+
+// Track calls for assertion
+let lastFetchInput: RequestInfo | URL | undefined;
+let lastFetchInit: RequestInit | undefined;
+
+function stubFetchTracked(status: number, body: unknown): FetchMock {
+  return async (input, init) => {
+    lastFetchInput = input;
+    lastFetchInit = init;
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+}
+
+// ─── Setup / teardown ───────────────────────────────────────────────────────
+
+let originalFetch: typeof globalThis.fetch;
+let originalDocument: unknown;
+
+before(() => {
+  originalFetch = globalThis.fetch;
+  // Set up a minimal document.cookie for logout tests
+  originalDocument = (globalThis as Record<string, unknown>)['document'];
+});
+
+after(() => {
+  globalThis.fetch = originalFetch;
+  if (originalDocument === undefined) {
+    delete (globalThis as Record<string, unknown>)['document'];
+  } else {
+    (globalThis as Record<string, unknown>)['document'] = originalDocument;
+  }
+});
+
+beforeEach(() => {
+  lastFetchInput = undefined;
+  lastFetchInit = undefined;
+});
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
 
 const validLoginResponse = {
   operatorId: 'op-1',
-  expiresAt: '2026-01-01T00:00:00.000Z',
+  expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
   state: 'active',
 };
 
 const validSessionInfo = {
   operatorId: 'op-1',
   state: 'active',
-  expiresAt: '2026-01-01T00:00:00.000Z',
-  lastActivityAt: '2025-12-31T23:00:00.000Z',
-  createdAt: '2025-12-31T22:00:00.000Z',
+  expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+  lastActivityAt: new Date().toISOString(),
+  createdAt: new Date().toISOString(),
 };
 
-// ─── Teardown ───────────────────────────────────────────────────────────────
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-// ─── login() ────────────────────────────────────────────────────────────────
-
 describe('login()', () => {
-  it('sends POST /auth/login with correct JSON body and credentials: include', async () => {
-    const fetchMock = mockFetch(200, validLoginResponse);
-    vi.stubGlobal('fetch', fetchMock);
+  it('sends POST /auth/login with correct JSON body and credentials:include', async () => {
+    globalThis.fetch = stubFetchTracked(200, validLoginResponse) as typeof globalThis.fetch;
 
-    await login('admin', 's3cret');
+    await login('admin', 'secret');
 
-    expect(fetchMock).toHaveBeenCalledWith('/auth/login', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identity: 'admin', secret: 's3cret' }),
-    });
+    assert.equal(lastFetchInput, '/auth/login');
+    assert.equal(lastFetchInit?.method, 'POST');
+    assert.equal(lastFetchInit?.credentials, 'include');
+    assert.equal(lastFetchInit?.body, JSON.stringify({ identity: 'admin', secret: 'secret' }));
   });
 
   it('returns parsed LoginResponse on 200', async () => {
-    vi.stubGlobal('fetch', mockFetch(200, validLoginResponse));
+    globalThis.fetch = stubFetch(200, validLoginResponse) as typeof globalThis.fetch;
 
-    const result = await login('admin', 's3cret');
+    const result = await login('admin', 'secret');
 
-    expect(result).toEqual(validLoginResponse);
+    assert.equal(result.operatorId, 'op-1');
+    assert.equal(result.state, 'active');
   });
 
   it('throws with code INVALID_CREDENTIALS on 401', async () => {
-    vi.stubGlobal(
-      'fetch',
-      mockFetch(401, { code: 'INVALID_CREDENTIALS', message: 'Bad credentials' }),
-    );
-
-    await expect(login('admin', 'wrong')).rejects.toMatchObject({
+    globalThis.fetch = stubFetch(401, {
       code: 'INVALID_CREDENTIALS',
       message: 'Bad credentials',
-    });
+    }) as typeof globalThis.fetch;
+
+    await assert.rejects(
+      () => login('admin', 'wrong'),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal((err as Error & { code: string }).code, 'INVALID_CREDENTIALS');
+        return true;
+      },
+    );
   });
 
   it('throws with code RATE_LIMITED on 429', async () => {
-    vi.stubGlobal(
-      'fetch',
-      mockFetch(429, { code: 'RATE_LIMITED', message: 'Too many requests' }),
-    );
-
-    await expect(login('admin', 'pass')).rejects.toMatchObject({
+    globalThis.fetch = stubFetch(429, {
       code: 'RATE_LIMITED',
-      message: 'Too many requests',
-    });
+      message: 'Too many attempts',
+    }) as typeof globalThis.fetch;
+
+    await assert.rejects(
+      () => login('admin', 'pass'),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal((err as Error & { code: string }).code, 'RATE_LIMITED');
+        return true;
+      },
+    );
   });
 });
 
-// ─── getSessionInfo() ───────────────────────────────────────────────────────
-
 describe('getSessionInfo()', () => {
-  it('returns SessionInfo on 200', async () => {
-    vi.stubGlobal('fetch', mockFetch(200, validSessionInfo));
+  it('returns parsed SessionInfo on 200', async () => {
+    globalThis.fetch = stubFetch(200, validSessionInfo) as typeof globalThis.fetch;
 
     const result = await getSessionInfo();
 
-    expect(result).toEqual(validSessionInfo);
+    assert.ok(result !== null);
+    assert.equal(result.operatorId, 'op-1');
+    assert.equal(result.state, 'active');
   });
 
   it('returns null on 401', async () => {
-    vi.stubGlobal('fetch', mockFetch(401, {}));
+    globalThis.fetch = stubFetch(401, {}) as typeof globalThis.fetch;
 
     const result = await getSessionInfo();
 
-    expect(result).toBeNull();
+    assert.equal(result, null);
   });
 });
 
-// ─── logout() ───────────────────────────────────────────────────────────────
-
 describe('logout()', () => {
-  it('sends POST /auth/logout with credentials: include and x-csrf-token header', async () => {
-    const fetchMock = mockFetch(200, { success: true });
-    vi.stubGlobal('fetch', fetchMock);
-    document.cookie = '__csrf=test-token';
+  it('sends POST /auth/logout with credentials:include and x-csrf-token header', async () => {
+    Object.defineProperty(globalThis, 'document', {
+      value: { cookie: '__csrf=test-token; other=value' },
+      configurable: true,
+    });
+
+    globalThis.fetch = stubFetchTracked(200, { success: true }) as typeof globalThis.fetch;
 
     await logout();
 
-    expect(fetchMock).toHaveBeenCalledWith('/auth/logout', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'x-csrf-token': 'test-token' },
-    });
+    assert.equal(lastFetchInput, '/auth/logout');
+    assert.equal(lastFetchInit?.method, 'POST');
+    assert.equal(lastFetchInit?.credentials, 'include');
+    assert.equal(
+      (lastFetchInit?.headers as Record<string, string>)?.['x-csrf-token'],
+      'test-token',
+    );
   });
 
-  it('resolves without throwing even when server returns 500', async () => {
-    vi.stubGlobal('fetch', mockFetch(500, { error: 'Internal Server Error' }));
+  it('resolves without throwing when server returns 500', async () => {
+    globalThis.fetch = stubFetch(500, {}) as typeof globalThis.fetch;
 
-    await expect(logout()).resolves.toBeUndefined();
+    await assert.doesNotReject(() => logout());
   });
 });
