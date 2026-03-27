@@ -37,18 +37,22 @@ product walkthrough.
   - close the panel to return to the normal transcript/composer flow
 - **Connection/session banners**
   - visible status for reconnecting, daemon recovery, expired sessions, and related issues
-- **Operations panels (Phase 2)**
-  - authoritative queue visibility in the sidebar
-  - work-item ordering and status labels
-  - queue selection state
-  - read-only checkpoint detail panel for the selected work item
-  - empty/loading/live sidebar states
+- **Operations panels (US1–US6, all phases complete)**
+  - authoritative queue visibility in the sidebar (work-item ordering, status labels, conversation/session relationship hints)
+  - work-item selection with checkpoint detail, routing, and execution panels
+  - health, budget, and risk signals with global/item scope separation
+  - routing, mode, agent, and council execution history visibility
+  - daemon-authorized operational controls (routing/mode/agent/council changes with pending, accepted, rejected, stale, and superseded outcomes)
+  - dense multi-agent and council timeline rendering with availability affordances (partial/unavailable states)
+  - refresh/reconnect/multi-tab regression-safe operations synchronization
+  - operations panel error boundary preserving chat workspace ownership on panel failure
+  - `minWidth: 0` grid hardening preventing chat column blowout during operations reflows
 
 ### What is not there yet
 
 - no dedicated browser login screen
-- no browser-side operational controls beyond the current read-only checkpoint detail view
-- no complete end-user walkthrough in the product itself
+- no browser-side settings or operator preferences UI
+- no end-user product walkthrough
 
 ### How to run it
 
