@@ -149,11 +149,18 @@ function getCurrentMode(task: TaskEntry, config: ControlContext): string {
   const routingHistory = (task as Record<string, unknown>)['routingHistory'];
   let currentMode: string | null = null;
   if (Array.isArray(routingHistory) && routingHistory.length > 0) {
-    const latest: unknown = routingHistory.at(-1);
-    if (latest != null && typeof latest === 'object') {
+    for (let index = routingHistory.length - 1; index >= 0; index -= 1) {
+      const latest: unknown = routingHistory[index];
+      if (latest == null || typeof latest !== 'object') {
+        continue;
+      }
       const entry = latest as Record<string, unknown>;
+      if (typeof entry['route'] !== 'string' || entry['route'] === '') {
+        continue;
+      }
       if (typeof entry['mode'] === 'string' && entry['mode'] !== '') {
         currentMode = entry['mode'];
+        break;
       }
     }
   }
@@ -501,9 +508,10 @@ function applyControlMutation(
     case 'agent': {
       const agent = optionId.replace('agent-', '');
       const assignmentState = ASSIGNMENT_STATE_BY_TASK_STATUS[task.status] ?? 'waiting';
+      const currentMode = getCurrentMode(task, config);
       closeLatestAssignment(task, now, assignmentState);
       task.owner = agent;
-      appendRoutingHistoryEntry(task, now, agent, null, `Agent reassigned to ${agent}`);
+      appendRoutingHistoryEntry(task, now, agent, currentMode, `Agent reassigned to ${agent}`);
       appendAssignmentHistory(task, now, agent, assignmentState);
       break;
     }

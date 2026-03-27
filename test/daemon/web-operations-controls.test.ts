@@ -7,6 +7,7 @@ import {
   executeControlMutation,
   type ControlContext,
 } from '../../lib/daemon/web-operations-controls.ts';
+import { projectWorkItemDetail } from '../../lib/daemon/web-operations-projection.ts';
 
 function makeTask(overrides: Partial<TaskEntry> = {}): TaskEntry {
   return {
@@ -123,5 +124,102 @@ describe('web-operations-controls', () => {
       result.control.options.find((option) => option.selected)?.optionId,
       'agent-gemini',
     );
+  });
+
+  it('preserves the current mode when reassigning an agent', () => {
+    const task = makeTask({
+      owner: 'claude',
+      routingHistory: [
+        {
+          route: 'claude',
+          mode: 'council',
+          changedAt: '2025-01-15T11:00:00.000Z',
+          reason: 'Council required',
+        },
+      ],
+      assignmentHistory: [
+        {
+          agent: 'claude',
+          role: null,
+          state: 'waiting',
+          startedAt: '2025-01-15T11:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    });
+    const state = makeState([task]);
+    const result = executeControlMutation(
+      state,
+      {
+        workItemId: task.id,
+        controlId: `${task.id}:agent`,
+        requestedOptionId: 'agent-gemini',
+        expectedRevision: computeRevisionToken(task),
+      },
+      makeControlConfig(),
+    );
+
+    assert.equal(result.outcome, 'accepted');
+    assert.equal(
+      result.control.options.find((option) => option.selected)?.optionId,
+      'agent-gemini',
+    );
+    assert.equal(projectWorkItemDetail(state, task.id)?.routing?.currentMode, 'council');
+    const routingHistory = (task as Record<string, unknown>)['routingHistory'] as Array<
+      Record<string, unknown>
+    >;
+    assert.equal(routingHistory.at(-1)?.['mode'], 'council');
+  });
+
+  it('ignores malformed routing history entries when recovering the current mode', () => {
+    const task = makeTask({
+      owner: 'claude',
+      routingHistory: [
+        {
+          route: 'claude',
+          mode: 'auto',
+          changedAt: '2025-01-15T10:00:00.000Z',
+          reason: 'Initial routing',
+        },
+        {
+          mode: 'council',
+          changedAt: '2025-01-15T10:30:00.000Z',
+          reason: 'Malformed row without route',
+        },
+        {
+          route: 'claude',
+          mode: null,
+          changedAt: '2025-01-15T11:00:00.000Z',
+          reason: 'Agent reassigned',
+        },
+      ],
+      assignmentHistory: [
+        {
+          agent: 'claude',
+          role: null,
+          state: 'waiting',
+          startedAt: '2025-01-15T10:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    });
+    const state = makeState([task]);
+    const result = executeControlMutation(
+      state,
+      {
+        workItemId: task.id,
+        controlId: `${task.id}:agent`,
+        requestedOptionId: 'agent-gemini',
+        expectedRevision: computeRevisionToken(task),
+      },
+      makeControlConfig(),
+    );
+
+    assert.equal(result.outcome, 'accepted');
+    assert.equal(projectWorkItemDetail(state, task.id)?.routing?.currentMode, 'auto');
+    const routingHistory = (task as Record<string, unknown>)['routingHistory'] as Array<
+      Record<string, unknown>
+    >;
+    assert.equal(routingHistory.at(-1)?.['mode'], 'auto');
   });
 });

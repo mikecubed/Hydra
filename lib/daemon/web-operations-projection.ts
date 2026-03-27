@@ -715,8 +715,10 @@ function projectRoutingHistory(task: TaskEntry): RoutingDecisionView | null {
     return null;
   }
 
+  const latestModeEntry = [...history].reverse().find((entry) => entry.mode !== null);
+
   return {
-    currentMode: latest.mode,
+    currentMode: latestModeEntry?.mode ?? null,
     currentRoute: latest.route,
     changedAt: latest.changedAt,
     history,

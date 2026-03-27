@@ -1460,6 +1460,35 @@ describe('projectWorkItemDetail routing history', () => {
     assert.equal(result.routing.history.length, 2);
   });
 
+  it('uses the latest non-null mode when the newest route entry omits mode', () => {
+    const state = makeState({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          routingHistory: [
+            {
+              route: 'claude',
+              mode: 'council',
+              changedAt: '2025-06-01T10:00:00.000Z',
+              reason: 'Council required',
+            },
+            {
+              route: 'gemini',
+              mode: null,
+              changedAt: '2025-06-01T11:00:00.000Z',
+              reason: 'Agent reassigned',
+            },
+          ],
+        }),
+      ],
+    });
+    const result = projectWorkItemDetail(state, 'task-1');
+    assert.ok(result !== null && result.routing !== null);
+    assert.equal(result.routing.currentRoute, 'gemini');
+    assert.equal(result.routing.currentMode, 'council');
+    assert.equal(result.routing.changedAt, '2025-06-01T11:00:00.000Z');
+  });
+
   it('assigns deterministic IDs to routing history entries', () => {
     const state = makeState({
       tasks: [
