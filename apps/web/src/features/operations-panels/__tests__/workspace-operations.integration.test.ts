@@ -851,11 +851,41 @@ describe('workspace operations integration', () => {
     const items = [makeQueueItem({ id: 'wi-1' })];
     const council = makeCouncil({
       transitions: [
-        { id: 'ct-1', label: 'Round 1', status: 'completed', timestamp: '2026-06-01T12:01:00.000Z', detail: null },
-        { id: 'ct-2', label: 'Round 2', status: 'completed', timestamp: '2026-06-01T12:02:00.000Z', detail: null },
-        { id: 'ct-3', label: 'Round 3', status: 'completed', timestamp: '2026-06-01T12:03:00.000Z', detail: null },
-        { id: 'ct-4', label: 'Round 4', status: 'active', timestamp: '2026-06-01T12:04:00.000Z', detail: null },
-        { id: 'ct-5', label: 'Round 5', status: 'waiting', timestamp: '2026-06-01T12:05:00.000Z', detail: null },
+        {
+          id: 'ct-1',
+          label: 'Round 1',
+          status: 'completed',
+          timestamp: '2026-06-01T12:01:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-2',
+          label: 'Round 2',
+          status: 'completed',
+          timestamp: '2026-06-01T12:02:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-3',
+          label: 'Round 3',
+          status: 'completed',
+          timestamp: '2026-06-01T12:03:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-4',
+          label: 'Round 4',
+          status: 'active',
+          timestamp: '2026-06-01T12:04:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-5',
+          label: 'Round 5',
+          status: 'waiting',
+          timestamp: '2026-06-01T12:05:00.000Z',
+          detail: null,
+        },
       ],
     });
 
