@@ -215,6 +215,49 @@ Two distinct test paths exist:
   up by the repo-root `npm test` (Node.js native test runner). This is the primary CI validation
   path and the one checked by the pre-push hook.
 
+## Session Lifecycle
+
+Once you are logged in, Hydra's browser client maintains your session automatically.
+
+### Polling
+
+`useSession` polls `GET /session/info` every **60 seconds** (±5% random jitter) to refresh local
+session state. Polling pauses automatically when the browser tab is hidden (`document.visibilityState
+=== 'hidden'`) and resumes when the tab becomes visible again. Polling stops entirely when the
+session reaches a terminal state (`expired`, `invalidated`, `logged-out`).
+
+### WebSocket real-time events (`/ws`)
+
+The browser also subscribes to the `/ws` WebSocket endpoint, which delivers `SessionEvent` frames
+(`state-change`, `expiry-warning`, `forced-logout`) pushed by the gateway. State transitions from
+WebSocket frames take effect immediately, ahead of the next polling cycle.
+
+If the WebSocket closes unexpectedly the client reconnects with binary exponential back-off:
+1 s base, 2× per attempt, 30 s cap, ±500 ms jitter.
+
+### Expiry warning banner
+
+When `session.state` becomes `'expiring-soon'` (gateway warning threshold default: 15 minutes
+before expiry), an amber banner appears at the top of the workspace with two actions:
+
+- **Extend Session** — calls `POST /auth/reauth`, resets state to `'active'`, and updates
+  `expiresAt` with the new expiry time.
+- **Dismiss** — hides the banner for the current page load (does not call reauth).
+
+The banner reappears automatically if the session enters `'expiring-soon'` again after a dismiss.
+
+### Daemon-unreachable screen
+
+When the gateway cannot reach the Hydra daemon it sets `session.state = 'daemon-unreachable'`.
+The workspace renders a full-width error screen with a **Check again** button that re-polls
+`GET /session/info`. The workspace does **not** redirect to `/login` for this state — the session
+itself is still valid; the daemon is temporarily down.
+
+### Logout
+
+The workspace header contains a **Log out** button. Clicking it calls `POST /auth/logout` (which
+invalidates the session cookie server-side) and navigates to `/login`.
+
 ## Technology Stack
 
 | Layer         | Choice                                                        |
