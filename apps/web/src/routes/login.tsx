@@ -21,11 +21,16 @@ export function LoginRoute(): JSX.Element {
   const redirectTo = isSameOriginPath(rawRedirect) ? rawRedirect : '/workspace';
 
   useEffect(() => {
-    void getSessionInfo().then((session) => {
-      if (session !== null && !TERMINAL_STATES.includes(session.state)) {
-        void navigate({ to: redirectTo, replace: true });
-      }
-    });
+    void getSessionInfo()
+      .then((session) => {
+        if (session !== null && !TERMINAL_STATES.includes(session.state)) {
+          void navigate({ to: redirectTo, replace: true });
+        }
+      })
+      .catch((err: unknown) => {
+        // Network error — stay on the login page.
+        console.error('Failed to check session on login route', err);
+      });
   }, [navigate, redirectTo]);
 
   function handleSuccess(_operatorId: string): void {

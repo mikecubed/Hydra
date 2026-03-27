@@ -149,6 +149,18 @@ describe('getSessionInfo()', () => {
 
     assert.equal(result, null);
   });
+
+  it('throws a descriptive error for non-2xx non-401 status', async () => {
+    globalThis.fetch = stubFetch(500, { error: 'server error' }) as typeof globalThis.fetch;
+    await assert.rejects(
+      () => getSessionInfo(),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.ok(err.message.includes('500'));
+        return true;
+      },
+    );
+  });
 });
 
 describe('logout()', () => {
@@ -175,5 +187,18 @@ describe('logout()', () => {
     globalThis.fetch = stubFetch(500, {}) as typeof globalThis.fetch;
 
     await assert.doesNotReject(() => logout());
+  });
+
+  it('sends full x-csrf-token for tokens containing = characters', async () => {
+    Object.defineProperty(globalThis, 'document', {
+      value: { cookie: '__csrf=tokenpart1=tokenpart2; other=value' },
+      configurable: true,
+    });
+    globalThis.fetch = stubFetchTracked(200, { success: true }) as typeof globalThis.fetch;
+    await logout();
+    assert.equal(
+      (lastFetchInit?.headers as Record<string, string>)?.['x-csrf-token'],
+      'tokenpart1=tokenpart2',
+    );
   });
 });

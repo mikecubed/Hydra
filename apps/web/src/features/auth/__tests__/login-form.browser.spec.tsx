@@ -25,6 +25,14 @@ describe('LoginForm', () => {
     expect(screen.getByTestId('login-submit')).toBeInTheDocument();
   });
 
+  it('has accessible aria-labels and required attributes on inputs', () => {
+    render(<LoginForm onSuccess={() => {}} />);
+    const identityInput = screen.getByLabelText('Identity');
+    const secretInput = screen.getByLabelText('Secret');
+    expect(identityInput).toBeRequired();
+    expect(secretInput).toBeRequired();
+  });
+
   it('submit button is disabled while loading', async () => {
     const user = userEvent.setup();
     mockLogin.mockReturnValue(new Promise(() => {}));

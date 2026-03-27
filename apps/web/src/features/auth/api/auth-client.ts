@@ -17,7 +17,13 @@ function getCsrfToken(): string {
   const cookieString = (globalThis as { document?: { cookie: string } }).document?.cookie ?? '';
   const match = cookieString.split(';').find((c) => c.trim().startsWith('__csrf='));
   if (match === undefined) return '';
-  return match.split('=')[1].trim();
+  const rawValue = match.trim().slice('__csrf='.length).trim();
+  if (rawValue === '') return '';
+  try {
+    return decodeURIComponent(rawValue);
+  } catch {
+    return '';
+  }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -56,6 +62,10 @@ export async function getSessionInfo(): Promise<SessionInfoType | null> {
   });
 
   if (res.status === 401) return null;
+
+  if (!res.ok) {
+    throw new Error(`/session/info returned ${res.status.toString()}`);
+  }
 
   const body: unknown = await res.json();
   return SessionInfo.parse(body);

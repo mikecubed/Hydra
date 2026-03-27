@@ -100,6 +100,8 @@ export function LoginForm({ onSuccess }: LoginFormProps): JSX.Element {
         data-testid="login-identity"
         type="text"
         placeholder="Identity"
+        aria-label="Identity"
+        required
         value={identity}
         onChange={(e) => {
           setIdentity(e.target.value);
@@ -111,6 +113,8 @@ export function LoginForm({ onSuccess }: LoginFormProps): JSX.Element {
         data-testid="login-secret"
         type="password"
         placeholder="Secret"
+        aria-label="Secret"
+        required
         value={secret}
         onChange={(e) => {
           setSecret(e.target.value);
