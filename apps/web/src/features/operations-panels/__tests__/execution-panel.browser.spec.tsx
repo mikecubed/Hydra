@@ -539,7 +539,6 @@ describe('ExecutionPanel council status coverage', () => {
 
 // ─── Dense multi-agent rendering (T048) ─────────────────────────────────────
 
-/* eslint-disable max-lines-per-function -- dense-layout matrix verifies all five states render simultaneously without overlap */
 describe('ExecutionPanel dense multi-agent rendering', () => {
   const denseAssignments: AgentAssignmentView[] = [
     makeAssignment({ participantId: 'p-1', label: 'claude', role: 'architect', state: 'active' }),
@@ -627,7 +626,6 @@ describe('ExecutionPanel dense multi-agent rendering', () => {
     }
   });
 });
-/* eslint-enable max-lines-per-function */
 
 // ─── Dense council timeline (T048) ──────────────────────────────────────────
 
@@ -713,7 +711,7 @@ describe('ExecutionPanel availability affordances', () => {
     );
 
     const element = screen.getByTestId('detail-availability-partial');
-    expect(element.textContent?.trim().length).toBeGreaterThan(0);
+    expect(element).toHaveTextContent(/\S/);
   });
 
   it('shows a visible affordance with data-testid when availability is unavailable', () => {
@@ -740,7 +738,7 @@ describe('ExecutionPanel availability affordances', () => {
     );
 
     const element = screen.getByTestId('detail-availability-unavailable');
-    expect(element.textContent?.trim().length).toBeGreaterThan(0);
+    expect(element).toHaveTextContent(/\S/);
   });
 
   it('does not show partial or unavailable affordance when availability is ready', () => {
