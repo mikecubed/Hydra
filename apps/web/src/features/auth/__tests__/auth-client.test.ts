@@ -189,6 +189,16 @@ describe('logout()', () => {
     await assert.doesNotReject(() => logout());
   });
 
+  it('omits x-csrf-token header when no __csrf cookie is present', async () => {
+    Object.defineProperty(globalThis, 'document', {
+      value: { cookie: 'session=abc; other=value' },
+      configurable: true,
+    });
+    globalThis.fetch = stubFetchTracked(200, { success: true }) as typeof globalThis.fetch;
+    await logout();
+    assert.equal((lastFetchInit?.headers as Record<string, string>)?.['x-csrf-token'], undefined);
+  });
+
   it('sends full x-csrf-token for tokens containing = characters', async () => {
     Object.defineProperty(globalThis, 'document', {
       value: { cookie: '__csrf=tokenpart1=tokenpart2; other=value' },

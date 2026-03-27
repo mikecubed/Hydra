@@ -13,17 +13,30 @@ import { LoginResponse, SessionInfo, AuthError } from '@hydra/web-contracts';
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Read the `__csrf` double-submit cookie value set by the gateway. */
-function getCsrfToken(): string {
-  const cookieString = (globalThis as { document?: { cookie: string } }).document?.cookie ?? '';
-  const match = cookieString.split(';').find((c) => c.trim().startsWith('__csrf='));
-  if (match === undefined) return '';
-  const rawValue = match.trim().slice('__csrf='.length).trim();
-  if (rawValue === '') return '';
-  try {
-    return decodeURIComponent(rawValue);
-  } catch {
-    return '';
+function getCsrfToken(): string | null {
+  const documentLike = Reflect.get(globalThis, 'document') as { cookie?: string } | undefined;
+  const cookieSource = documentLike?.cookie;
+
+  if (typeof cookieSource !== 'string' || cookieSource === '') {
+    return null;
   }
+
+  for (const entry of cookieSource.split(';')) {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith('__csrf=')) {
+      const rawValue = trimmed.slice('__csrf='.length);
+      if (rawValue === '') {
+        return null;
+      }
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -78,10 +91,15 @@ export async function getSessionInfo(): Promise<SessionInfoType | null> {
  */
 export async function logout(): Promise<void> {
   try {
+    const csrfToken = getCsrfToken();
+    const headers: Record<string, string> = {};
+    if (csrfToken !== null) {
+      headers['x-csrf-token'] = csrfToken;
+    }
     await fetch('/auth/logout', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'x-csrf-token': getCsrfToken() },
+      headers,
     });
   } catch {
     // Swallow — logout is best-effort.
