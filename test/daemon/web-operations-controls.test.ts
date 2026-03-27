@@ -171,6 +171,77 @@ describe('web-operations-controls', () => {
     assert.equal(routingHistory.at(-1)?.['mode'], 'council');
   });
 
+  it('does not overwrite an existing endedAt when reassigning an agent', () => {
+    const originalEndedAt = '2025-01-15T10:30:00.000Z';
+    const task = makeTask({
+      owner: 'claude',
+      assignmentHistory: [
+        {
+          agent: 'gemini',
+          role: null,
+          state: 'completed',
+          startedAt: '2025-01-15T10:00:00.000Z',
+          endedAt: originalEndedAt,
+        },
+      ],
+    });
+    const mutationTime = '2025-01-15T12:00:00.000Z';
+    const result = executeControlMutation(
+      makeState([task]),
+      {
+        workItemId: task.id,
+        controlId: `${task.id}:agent`,
+        requestedOptionId: 'agent-gemini',
+        expectedRevision: computeRevisionToken(task),
+      },
+      makeControlConfig(mutationTime),
+    );
+
+    assert.equal(result.outcome, 'accepted');
+    const history = (task as Record<string, unknown>)['assignmentHistory'] as Array<
+      Record<string, unknown>
+    >;
+    // The closed entry should keep its original endedAt
+    const closedEntry = history.at(-2);
+    assert.equal(closedEntry?.['state'], 'completed');
+    assert.equal(closedEntry?.['endedAt'], originalEndedAt);
+    // The new entry should be appended
+    assert.equal(history.at(-1)?.['agent'], 'gemini');
+  });
+
+  it('sets endedAt on an open assignment when reassigning an agent', () => {
+    const task = makeTask({
+      owner: 'claude',
+      assignmentHistory: [
+        {
+          agent: 'claude',
+          role: null,
+          state: 'waiting',
+          startedAt: '2025-01-15T10:00:00.000Z',
+          endedAt: null,
+        },
+      ],
+    });
+    const mutationTime = '2025-01-15T12:00:00.000Z';
+    const result = executeControlMutation(
+      makeState([task]),
+      {
+        workItemId: task.id,
+        controlId: `${task.id}:agent`,
+        requestedOptionId: 'agent-gemini',
+        expectedRevision: computeRevisionToken(task),
+      },
+      makeControlConfig(mutationTime),
+    );
+
+    assert.equal(result.outcome, 'accepted');
+    const history = (task as Record<string, unknown>)['assignmentHistory'] as Array<
+      Record<string, unknown>
+    >;
+    const closedEntry = history.at(-2);
+    assert.equal(closedEntry?.['endedAt'], mutationTime);
+  });
+
   it('ignores malformed routing history entries when recovering the current mode', () => {
     const task = makeTask({
       owner: 'claude',

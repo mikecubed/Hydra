@@ -117,8 +117,10 @@ function closeLatestAssignment(task: TaskEntry, now: string, state: string): voi
     return;
   }
 
-  latest['state'] = state;
-  latest['endedAt'] = now;
+  if (latest['endedAt'] == null) {
+    latest['state'] = state;
+    latest['endedAt'] = now;
+  }
   (task as Record<string, unknown>)['assignmentHistory'] = history;
 }
 
