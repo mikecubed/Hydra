@@ -13,6 +13,10 @@ import {
 } from 'react';
 import { WorkspaceLayout } from '../features/chat-workspace/components/workspace-layout.tsx';
 import { ComposerPanel } from '../features/chat-workspace/components/composer-panel.tsx';
+import { SessionProvider } from '../features/auth/components/session-provider.tsx';
+import { LogoutButton } from '../features/auth/components/logout-button.tsx';
+import { ExpiryBanner } from '../features/auth/components/expiry-banner.tsx';
+import { DaemonUnreachable } from '../features/auth/components/daemon-unreachable.tsx';
 import {
   ConnectionBanner,
   ConnectionStateContext,
@@ -1649,61 +1653,75 @@ export function WorkspaceRoute(): JSX.Element {
   }, [store]);
 
   return (
-    <ConnectionStateContext.Provider value={state.connection}>
-      <ConnectionBanner
-        connection={state.connection}
-        staleControlReason={activeConversation?.controlState.staleReason ?? null}
-      />
-      <WorkspaceLayout
-        conversations={selectConversationList(state)}
-        activeConversationId={state.activeConversationId}
-        activeConversation={activeConversation}
-        activeEntries={activeEntries}
-        activeHiddenEntryCount={activeTranscriptSummary.hiddenCount}
-        activeLoadState={selectActiveLoadState(state)}
-        activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
-        isLoadingConversations={isLoadingConversations}
-        conversationErrorMessage={conversationErrorMessage}
-        onSelectConversation={(conversationId) => {
-          artifactRequestRef.current++;
-          store.dispatch({ type: 'conversation/select', conversationId });
-          clearConversationError();
-          composer.clearCreateState();
+    <SessionProvider>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          padding: '4px 8px',
+          background: '#0f172a',
         }}
-        onStartNewConversation={() => {
-          artifactRequestRef.current++;
-          store.dispatch({ type: 'conversation/select', conversationId: null });
-          clearConversationError();
-          composer.clearCreateState();
-        }}
-        onRetryActiveTranscript={retryActiveTranscript}
-        onRespondToPrompt={handleRespondToPrompt}
-        onCancelTurn={turnActions.handleCancel}
-        onRetryTurn={turnActions.handleRetry}
-        onBranchTurn={turnActions.handleBranch}
-        onFollowUpTurn={turnActions.handleFollowUp}
-        onArtifactSelect={handleArtifactSelect}
-        resolveEntryActions={turnActions.resolveEntryActions}
-        visibleArtifact={visibleArtifact}
-        onCloseArtifact={handleCloseArtifact}
-        composerSlot={
-          <ComposerPanel
-            draftText={composer.draftText}
-            submitState={composer.submitState}
-            validationMessage={composer.validationMessage}
-            canSubmit={composer.canSubmit}
-            policyLabel={composer.policyLabel}
-            disabled={composer.disabled}
-            onDraftChange={composer.onDraftChange}
-            onSubmit={composer.onSubmit}
-          />
-        }
-        operationsPanelSlot={
-          <OperationsErrorBoundary>
-            <WorkspaceOperationsPanel />
-          </OperationsErrorBoundary>
-        }
-      />
-    </ConnectionStateContext.Provider>
+      >
+        <LogoutButton />
+      </div>
+      <ConnectionStateContext.Provider value={state.connection}>
+        <ConnectionBanner
+          connection={state.connection}
+          staleControlReason={activeConversation?.controlState.staleReason ?? null}
+        />
+        <DaemonUnreachable />
+        <ExpiryBanner />
+        <WorkspaceLayout
+          conversations={selectConversationList(state)}
+          activeConversationId={state.activeConversationId}
+          activeConversation={activeConversation}
+          activeEntries={activeEntries}
+          activeHiddenEntryCount={activeTranscriptSummary.hiddenCount}
+          activeLoadState={selectActiveLoadState(state)}
+          activeHasMoreHistory={activeConversation?.hasMoreHistory ?? false}
+          isLoadingConversations={isLoadingConversations}
+          conversationErrorMessage={conversationErrorMessage}
+          onSelectConversation={(conversationId) => {
+            artifactRequestRef.current++;
+            store.dispatch({ type: 'conversation/select', conversationId });
+            clearConversationError();
+            composer.clearCreateState();
+          }}
+          onStartNewConversation={() => {
+            artifactRequestRef.current++;
+            store.dispatch({ type: 'conversation/select', conversationId: null });
+            clearConversationError();
+            composer.clearCreateState();
+          }}
+          onRetryActiveTranscript={retryActiveTranscript}
+          onRespondToPrompt={handleRespondToPrompt}
+          onCancelTurn={turnActions.handleCancel}
+          onRetryTurn={turnActions.handleRetry}
+          onBranchTurn={turnActions.handleBranch}
+          onFollowUpTurn={turnActions.handleFollowUp}
+          onArtifactSelect={handleArtifactSelect}
+          resolveEntryActions={turnActions.resolveEntryActions}
+          visibleArtifact={visibleArtifact}
+          onCloseArtifact={handleCloseArtifact}
+          composerSlot={
+            <ComposerPanel
+              draftText={composer.draftText}
+              submitState={composer.submitState}
+              validationMessage={composer.validationMessage}
+              canSubmit={composer.canSubmit}
+              policyLabel={composer.policyLabel}
+              disabled={composer.disabled}
+              onDraftChange={composer.onDraftChange}
+              onSubmit={composer.onSubmit}
+            />
+          }
+          operationsPanelSlot={
+            <OperationsErrorBoundary>
+              <WorkspaceOperationsPanel />
+            </OperationsErrorBoundary>
+          }
+        />
+      </ConnectionStateContext.Provider>
+    </SessionProvider>
   );
 }
