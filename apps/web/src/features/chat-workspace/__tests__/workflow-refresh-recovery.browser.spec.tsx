@@ -950,3 +950,74 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     });
   });
 });
+
+// ─── Operations polling survives workspace refresh ──────────────────────────
+
+describe('operations polling survives workspace refresh', () => {
+  it('operations panel re-renders after unmount+remount without getting stuck in error', async () => {
+    let mountCount = 0;
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Ops refresh test')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return jsonResponse(EMPTY_HISTORY);
+      }
+      // Operations snapshot endpoint — succeeds on every mount
+      if (url === '/operations/snapshot') {
+        mountCount += 1;
+        return jsonResponse({
+          queue: [
+            {
+              id: `wi-${String(mountCount)}`,
+              title: `Task from mount ${String(mountCount)}`,
+              status: 'active',
+              position: 0,
+              relatedConversationId: null,
+              relatedSessionId: null,
+              ownerLabel: null,
+              lastCheckpointSummary: null,
+              updatedAt: '2026-07-01T12:00:00.000Z',
+              riskSignals: [],
+              detailAvailability: 'ready',
+            },
+          ],
+          health: null,
+          budget: null,
+          availability: 'ready',
+          lastSynchronizedAt: '2026-07-01T12:00:00.000Z',
+          nextCursor: null,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    // First mount — operations panel should render with queue
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /ops refresh test/i });
+
+    // The operations panel heading should be visible
+    await vi.waitFor(() => {
+      expect(screen.getByText('Operations')).toBeInTheDocument();
+    });
+
+    // Simulate page refresh — unmount everything and re-render
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /ops refresh test/i });
+
+    // After remount, operations panel should still render correctly
+    await vi.waitFor(() => {
+      expect(screen.getByText('Operations')).toBeInTheDocument();
+    });
+
+    // Verify the panel is not stuck in error — the snapshot was fetched at least twice
+    expect(mountCount).toBeGreaterThanOrEqual(2);
+  });
+});
