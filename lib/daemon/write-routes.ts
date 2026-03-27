@@ -12,6 +12,13 @@ import {
   updateSession as hubUpdate,
 } from '../hydra-hub.ts';
 import { exit } from '../hydra-process.ts';
+import {
+  discoverControlsBatch,
+  executeControlMutation,
+  type ControlContext,
+} from './web-operations-controls.ts';
+import { loadHydraConfig as loadConfig } from '../hydra-config.ts';
+import type { ControlKind } from '@hydra/web-contracts';
 
 // ── Mutation helpers ──────────────────────────────────────────────────────────
 
@@ -1418,6 +1425,168 @@ function handleShutdown(ctx: WriteRouteCtx): Promise<boolean> {
   return Promise.resolve(true);
 }
 
+// ── Operations Control Mutation ───────────────────────────────────────────────
+
+function buildWriteControlContext(ctx: WriteRouteCtx): ControlContext {
+  return {
+    loadConfig: () => {
+      try {
+        const config = loadConfig();
+        const raw = config as Record<string, unknown>;
+        const mode = typeof raw['mode'] === 'string' ? raw['mode'] : 'auto';
+        const routing = raw['routing'] as Record<string, unknown> | undefined;
+        const routingMode = typeof routing?.['mode'] === 'string' ? routing['mode'] : 'balanced';
+        return { mode, routing: { mode: routingMode } };
+      } catch {
+        return { mode: 'auto', routing: { mode: 'balanced' } };
+      }
+    },
+    agentNames: ctx.AGENT_NAMES,
+    nowIso: ctx.nowIso,
+  };
+}
+
+async function handleOperationsControlAction(ctx: WriteRouteCtx): Promise<boolean> {
+  const { req, res, sendJson, sendError } = ctx;
+  const body = await ctx.readJsonBody(req);
+  const { workItemId, controlId, requestedOptionId, expectedRevision, requestId } =
+    parseOperationsControlActionInput(ctx.route, body);
+
+  if (workItemId === '') {
+    sendError(res, 400, 'Field "workItemId" is required');
+    return true;
+  }
+  if (controlId === '') {
+    sendError(res, 400, 'Field "controlId" is required');
+    return true;
+  }
+  if (requestedOptionId === '') {
+    sendError(res, 400, 'Field "requestedOptionId" is required');
+    return true;
+  }
+  if (expectedRevision === '') {
+    sendError(res, 400, 'Field "expectedRevision" is required');
+    return true;
+  }
+
+  const controlConfig = buildWriteControlContext(ctx);
+
+  const result = await ctx.enqueueMutation(
+    `operations:control workItemId=${workItemId} controlId=${controlId}`,
+    (state: HydraStateShape) =>
+      executeControlMutation(
+        state,
+        { workItemId, controlId, requestedOptionId, expectedRevision, requestId },
+        controlConfig,
+      ),
+    { event: 'operations:control', workItemId, controlId, requestedOptionId },
+  );
+
+  let httpStatus = 200;
+  if (result.outcome === 'stale') {
+    httpStatus = 409;
+  }
+
+  sendJson(res, httpStatus, result);
+  return true;
+}
+
+function readTrimmedStringField(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseOperationsControlActionInput(
+  route: string,
+  body: Record<string, unknown>,
+): {
+  workItemId: string;
+  controlId: string;
+  requestedOptionId: string;
+  expectedRevision: string;
+  requestId: string | undefined;
+} {
+  const routeMatch = matchOperationsControlActionRoute(route);
+  const requestIdRaw = readTrimmedStringField(body, 'requestId');
+  return {
+    workItemId: routeMatch?.workItemId ?? readTrimmedStringField(body, 'workItemId'),
+    controlId: routeMatch?.controlId ?? readTrimmedStringField(body, 'controlId'),
+    requestedOptionId: readTrimmedStringField(body, 'requestedOptionId'),
+    expectedRevision: readTrimmedStringField(body, 'expectedRevision'),
+    requestId: requestIdRaw === '' ? undefined : requestIdRaw,
+  };
+}
+
+function isControlKind(value: string): value is ControlKind {
+  return value === 'routing' || value === 'mode' || value === 'agent' || value === 'council';
+}
+
+async function handleBatchControlDiscovery(ctx: WriteRouteCtx): Promise<boolean> {
+  const { req, res, sendJson, sendError, readState } = ctx;
+  const body = await ctx.readJsonBody(req);
+
+  const workItemIdsRaw = body['workItemIds'];
+  if (!Array.isArray(workItemIdsRaw)) {
+    sendError(res, 400, 'Field "workItemIds" must be a non-empty array');
+    return true;
+  }
+
+  const workItemIds = workItemIdsRaw
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter((value) => value !== '');
+  if (workItemIds.length === 0) {
+    sendError(res, 400, 'Field "workItemIds" must contain at least one non-empty ID');
+    return true;
+  }
+
+  const kindFilterRaw = body['kindFilter'];
+  let kindFilter: ControlKind | undefined;
+  if (typeof kindFilterRaw === 'string' && kindFilterRaw.trim() !== '') {
+    const normalized = kindFilterRaw.trim();
+    if (!isControlKind(normalized)) {
+      sendError(res, 400, `Invalid kindFilter: ${normalized}`);
+      return true;
+    }
+    kindFilter = normalized;
+  }
+
+  const items = discoverControlsBatch(
+    readState(),
+    workItemIds,
+    buildWriteControlContext(ctx),
+    kindFilter,
+  );
+  sendJson(res, 200, { items });
+  return true;
+}
+
+function matchOperationsControlActionRoute(
+  route: string,
+): { workItemId: string; controlId: string } | null {
+  const prefix = '/operations/work-items/';
+  if (!route.startsWith(prefix)) {
+    return null;
+  }
+
+  const rest = route.slice(prefix.length);
+  const parts = rest.split('/');
+  if (parts.length !== 3 || parts[1] !== 'controls' || parts[2] === '') {
+    return null;
+  }
+
+  try {
+    return {
+      workItemId: decodeURIComponent(parts[0] ?? ''),
+      controlId: decodeURIComponent(parts[2] ?? ''),
+    };
+  } catch {
+    return {
+      workItemId: parts[0] ?? '',
+      controlId: parts[2] ?? '',
+    };
+  }
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 const POST_ROUTES: Partial<Record<string, (ctx: WriteRouteCtx) => Promise<boolean>>> = {
@@ -1442,6 +1611,7 @@ const POST_ROUTES: Partial<Record<string, (ctx: WriteRouteCtx) => Promise<boolea
   '/dead-letter/retry': handleDeadLetterRetry,
   '/admin/compact': handleAdminCompact,
   '/shutdown': handleShutdown,
+  '/operations/controls/discover': handleBatchControlDiscovery,
 };
 
 export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
@@ -1459,6 +1629,9 @@ export async function handleWriteRoute(ctx: WriteRouteCtx): Promise<boolean> {
   if (method === 'POST') {
     const handler = POST_ROUTES[route];
     if (handler != null) return handler(ctx);
+    if (matchOperationsControlActionRoute(route) != null) {
+      return handleOperationsControlAction(ctx);
+    }
     if (route.startsWith('/task/') && route.endsWith('/heartbeat')) return handleTaskHeartbeat(ctx);
   }
 

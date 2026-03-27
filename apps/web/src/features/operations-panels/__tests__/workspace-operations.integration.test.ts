@@ -16,6 +16,7 @@ import type {
   CouncilExecutionView,
   GetOperationsSnapshotResponse,
   GetWorkItemDetailResponse,
+  OperationalControlView,
   RoutingDecisionView,
   WorkQueueItemView,
 } from '@hydra/web-contracts';
@@ -28,6 +29,7 @@ import {
 import {
   selectAvailability,
   selectBudgetStatus,
+  selectControlsForSelectedItem,
   selectDetailAvailability,
   selectDetailFetchStatus,
   selectFilteredQueueItems,
@@ -165,6 +167,24 @@ function makeCouncil(overrides: Partial<CouncilExecutionView> = {}): CouncilExec
       },
     ],
     finalOutcome: 'Ship with codex implementation.',
+    ...overrides,
+  };
+}
+
+function makeControl(overrides: Partial<OperationalControlView> = {}): OperationalControlView {
+  return {
+    controlId: 'ctrl-1',
+    kind: 'routing',
+    label: 'Route override',
+    availability: 'actionable',
+    authority: 'granted',
+    reason: null,
+    options: [
+      { optionId: 'opt-1', label: 'Codex', selected: true, available: true },
+      { optionId: 'opt-2', label: 'Claude', selected: false, available: true },
+    ],
+    expectedRevision: 'rev-1',
+    lastResolvedAt: null,
     ...overrides,
   };
 }
@@ -316,6 +336,99 @@ describe('workspace operations integration', () => {
 
     assert.equal(selectHasPendingControl(state, 'wi-1'), true);
     assert.equal(selectHasPendingControl(state, 'wi-2'), false);
+  });
+
+  it('stale control resolution clears pending state without showing false success', () => {
+    const item = makeQueueItem({ id: 'wi-1', ownerLabel: 'codex' });
+    const initialDetail = makeDetailResponse({
+      item,
+      controls: [makeControl()],
+      routing: makeRouting({ currentRoute: 'codex' }),
+    });
+    const authoritativeDetail = makeDetailResponse({
+      item,
+      controls: [makeControl({ availability: 'stale', expectedRevision: 'rev-2' })],
+      routing: makeRouting({ currentRoute: 'codex' }),
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: [item] }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: initialDetail },
+      {
+        type: 'controls/submit-pending',
+        pending: {
+          requestId: 'req-1',
+          workItemId: 'wi-1',
+          controlId: 'ctrl-1',
+          submittedAt: '2026-06-01T12:00:00.000Z',
+          requestedOptionId: 'opt-2',
+        },
+      },
+      { type: 'controls/submit-resolved', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: authoritativeDetail },
+    ]);
+
+    assert.equal(selectHasPendingControl(state, 'wi-1'), false);
+    assert.equal(selectControlsForSelectedItem(state)[0]?.availability, 'stale');
+    assert.equal(selectSelectedRouting(state)?.currentRoute, 'codex');
+  });
+
+  it('authoritative refetch converges queue and detail after a control resolves elsewhere', () => {
+    const originalQueueItem = makeQueueItem({ id: 'wi-1', ownerLabel: 'codex' });
+    const refreshedQueueItem = makeQueueItem({
+      id: 'wi-1',
+      ownerLabel: 'claude',
+      updatedAt: '2026-06-01T12:05:00.000Z',
+    });
+    const originalDetail = makeDetailResponse({
+      item: originalQueueItem,
+      controls: [makeControl()],
+      routing: makeRouting({ currentRoute: 'codex' }),
+    });
+    const refreshedDetail = makeDetailResponse({
+      item: refreshedQueueItem,
+      controls: [
+        makeControl({
+          availability: 'accepted',
+          expectedRevision: 'rev-2',
+          lastResolvedAt: '2026-06-01T12:05:00.000Z',
+          options: [
+            { optionId: 'opt-1', label: 'Codex', selected: false, available: true },
+            { optionId: 'opt-2', label: 'Claude', selected: true, available: true },
+          ],
+        }),
+      ],
+      routing: makeRouting({
+        currentRoute: 'claude',
+        changedAt: '2026-06-01T12:05:00.000Z',
+      }),
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: [originalQueueItem] }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: originalDetail },
+      {
+        type: 'controls/submit-pending',
+        pending: {
+          requestId: 'req-2',
+          workItemId: 'wi-1',
+          controlId: 'ctrl-1',
+          submittedAt: '2026-06-01T12:04:00.000Z',
+          requestedOptionId: 'opt-2',
+        },
+      },
+      { type: 'controls/submit-resolved', workItemId: 'wi-1' },
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: [refreshedQueueItem] }) },
+      { type: 'selection/detail-loaded', detail: refreshedDetail },
+    ]);
+
+    assert.equal(selectHasPendingControl(state, 'wi-1'), false);
+    assert.equal(selectQueueItems(state)[0]?.ownerLabel, 'claude');
+    assert.equal(selectSelectedDetail(state)?.item.ownerLabel, 'claude');
+    assert.equal(selectSelectedRouting(state)?.currentRoute, 'claude');
+    assert.equal(selectControlsForSelectedItem(state)[0]?.availability, 'accepted');
   });
 
   // ─── Error lifecycle ────────────────────────────────────────────────────

@@ -7,11 +7,16 @@
  * - Dispatches selection/detail-failed on non-abort errors
  * - Ignores results after dispose
  * - cancelSync aborts in-flight and prevents dispatch
+ * - fetchSnapshot dispatches snapshot lifecycle with stale-response protection
  */
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { GetWorkItemDetailResponse, WorkQueueItemView } from '@hydra/web-contracts';
+import type {
+  GetOperationsSnapshotResponse,
+  GetWorkItemDetailResponse,
+  WorkQueueItemView,
+} from '@hydra/web-contracts';
 
 import type { OperationsClient } from '../api/operations-client.ts';
 import type { OperationsAction } from '../model/operations-reducer.ts';
@@ -71,6 +76,20 @@ function createDeferredFetch<T>(): DeferredFetch<T> {
   return { promise, resolve, reject };
 }
 
+function makeSnapshotResponse(
+  overrides: Partial<GetOperationsSnapshotResponse> = {},
+): GetOperationsSnapshotResponse {
+  return {
+    queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],
+    health: null,
+    budget: null,
+    availability: 'ready',
+    lastSynchronizedAt: NOW,
+    nextCursor: null,
+    ...overrides,
+  };
+}
+
 function createMockClient(
   getWorkItemDetailImpl: (
     workItemId: string,
@@ -86,6 +105,25 @@ function createMockClient(
     submitControlAction: mock.fn(() => Promise.reject(new Error('not implemented'))),
     discoverControls: mock.fn(() => Promise.reject(new Error('not implemented'))),
   } as unknown as OperationsClient;
+}
+
+function createSnapshotMockClient(getSnapshotImpl: () => Promise<GetOperationsSnapshotResponse>): {
+  client: OperationsClient;
+  discoverControlsMock: ReturnType<typeof mock.fn>;
+} {
+  const discoverControlsMock = mock.fn(() => Promise.resolve({ items: [] }));
+  return {
+    client: {
+      getSnapshot: mock.fn(getSnapshotImpl),
+      getWorkItemDetail: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      getWorkItemCheckpoints: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      getWorkItemExecution: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      getWorkItemControls: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      submitControlAction: mock.fn(() => Promise.reject(new Error('not implemented'))),
+      discoverControls: discoverControlsMock,
+    } as unknown as OperationsClient,
+    discoverControlsMock,
+  };
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -404,5 +442,353 @@ describe('createSyncController', () => {
     assert.equal(signals[9].aborted, false, 'last signal should still be active');
 
     controller.dispose();
+  });
+
+  // ─── Issue 2: reconcileDetail ───────────────────────────────────────────
+
+  describe('reconcileDetail', () => {
+    it('fetches detail when workItemId matches currentSelectedId', async () => {
+      const detail = makeDetailResponse({ item: makeQueueItem({ id: 'wq-1' }) });
+      const deferred = createDeferredFetch<GetWorkItemDetailResponse>();
+      const client = createMockClient(() => deferred.promise);
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.reconcileDetail('wq-1', 'wq-1');
+
+      // Should dispatch detail-loading and start fetch
+      assert.equal(dispatched.length, 1);
+      assert.equal(dispatched[0].type, 'selection/detail-loading');
+
+      deferred.resolve(detail);
+      await deferred.promise;
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(dispatched.length, 2);
+      assert.equal(dispatched[1].type, 'selection/detail-loaded');
+    });
+
+    it('skips fetch when workItemId differs from currentSelectedId', async () => {
+      let fetchCalled = false;
+      const client = createMockClient(() => {
+        fetchCalled = true;
+        return Promise.resolve(makeDetailResponse());
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      // Control resolved for A, but user already selected B
+      controller.reconcileDetail('wq-A', 'wq-B');
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(fetchCalled, false, 'should not fetch detail for non-selected item');
+      assert.equal(dispatched.length, 0, 'should not dispatch any actions');
+    });
+
+    it('skips fetch when currentSelectedId is null', async () => {
+      let fetchCalled = false;
+      const client = createMockClient(() => {
+        fetchCalled = true;
+        return Promise.resolve(makeDetailResponse());
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.reconcileDetail('wq-A', null);
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(fetchCalled, false);
+      assert.equal(dispatched.length, 0);
+    });
+
+    it('does not abort in-flight fetch for a different item', async () => {
+      const deferredB = createDeferredFetch<GetWorkItemDetailResponse>();
+      const detailB = makeDetailResponse({ item: makeQueueItem({ id: 'wq-B' }) });
+      let bSignal: AbortSignal | undefined;
+
+      const client = createMockClient((workItemId, options) => {
+        if (workItemId === 'wq-B') {
+          bSignal = options?.signal;
+          return deferredB.promise;
+        }
+        return Promise.resolve(makeDetailResponse({ item: makeQueueItem({ id: workItemId }) }));
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      // User selects B — B is now in-flight
+      controller.syncDetail('wq-B');
+      assert.ok(bSignal, 'B fetch should have started');
+      assert.equal(bSignal.aborted, false);
+
+      // Control for A resolves, but user is on B
+      controller.reconcileDetail('wq-A', 'wq-B');
+
+      // B's fetch must NOT be aborted
+      assert.equal(bSignal.aborted, false, 'B fetch must not be aborted by reconcile for A');
+
+      deferredB.resolve(detailB);
+      await deferredB.promise;
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      const loaded = dispatched.filter((a) => a.type === 'selection/detail-loaded');
+      assert.equal(loaded.length, 1);
+      if (loaded[0].type === 'selection/detail-loaded') {
+        assert.equal(loaded[0].detail.item.id, 'wq-B');
+      }
+    });
+
+    it('is a no-op after dispose', async () => {
+      const client = createMockClient(() => Promise.resolve(makeDetailResponse()));
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.dispose();
+      controller.reconcileDetail('wq-1', 'wq-1');
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(dispatched.length, 0);
+    });
+  });
+
+  // ─── Issue 3: fetchSnapshot stale-response protection ───────────────────
+
+  describe('fetchSnapshot', () => {
+    it('dispatches snapshot/request then snapshot/success on successful fetch', async () => {
+      const snapshot = makeSnapshotResponse({ queue: [] });
+      const { client } = createSnapshotMockClient(() => Promise.resolve(snapshot));
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.fetchSnapshot();
+
+      // snapshot/request dispatched synchronously
+      assert.equal(dispatched.length, 1);
+      assert.equal(dispatched[0].type, 'snapshot/request');
+
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(dispatched.length, 2);
+      assert.equal(dispatched[1].type, 'snapshot/success');
+      if (dispatched[1].type === 'snapshot/success') {
+        assert.deepEqual(dispatched[1].snapshot, snapshot);
+      }
+    });
+
+    it('drops stale snapshot response when a newer fetch is initiated', async () => {
+      const snapshotOld = makeSnapshotResponse({
+        queue: [makeQueueItem({ id: 'old-1' })],
+      });
+      const snapshotNew = makeSnapshotResponse({
+        queue: [makeQueueItem({ id: 'new-1' })],
+      });
+
+      const deferredOld = createDeferredFetch<GetOperationsSnapshotResponse>();
+      const deferredNew = createDeferredFetch<GetOperationsSnapshotResponse>();
+
+      let callCount = 0;
+      const { client } = createSnapshotMockClient(() => {
+        callCount += 1;
+        return callCount === 1 ? deferredOld.promise : deferredNew.promise;
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      // First fetch
+      controller.fetchSnapshot();
+      // Second fetch before first resolves — should invalidate first
+      controller.fetchSnapshot();
+
+      // Resolve the newer fetch first
+      deferredNew.resolve(snapshotNew);
+      await deferredNew.promise;
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      // Now resolve the stale first fetch
+      deferredOld.resolve(snapshotOld);
+      await deferredOld.promise;
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      // Only the new snapshot should have been dispatched as success
+      const successActions = dispatched.filter((a) => a.type === 'snapshot/success');
+      assert.equal(successActions.length, 1);
+      if (successActions[0].type === 'snapshot/success') {
+        assert.equal(successActions[0].snapshot.queue[0].id, 'new-1');
+      }
+    });
+
+    it('drops stale snapshot failure when a newer fetch succeeded', async () => {
+      const snapshotNew = makeSnapshotResponse({
+        queue: [makeQueueItem({ id: 'new-1' })],
+      });
+
+      const deferredOld = createDeferredFetch<GetOperationsSnapshotResponse>();
+      const deferredNew = createDeferredFetch<GetOperationsSnapshotResponse>();
+
+      let callCount = 0;
+      const { client } = createSnapshotMockClient(() => {
+        callCount += 1;
+        return callCount === 1 ? deferredOld.promise : deferredNew.promise;
+      });
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.fetchSnapshot();
+      controller.fetchSnapshot();
+
+      // Resolve the new one first
+      deferredNew.resolve(snapshotNew);
+      await deferredNew.promise;
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      // Reject the stale one — failure must be dropped
+      deferredOld.reject(new Error('Network failure'));
+      try {
+        await deferredOld.promise;
+      } catch {
+        // expected
+      }
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      // Should see success but no failure dispatch
+      const failureActions = dispatched.filter((a) => a.type === 'snapshot/failure');
+      assert.equal(failureActions.length, 0);
+    });
+
+    it('dispatches snapshot/failure on error', async () => {
+      const { client } = createSnapshotMockClient(() =>
+        Promise.reject(new Error('Network failure')),
+      );
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.fetchSnapshot();
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(dispatched.length, 2);
+      assert.equal(dispatched[0].type, 'snapshot/request');
+      assert.equal(dispatched[1].type, 'snapshot/failure');
+    });
+
+    it('does not trigger control discovery as a side effect of snapshot success', async () => {
+      const snapshot = makeSnapshotResponse({
+        queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],
+      });
+      const { client, discoverControlsMock } = createSnapshotMockClient(() =>
+        Promise.resolve(snapshot),
+      );
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.fetchSnapshot();
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      const discoveryActions = dispatched.filter((a) => a.type === 'controls/discovery-loaded');
+      assert.equal(discoveryActions.length, 0);
+      assert.equal(discoverControlsMock.mock.calls.length, 0);
+    });
+
+    it('hydrates control discovery only when requested explicitly', async () => {
+      const { client, discoverControlsMock } = createSnapshotMockClient(() =>
+        Promise.resolve(makeSnapshotResponse()),
+      );
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.syncControlDiscovery(['wq-1', 'wq-2']);
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      const discoveryActions = dispatched.filter((a) => a.type === 'controls/discovery-loaded');
+      assert.equal(discoveryActions.length, 1);
+      assert.equal(discoverControlsMock.mock.calls.length, 1);
+    });
+
+    it('is a no-op after dispose', async () => {
+      const { client } = createSnapshotMockClient(() => Promise.resolve(makeSnapshotResponse()));
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.dispose();
+      controller.fetchSnapshot();
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(dispatched.length, 0);
+    });
   });
 });

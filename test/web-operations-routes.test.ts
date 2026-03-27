@@ -8,10 +8,18 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse, Server } from 'node:http';
 import { EventEmitter } from 'node:events';
 import type { ReadRouteCtx, HydraStateShape, TaskEntry, UsageCheckResult } from '../lib/types.ts';
 import { handleOperationsReadRoute } from '../lib/daemon/web-operations-routes.ts';
+import { handleWriteRoute } from '../lib/daemon/write-routes.ts';
+import { projectWorkItemDetail } from '../lib/daemon/web-operations-projection.ts';
+import {
+  discoverControls,
+  computeRevisionToken,
+  executeControlMutation,
+  type ControlContext,
+} from '../lib/daemon/web-operations-controls.ts';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -998,12 +1006,19 @@ describe('handleOperationsReadRoute', () => {
       assert.equal(participants.length, 1);
     });
 
-    it('returns empty controls array', () => {
+    it('returns populated controls array for active work item', () => {
       const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
       const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
       handleOperationsReadRoute(ctx);
       const data = ctx.captured.data as Record<string, unknown>;
-      assert.deepStrictEqual(data['controls'], []);
+      const controls = data['controls'] as unknown[];
+      assert.ok(Array.isArray(controls), 'controls should be an array');
+      assert.ok(controls.length > 0, 'controls should be populated for active work items');
+      const first = controls[0] as Record<string, unknown>;
+      assert.ok(typeof first['controlId'] === 'string');
+      assert.ok(typeof first['kind'] === 'string');
+      assert.ok(typeof first['availability'] === 'string');
+      assert.ok(typeof first['authority'] === 'string');
     });
 
     it('returns unavailable item budget for work item', () => {
@@ -1307,6 +1322,916 @@ describe('handleOperationsReadRoute', () => {
       const handled = handleOperationsReadRoute(ctx);
       assert.equal(handled, true);
       assert.equal(ctx.captured.statusCode, 200);
+    });
+  });
+});
+
+// ── T038: Control Discovery, Authority, Actionable/Read-Only, Outcomes ──────
+
+function makeControlConfig(overrides: Partial<ControlContext> = {}): ControlContext {
+  return {
+    loadConfig: () => ({ mode: 'auto', routing: { mode: 'balanced' } }),
+    agentNames: ['claude', 'gemini', 'codex'],
+    nowIso: () => '2025-01-15T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeWriteCtx(
+  method: string,
+  routePath: string,
+  state: HydraStateShape,
+  bodyData: Record<string, unknown> = {},
+): {
+  captured: { statusCode: number; data: unknown };
+  ctx: Parameters<typeof handleWriteRoute>[0];
+} {
+  const url = new URL(`http://localhost${routePath}`);
+  const captured: { statusCode: number; data: unknown } = { statusCode: 0, data: null };
+  const req = new EventEmitter() as IncomingMessage & { headers: Record<string, string> };
+  req.headers = {};
+  const res = new EventEmitter() as ServerResponse & {
+    writeHead: () => ServerResponse;
+    write: () => boolean;
+    end: () => ServerResponse;
+  };
+  res.writeHead = () => res;
+  res.write = () => true;
+  res.end = () => res;
+
+  const sendJson = (_r: ServerResponse, code: number, data: unknown) => {
+    captured.statusCode = code;
+    captured.data = data;
+  };
+  const sendError = (_r: ServerResponse, code: number, msg: string) => {
+    captured.statusCode = code;
+    captured.data = { ok: false, error: msg };
+  };
+
+  return {
+    captured,
+    ctx: {
+      method,
+      route: routePath,
+      requestUrl: url,
+      req,
+      res,
+      sendJson,
+      sendError,
+      writeStatus: () => {},
+      readStatus: () => ({ running: true }),
+      checkUsage: () => ({
+        level: 'normal',
+        percent: 10,
+        todayTokens: 100,
+        message: 'ok',
+        confidence: 1,
+        model: 'test',
+        budget: 1000,
+        used: 100,
+        remaining: 900,
+        resetAt: '',
+        resetInMs: 0,
+        agents: {},
+      }),
+      getModelSummary: () => ({
+        claude: { active: 'claude-opus-4-6', isDefault: true },
+      }),
+      readState: () => state,
+      getSummary: () => ({ project: 'test', tasks: 0, handoffs: 0 }),
+      buildPrompt: () => '',
+      suggestNext: () => ({ action: 'none' }),
+      readEvents: () => [],
+      replayEvents: () => [],
+      readJsonBody: () => Promise.resolve(bodyData),
+      enqueueMutation: <T>(_label: string, mutator: (s: HydraStateShape) => T) =>
+        Promise.resolve(mutator(state)),
+      ensureKnownAgent: () => {},
+      ensureKnownStatus: () => {},
+      parseList: (val: unknown) =>
+        String(val)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      getCurrentBranch: () => 'main',
+      toSessionId: () => 'ses_test',
+      nowIso: () => '2025-01-15T12:00:00.000Z',
+      classifyTask: () => 'feat',
+      nextId: (prefix: string, items: unknown[]) => `${prefix}_${String(items.length + 1)}`,
+      detectCycle: () => false,
+      autoUnblock: () => {},
+      AGENT_NAMES: ['claude', 'gemini', 'codex'],
+      getAgent: () => {},
+      listAgents: () => [],
+      resolveVerificationPlan: () => ({}),
+      runVerification: () => {},
+      archiveState: () => 0,
+      truncateEventsFile: () => 0,
+      appendEvent: () => {},
+      broadcastEvent: () => {},
+      setIsShuttingDown: () => {},
+      server: {} as Server,
+      createSnapshot: () => ({}),
+      cleanOldSnapshots: () => {},
+      checkIdempotency: null,
+      createTaskWorktree: () => null,
+      mergeTaskWorktree: () => ({}),
+      cleanupTaskWorktree: () => {},
+      sseClients: new Set(),
+      readArchive: () => ({
+        snapshots: [],
+        lastArchiveAt: null,
+        tasks: [],
+        handoffs: [],
+        blockers: [],
+      }),
+      getMetricsSummary: () => ({}),
+      getEventCount: () => 0,
+    } as Parameters<typeof handleWriteRoute>[0],
+  };
+}
+
+describe('Control Discovery (T038/T039)', () => {
+  describe('discoverControls', () => {
+    it('discovers four control kinds for an active work item', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      assert.equal(controls.length, 4);
+      const kinds = controls.map((c) => c.kind);
+      assert.deepStrictEqual(kinds, ['routing', 'mode', 'agent', 'council']);
+    });
+
+    it('marks all controls as actionable for non-terminal work items', () => {
+      const task = makeTask({ id: 'task-1', status: 'in_progress' });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      for (const control of controls) {
+        assert.equal(control.availability, 'actionable');
+        assert.equal(control.authority, 'granted');
+        assert.equal(control.reason, null);
+      }
+    });
+
+    it('marks all controls as read-only for terminal work items', () => {
+      for (const status of ['done', 'failed', 'cancelled'] as const) {
+        const task = makeTask({ id: 'task-1', status });
+        const config = makeControlConfig();
+        const controls = discoverControls(task, config);
+        for (const control of controls) {
+          assert.equal(
+            control.availability,
+            'read-only',
+            `Expected read-only for status=${status}`,
+          );
+          assert.equal(
+            control.authority,
+            'unavailable',
+            `Expected unavailable authority for status=${status}`,
+          );
+          assert.equal(control.reason, `Work item is ${status}`);
+        }
+      }
+    });
+
+    it('includes expectedRevision for actionable controls', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      for (const control of controls) {
+        assert.ok(
+          typeof control.expectedRevision === 'string' && control.expectedRevision.length > 0,
+          'actionable controls must have expectedRevision',
+        );
+      }
+    });
+
+    it('excludes expectedRevision for read-only controls', () => {
+      const task = makeTask({ id: 'task-1', status: 'done' });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      for (const control of controls) {
+        assert.equal(control.expectedRevision, null);
+      }
+    });
+
+    it('includes options with selected state for routing strategy', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const config = makeControlConfig({
+        loadConfig: () => ({ mode: 'auto', routing: { mode: 'performance' } }),
+      });
+      const controls = discoverControls(task, config);
+      const routing = controls.find((c) => c.kind === 'routing');
+      assert.ok(routing != null);
+      const selected = routing.options.find((o) => o.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'routing-performance');
+    });
+
+    it('includes agent options from config', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'gemini' });
+      const config = makeControlConfig({ agentNames: ['claude', 'gemini', 'codex'] });
+      const controls = discoverControls(task, config);
+      const agentControl = controls.find((c) => c.kind === 'agent');
+      assert.ok(agentControl != null);
+      assert.equal(agentControl.options.length, 3);
+      const selected = agentControl.options.find((o) => o.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'agent-gemini');
+    });
+
+    it('includes mode options reflecting current dispatch mode', () => {
+      const task = makeTask({
+        id: 'task-1',
+        status: 'in_progress',
+        routingHistory: [
+          { route: 'claude', mode: 'council', changedAt: '2025-01-15T12:00:00Z', reason: 'test' },
+        ],
+      });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      const mode = controls.find((c) => c.kind === 'mode');
+      assert.ok(mode != null);
+      const selected = mode.options.find((o) => o.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'mode-council');
+    });
+
+    it('marks options as unavailable for terminal work items', () => {
+      const task = makeTask({ id: 'task-1', status: 'done' });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      for (const control of controls) {
+        for (const option of control.options) {
+          assert.equal(option.available, false);
+        }
+      }
+    });
+
+    it('builds unique controlId per work-item and kind', () => {
+      const task = makeTask({ id: 'task-1' });
+      const config = makeControlConfig();
+      const controls = discoverControls(task, config);
+      const ids = new Set(controls.map((c) => c.controlId));
+      assert.equal(ids.size, controls.length, 'controlIds must be unique');
+      for (const control of controls) {
+        assert.ok(control.controlId.startsWith('task-1:'), 'controlId must include workItemId');
+      }
+    });
+  });
+
+  describe('computeRevisionToken', () => {
+    it('returns a non-empty string', () => {
+      const task = makeTask({ id: 'task-1' });
+      const token = computeRevisionToken(task);
+      assert.ok(typeof token === 'string' && token.length > 0);
+    });
+
+    it('returns the same token for the same task state', () => {
+      const task = makeTask({ id: 'task-1', updatedAt: '2025-01-15T12:00:00Z' });
+      assert.equal(computeRevisionToken(task), computeRevisionToken(task));
+    });
+
+    it('returns a different token when owner changes', () => {
+      const task1 = makeTask({ id: 'task-1', owner: 'claude', updatedAt: '2025-01-15T12:00:00Z' });
+      const task2 = makeTask({ id: 'task-1', owner: 'gemini', updatedAt: '2025-01-15T12:00:00Z' });
+      assert.notEqual(computeRevisionToken(task1), computeRevisionToken(task2));
+    });
+
+    it('returns a different token when status changes', () => {
+      const task1 = makeTask({ id: 'task-1', status: 'todo', updatedAt: '2025-01-15T12:00:00Z' });
+      const task2 = makeTask({
+        id: 'task-1',
+        status: 'in_progress',
+        updatedAt: '2025-01-15T12:00:00Z',
+      });
+      assert.notEqual(computeRevisionToken(task1), computeRevisionToken(task2));
+    });
+  });
+
+  describe('GET /operations/work-items/:id/controls', () => {
+    it('returns controls for a valid work item', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/controls', state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      assert.equal(data['workItemId'], 'task-1');
+      const controls = data['controls'] as unknown[];
+      assert.ok(controls.length > 0);
+      assert.ok(!('revision' in data));
+      assert.equal(data['availability'], 'ready');
+    });
+
+    it('returns 404 for missing work item', () => {
+      const state = makeState({ tasks: [] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/missing/controls', state);
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 404);
+    });
+
+    it('filters controls by kind query parameter', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/controls', state, {
+        kind: 'routing',
+      });
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const controls = data['controls'] as Array<Record<string, unknown>>;
+      assert.equal(controls.length, 1);
+      assert.equal(controls[0]['kind'], 'routing');
+    });
+
+    it('rejects invalid kind query parameter', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/controls', state, {
+        kind: 'invalid',
+      });
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 400);
+    });
+
+    it('filters control options to assignable agent names only', () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1', owner: 'claude' })] });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1/controls', state);
+      ctx.getModelSummary = () =>
+        ({
+          claude: { active: 'claude-opus-4-6', isDefault: true },
+          gemini: { active: 'gemini-3-pro', isDefault: false },
+          _mode: { active: 'balanced', isDefault: false },
+        }) as ReturnType<typeof ctx.getModelSummary>;
+      const handled = handleOperationsReadRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(ctx.captured.statusCode, 200);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const controls = data['controls'] as Array<Record<string, unknown>>;
+      const agentControl = controls.find((control) => control['kind'] === 'agent');
+      assert.ok(agentControl != null);
+      const options = agentControl['options'] as Array<Record<string, unknown>>;
+      assert.ok(options.some((option) => option['optionId'] === 'agent-claude'));
+      assert.ok(options.some((option) => option['optionId'] === 'agent-gemini'));
+      assert.ok(options.every((option) => option['optionId'] !== 'agent-_mode'));
+    });
+  });
+
+  describe('POST /operations/controls/discover', () => {
+    it('returns controls for multiple work items', async () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-1' }), makeTask({ id: 'task-2', status: 'done' })],
+      });
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['task-1', 'task-2'],
+      });
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
+      const items = data['items'] as Array<Record<string, unknown>>;
+      assert.equal(items.length, 2);
+      assert.equal(items[0]['workItemId'], 'task-1');
+      assert.equal(items[0]['availability'], 'ready');
+      assert.equal(items[1]['workItemId'], 'task-2');
+    });
+
+    it('returns unavailable for missing work items', async () => {
+      const state = makeState({ tasks: [] });
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['missing'],
+      });
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
+      const items = data['items'] as Array<Record<string, unknown>>;
+      assert.equal(items.length, 1);
+      assert.equal(items[0]['availability'], 'unavailable');
+    });
+
+    it('returns 400 when workItemIds is missing', async () => {
+      const state = makeState();
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {});
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 400);
+    });
+
+    it('supports kindFilter body parameter', async () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['task-1'],
+        kindFilter: 'agent',
+      });
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
+      const items = data['items'] as Array<Record<string, unknown>>;
+      const controls = items[0]['controls'] as Array<Record<string, unknown>>;
+      assert.equal(controls.length, 1);
+      assert.equal(controls[0]['kind'], 'agent');
+    });
+
+    it('rejects invalid kindFilter', async () => {
+      const state = makeState({ tasks: [makeTask({ id: 'task-1' })] });
+      const { captured, ctx } = makeWriteCtx('POST', '/operations/controls/discover', state, {
+        workItemIds: ['task-1'],
+        kindFilter: 'bogus',
+      });
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 400);
+    });
+  });
+});
+
+describe('Control Mutations (T038/T040)', () => {
+  describe('executeControlMutation', () => {
+    it('accepts a valid routing strategy change', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:routing',
+          requestedOptionId: 'routing-performance',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'accepted');
+      assert.equal(result.workItemId, 'task-1');
+      assert.ok(result.resolvedAt !== '');
+      const detail = projectWorkItemDetail(state, 'task-1', config);
+      assert.ok(detail?.routing != null);
+      assert.equal(detail.routing.currentMode, 'auto');
+      const selected = result.control.options.find((option) => option.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'routing-performance');
+    });
+
+    it('accepts an agent reassignment', () => {
+      const task = makeTask({
+        id: 'task-1',
+        status: 'todo',
+        owner: 'claude',
+        assignmentHistory: [
+          {
+            agent: 'claude',
+            role: null,
+            state: 'waiting',
+            startedAt: '2025-01-15T12:00:00.000Z',
+            endedAt: null,
+          },
+        ],
+      });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-gemini',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'accepted');
+      assert.equal(task.owner, 'gemini');
+      const history = (task as Record<string, unknown>)['assignmentHistory'] as Array<
+        Record<string, unknown>
+      >;
+      assert.equal(history.length, 2);
+      assert.equal(history[0]?.['agent'], 'claude');
+      assert.equal(history[0]?.['endedAt'], result.resolvedAt);
+      assert.equal(history[1]?.['agent'], 'gemini');
+    });
+
+    it('accepts a mode change', () => {
+      const task = makeTask({ id: 'task-1', status: 'in_progress' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:mode',
+          requestedOptionId: 'mode-council',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'accepted');
+    });
+
+    it('rejects mutation for non-existent work item', () => {
+      const state = makeState({ tasks: [] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'missing',
+          controlId: 'missing:routing',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: 'abc123',
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'rejected');
+      assert.ok(result.message?.includes('not found'));
+    });
+
+    it('rejects mutation for terminal work item', () => {
+      const task = makeTask({ id: 'task-1', status: 'done' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      // Must compute revision BEFORE testing terminal check —
+      // terminal tasks still have a revision for read purposes
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:routing',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: computeRevisionToken(task),
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'rejected');
+      assert.ok(result.message?.includes('done'));
+    });
+
+    it('returns stale outcome when revision token mismatches', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:routing',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: 'stale-token-that-does-not-match',
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'stale');
+      assert.ok(result.message?.includes('Revision'));
+    });
+
+    it('stale outcome control has availability "stale" and lastResolvedAt set', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:routing',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: 'stale-token',
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'stale');
+      assert.equal(result.control.availability, 'stale');
+      assert.equal(result.control.lastResolvedAt, result.resolvedAt);
+      // Discovered options and kind are preserved
+      assert.equal(result.control.kind, 'routing');
+      assert.ok(result.control.options.length > 0);
+    });
+
+    it('returns superseded when option is already selected', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-claude',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'superseded');
+      assert.ok(result.message?.includes('already'));
+    });
+
+    it('superseded outcome control has availability "superseded" and lastResolvedAt set', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-claude',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'superseded');
+      assert.equal(result.control.availability, 'superseded');
+      assert.equal(result.control.lastResolvedAt, result.resolvedAt);
+      // Discovered options and kind are preserved
+      assert.equal(result.control.kind, 'agent');
+      assert.ok(result.control.options.length > 0);
+      const selected = result.control.options.find((o) => o.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'agent-claude');
+    });
+
+    it('rejects unknown option', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:routing',
+          requestedOptionId: 'routing-unknown',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'rejected');
+      assert.ok(result.message?.includes('Unknown option'));
+      assert.equal(result.control.kind, 'routing');
+    });
+
+    it('rejects invalid control ID', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'bogus-control-id',
+          requestedOptionId: 'routing-economy',
+          expectedRevision: computeRevisionToken(task),
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'rejected');
+      assert.ok(result.message?.includes('Invalid control ID'));
+    });
+
+    it('returns updated control view after accepted mutation', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-gemini',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'accepted');
+      assert.ok(result.control != null);
+      assert.equal(result.control.kind, 'agent');
+      assert.equal(result.control.availability, 'accepted');
+      assert.equal(result.control.lastResolvedAt, result.resolvedAt);
+      // After mutation, the control should show the new state
+      const selected = result.control.options.find((o) => o.selected);
+      assert.ok(selected != null);
+      assert.equal(selected.optionId, 'agent-gemini');
+    });
+
+    it('preserves rejected control kind for agent mutations', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:agent',
+          requestedOptionId: 'agent-unknown',
+          expectedRevision: computeRevisionToken(task),
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'rejected');
+      assert.equal(result.control.kind, 'agent');
+    });
+
+    it('requests council deliberation', () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const config = makeControlConfig();
+      const revision = computeRevisionToken(task);
+      const result = executeControlMutation(
+        state,
+        {
+          workItemId: 'task-1',
+          controlId: 'task-1:council',
+          requestedOptionId: 'council-request',
+          expectedRevision: revision,
+        },
+        config,
+      );
+      assert.equal(result.outcome, 'accepted');
+      const councilHistory = (task as Record<string, unknown>)['councilHistory'] as Record<
+        string,
+        unknown
+      >;
+      assert.equal(councilHistory['status'], 'waiting');
+    });
+  });
+
+  describe('POST /operations/work-items/:workItemId/controls/:controlId', () => {
+    it('accepts a valid control mutation via route', async () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const revision = computeRevisionToken(task);
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
+          requestedOptionId: 'agent-gemini',
+          expectedRevision: revision,
+        },
+      );
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
+      assert.equal(data['outcome'], 'accepted');
+    });
+
+    it('returns 409 for stale revision', async () => {
+      const task = makeTask({ id: 'task-1', status: 'todo' });
+      const state = makeState({ tasks: [task] });
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Arouting',
+        state,
+        {
+          requestedOptionId: 'routing-economy',
+          expectedRevision: 'stale-revision',
+        },
+      );
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 409);
+      const data = captured.data as Record<string, unknown>;
+      assert.equal(data['outcome'], 'stale');
+    });
+
+    it('returns 200 for rejected mutation', async () => {
+      const task = makeTask({ id: 'task-1', status: 'done' });
+      const state = makeState({ tasks: [task] });
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Arouting',
+        state,
+        {
+          requestedOptionId: 'routing-economy',
+          expectedRevision: computeRevisionToken(task),
+        },
+      );
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
+      assert.equal(data['outcome'], 'rejected');
+    });
+
+    it('returns 200 for superseded mutation', async () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
+          requestedOptionId: 'agent-claude',
+          expectedRevision: computeRevisionToken(task),
+        },
+      );
+      const handled = await handleWriteRoute(ctx);
+      assert.equal(handled, true);
+      assert.equal(captured.statusCode, 200);
+      const data = captured.data as Record<string, unknown>;
+      assert.equal(data['outcome'], 'superseded');
+    });
+
+    it('validates required fields', async () => {
+      const state = makeState();
+      const full: Record<string, string> = {
+        requestedOptionId: 'routing-economy',
+        expectedRevision: 'some-rev',
+      };
+      for (const missingField of ['requestedOptionId', 'expectedRevision']) {
+        const body = { ...full };
+        body[missingField] = '';
+        const { captured, ctx } = makeWriteCtx(
+          'POST',
+          '/operations/work-items/task-1/controls/task-1%3Arouting',
+          state,
+          body,
+        );
+        await handleWriteRoute(ctx);
+        assert.equal(captured.statusCode, 400, `Missing ${missingField} should return 400`);
+      }
+    });
+
+    it('returns control view with the result', async () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const revision = computeRevisionToken(task);
+      const { captured, ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
+          requestedOptionId: 'agent-codex',
+          expectedRevision: revision,
+        },
+      );
+      await handleWriteRoute(ctx);
+      const data = captured.data as Record<string, unknown>;
+      assert.equal(data['outcome'], 'accepted');
+      const control = data['control'] as Record<string, unknown>;
+      assert.ok(control != null);
+      assert.equal(control['kind'], 'agent');
+      assert.equal(data['workItemId'], 'task-1');
+      assert.ok(typeof data['resolvedAt'] === 'string');
+    });
+
+    it('mutates task state on accepted control action', async () => {
+      const task = makeTask({ id: 'task-1', status: 'todo', owner: 'claude' });
+      const state = makeState({ tasks: [task] });
+      const revision = computeRevisionToken(task);
+      const { ctx } = makeWriteCtx(
+        'POST',
+        '/operations/work-items/task-1/controls/task-1%3Aagent',
+        state,
+        {
+          requestedOptionId: 'agent-gemini',
+          expectedRevision: revision,
+        },
+      );
+      await handleWriteRoute(ctx);
+      assert.equal(task.owner, 'gemini', 'Task owner should be mutated to gemini');
+    });
+  });
+
+  describe('detail route includes controls', () => {
+    it('populates controls in work item detail for active work item', () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-1', status: 'in_progress', owner: 'claude' })],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const controls = data['controls'] as Array<Record<string, unknown>>;
+      assert.ok(controls.length > 0);
+      for (const control of controls) {
+        assert.equal(control['availability'], 'actionable');
+        assert.equal(control['authority'], 'granted');
+        assert.ok(typeof control['expectedRevision'] === 'string');
+      }
+    });
+
+    it('populates read-only controls in work item detail for completed work item', () => {
+      const state = makeState({
+        tasks: [makeTask({ id: 'task-1', status: 'done', owner: 'claude' })],
+      });
+      const ctx = makeReadCtx('GET', '/operations/work-items/task-1', state);
+      handleOperationsReadRoute(ctx);
+      const data = ctx.captured.data as Record<string, unknown>;
+      const controls = data['controls'] as Array<Record<string, unknown>>;
+      assert.ok(controls.length > 0);
+      for (const control of controls) {
+        assert.equal(control['availability'], 'read-only');
+        assert.equal(control['authority'], 'unavailable');
+        assert.equal(control['expectedRevision'], null);
+      }
     });
   });
 });
