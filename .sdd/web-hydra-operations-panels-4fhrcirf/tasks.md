@@ -151,11 +151,11 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 **Independent Test**: Observe a many-participant council flow across refresh or concurrent tabs; verify the execution view remains legible, operations state converges within one sync cycle, and existing chat-workspace behavior does not regress.
 
-- [ ] T048 [P] [US6] **TDD:** add dense execution-visualization and partial-data recovery coverage in `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
-- [ ] T049 [P] [US6] Implement dense multi-agent and council timeline rendering plus availability affordances in `apps/web/src/features/operations-panels/components/execution-panel.tsx`, `apps/web/src/features/operations-panels/components/empty-state-card.tsx`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
-- [ ] T050 [P] [US6] Add refresh, reconnect, and multi-tab regression coverage for operations polling alongside existing chat flows in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`, `apps/web/src/features/chat-workspace/__tests__/workflow-refresh-recovery.browser.spec.tsx`, and `apps/web/src/features/chat-workspace/__tests__/workflow-control-actions.browser.spec.tsx`.
-- [ ] T051 [US6] Harden workspace composition so operations synchronization preserves chat ownership and orientation in `apps/web/src/routes/workspace.tsx`, `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`, and `apps/web/src/shared/session-state.ts`.
-- [ ] T052 [US6] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after multi-agent visualization and regression hardening is green.
+- [x] T048 [P] [US6] **TDD:** add dense execution-visualization and partial-data recovery coverage in `apps/web/src/features/operations-panels/__tests__/execution-panel.browser.spec.tsx` and `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`.
+- [x] T049 [P] [US6] Implement dense multi-agent and council timeline rendering plus availability affordances in `apps/web/src/features/operations-panels/components/execution-panel.tsx`, `apps/web/src/features/operations-panels/components/empty-state-card.tsx`, and `apps/web/src/features/operations-panels/model/selectors.ts`.
+- [x] T050 [P] [US6] Add refresh, reconnect, and multi-tab regression coverage for operations polling alongside existing chat flows in `apps/web/src/features/operations-panels/__tests__/workspace-operations.integration.test.ts`, `apps/web/src/features/chat-workspace/__tests__/workflow-refresh-recovery.browser.spec.tsx`, and `apps/web/src/features/chat-workspace/__tests__/workflow-control-actions.browser.spec.tsx`.
+- [x] T051 [US6] Harden workspace composition so operations synchronization preserves chat ownership and orientation in `apps/web/src/routes/workspace.tsx`, `apps/web/src/features/chat-workspace/components/workspace-layout.tsx`, and `apps/web/src/shared/session-state.ts`.
+- [x] T052 [US6] Run the phase quality gate from the repo root with `npm run quality` and `npm test` after multi-agent visualization and regression hardening is green.
 
 **Checkpoint**: The operations panels behave like a trustworthy companion surface rather than a fragile sidecar.
 
@@ -163,9 +163,9 @@ _Create the browser-safe operations vocabulary before daemon, gateway, or browse
 
 ## Phase 7 — Docs, Final Validation & Release Readiness
 
-- [ ] T053 [P] Update browser workspace and architecture docs for operations panels in `apps/web/README.md` and `docs/web-interface/03-architecture.md`.
-- [ ] T054 [P] Update protocol, phase-roadmap, and boundary documentation for operations snapshot/detail/control routes in `docs/web-interface/04-protocol.md`, `docs/web-interface/06-phases-and-sdd.md`, and `docs/web-interface/07-boundaries-and-governance.md`.
-- [ ] T055 Run final validation with `npm run quality`, `npm test`, and `npm run test:browser -w @hydra/web`, then reconcile any last operations-panels doc or regression gaps.
+- [x] T053 [P] Update browser workspace and architecture docs for operations panels in `apps/web/README.md` and `docs/web-interface/03-architecture.md`.
+- [x] T054 [P] Update protocol, phase-roadmap, and boundary documentation for operations snapshot/detail/control routes in `docs/web-interface/04-protocol.md`, `docs/web-interface/06-phases-and-sdd.md`, and `docs/web-interface/07-boundaries-and-governance.md`.
+- [x] T055 Run final validation with `npm run quality`, `npm test`, and `npm run test:browser -w @hydra/web`, then reconcile any last operations-panels doc or regression gaps.
 
 ---
 

@@ -537,6 +537,225 @@ describe('ExecutionPanel council status coverage', () => {
   }
 });
 
+// ─── Dense multi-agent rendering (T048) ─────────────────────────────────────
+
+describe('ExecutionPanel dense multi-agent rendering', () => {
+  const denseAssignments: AgentAssignmentView[] = [
+    makeAssignment({ participantId: 'p-1', label: 'claude', role: 'architect', state: 'active' }),
+    makeAssignment({
+      participantId: 'p-2',
+      label: 'gemini',
+      role: 'analyst',
+      state: 'waiting',
+    }),
+    makeAssignment({
+      participantId: 'p-3',
+      label: 'codex',
+      role: 'implementer',
+      state: 'completed',
+      endedAt: NOW,
+    }),
+    makeAssignment({ participantId: 'p-4', label: 'local', role: 'runner', state: 'failed' }),
+    makeAssignment({
+      participantId: 'p-5',
+      label: 'copilot',
+      role: 'advisor',
+      state: 'cancelled',
+    }),
+  ];
+
+  it('renders all 5 agent assignment cards without missing any', () => {
+    render(
+      <ExecutionPanel
+        assignments={denseAssignments}
+        council={null}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    const list = screen.getByRole('list', { name: /agent assignments/i });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5);
+  });
+
+  it('each assignment card has a unique data-testid containing the participantId', () => {
+    render(
+      <ExecutionPanel
+        assignments={denseAssignments}
+        council={null}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    for (const a of denseAssignments) {
+      const testIds = screen
+        .getAllByTestId(new RegExp(`^assignment-${a.participantId}:`))
+        .map((el) => el.getAttribute('data-testid'));
+      expect(testIds.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('renders all five distinct state badges simultaneously', () => {
+    render(
+      <ExecutionPanel
+        assignments={denseAssignments}
+        council={null}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    for (const state of ['active', 'waiting', 'completed', 'failed', 'cancelled'] as const) {
+      expect(screen.getByText(state)).toBeInTheDocument();
+    }
+  });
+
+  it('each card shows its agent label without truncation', () => {
+    render(
+      <ExecutionPanel
+        assignments={denseAssignments}
+        council={null}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    for (const a of denseAssignments) {
+      expect(screen.getByText(a.label)).toBeInTheDocument();
+    }
+  });
+});
+
+// ─── Dense council timeline (T048) ──────────────────────────────────────────
+
+describe('ExecutionPanel dense council timeline', () => {
+  const denseTransitions: CouncilTransitionView[] = [
+    makeTransition({ id: 'ct-1', label: 'Round 1', status: 'completed' }),
+    makeTransition({ id: 'ct-2', label: 'Round 2', status: 'completed' }),
+    makeTransition({ id: 'ct-3', label: 'Round 3', status: 'completed' }),
+    makeTransition({ id: 'ct-4', label: 'Round 4', status: 'active' }),
+    makeTransition({ id: 'ct-5', label: 'Round 5', status: 'waiting' }),
+  ];
+
+  it('renders 5+ council transitions in order with correct IDs', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={makeCouncil({ transitions: denseTransitions })}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    for (const t of denseTransitions) {
+      expect(screen.getByTestId(`council-transition-${t.id}`)).toBeInTheDocument();
+    }
+  });
+
+  it('each transition displays its label', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={makeCouncil({ transitions: denseTransitions })}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    for (const t of denseTransitions) {
+      expect(screen.getByTestId(`council-transition-${t.id}`)).toHaveTextContent(t.label);
+    }
+  });
+
+  it('each transition displays its status label', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={makeCouncil({ transitions: denseTransitions })}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    for (const t of denseTransitions) {
+      expect(screen.getByTestId(`council-transition-${t.id}`)).toHaveTextContent(t.status);
+    }
+  });
+});
+
+// ─── Partial-data and unavailable affordances (T048) ─────────────────────────
+
+describe('ExecutionPanel availability affordances', () => {
+  it('shows a visible affordance with data-testid when availability is partial', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={null}
+        detailAvailability="partial"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    expect(screen.getByTestId('detail-availability-partial')).toBeInTheDocument();
+  });
+
+  it('partial affordance is not a blank screen — contains meaningful text', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={null}
+        detailAvailability="partial"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    const element = screen.getByTestId('detail-availability-partial');
+    expect(element).toHaveTextContent(/\S/);
+  });
+
+  it('shows a visible affordance with data-testid when availability is unavailable', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={null}
+        detailAvailability="unavailable"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    expect(screen.getByTestId('detail-availability-unavailable')).toBeInTheDocument();
+  });
+
+  it('unavailable affordance contains meaningful text', () => {
+    render(
+      <ExecutionPanel
+        assignments={[]}
+        council={null}
+        detailAvailability="unavailable"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    const element = screen.getByTestId('detail-availability-unavailable');
+    expect(element).toHaveTextContent(/\S/);
+  });
+
+  it('does not show partial or unavailable affordance when availability is ready', () => {
+    render(
+      <ExecutionPanel
+        assignments={[makeAssignment()]}
+        council={null}
+        detailAvailability="ready"
+        detailFetchStatus="idle"
+      />,
+    );
+
+    expect(screen.queryByTestId('detail-availability-partial')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('detail-availability-unavailable')).not.toBeInTheDocument();
+  });
+});
+
 // ─── Loading with existing data ─────────────────────────────────────────────
 
 describe('ExecutionPanel stale-data indicators', () => {

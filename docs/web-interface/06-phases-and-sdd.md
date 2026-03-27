@@ -30,12 +30,14 @@ These phases define the program shape. They are intentionally broader than the e
 - approvals and browser-safe interactive prompts;
 - artifact views.
 
-### Phase 3 — Hydra-Native Control Surfaces
+### Phase 3 — Hydra-Native Control Surfaces ✅ Delivered
 
-- task queue and checkpoints;
-- routing, mode, agent, and council controls;
-- budgets and daemon health;
-- council and multi-agent execution visualization.
+Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
+
+- task queue and checkpoints: ✅ delivered
+- routing, mode, agent, and council controls: ✅ delivered
+- budgets and daemon health: ✅ delivered
+- council and multi-agent execution visualization: ✅ delivered
 
 ### Phase 4 — Controlled Mutations and Operational Workflows
 
@@ -59,7 +61,7 @@ After the document set is accepted, break the work into these specs:
 3. **`web-conversation-protocol`**
 4. **`web-gateway-conversation-transport`** — gateway REST + WebSocket mediation, session binding, reconnect/resume, and daemon transport amendments
 5. **`web-chat-workspace`**
-6. **`web-hydra-operations-panels`**
+6. **`web-hydra-operations-panels`** — Hydra-native operations visibility and daemon-authorized controls (US1–US6, all phases delivered)
 7. **`web-controlled-mutations`**
 8. **`web-hardening-and-packaging`**
 

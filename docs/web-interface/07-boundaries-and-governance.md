@@ -89,15 +89,15 @@ In emergencies requiring a boundary violation (e.g., a critical bug fix that spa
 
 Known future phases and their expected workspace changes:
 
-| Phase                   | Expected Packages                                            |
-| ----------------------- | ------------------------------------------------------------ |
-| `foundation` (current)  | `apps/web`, `apps/web-gateway`, `packages/web-contracts`     |
-| `session-auth`          | Additions to `apps/web-gateway` and `packages/web-contracts` |
-| `conversation-protocol` | Additions to `packages/web-contracts`, new daemon contracts  |
-| `chat-workspace`        | Additions to `apps/web`, potentially `packages/web-ui`       |
-| `operations`            | Additions to `apps/web`                                      |
-| `mutations`             | Additions to `apps/web-gateway` and `packages/web-contracts` |
-| `hardening`             | Cross-cutting quality and security improvements              |
+| Phase                   | Expected Packages                                                                |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| `foundation` (current)  | `apps/web`, `apps/web-gateway`, `packages/web-contracts`                         |
+| `session-auth`          | Additions to `apps/web-gateway` and `packages/web-contracts`                     |
+| `conversation-protocol` | Additions to `packages/web-contracts`, new daemon contracts                      |
+| `chat-workspace`        | Additions to `apps/web`, potentially `packages/web-ui`                           |
+| `operations`            | Additions to `apps/web` ✅ delivered via `web-hydra-operations-panels` (US1–US6) |
+| `mutations`             | Additions to `apps/web-gateway` and `packages/web-contracts`                     |
+| `hardening`             | Cross-cutting quality and security improvements                                  |
 
 ## Extending the Foundation
 

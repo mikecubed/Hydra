@@ -174,16 +174,6 @@ function resolveStatusNotice(fetchStatus: DetailFetchStatus): string | null {
   return null;
 }
 
-function resolveEmptyMessage(
-  availability: DetailAvailability | null,
-  fetchStatus: DetailFetchStatus,
-): string {
-  const notice = resolveStatusNotice(fetchStatus);
-  if (notice !== null) return notice;
-  if (availability === 'unavailable') return 'Execution data is currently unavailable.';
-  return 'No execution data recorded yet.';
-}
-
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
 function AssignmentStateBadge({ state }: { readonly state: AgentAssignmentState }): JSX.Element {
@@ -361,9 +351,22 @@ export function ExecutionPanel({
     <div style={panelStyle} data-testid="execution-panel">
       <h4 style={headingStyle}>Execution</h4>
       {statusNotice !== null && <p style={emptyStyle}>{statusNotice}</p>}
-      {!hasData && statusNotice === null && (
-        <p style={emptyStyle}>{resolveEmptyMessage(detailAvailability, detailFetchStatus)}</p>
+      {!hasData && statusNotice === null && detailAvailability === 'partial' && (
+        <p data-testid="detail-availability-partial" style={emptyStyle}>
+          No execution data recorded yet (partial availability).
+        </p>
       )}
+      {!hasData && statusNotice === null && detailAvailability === 'unavailable' && (
+        <p data-testid="detail-availability-unavailable" style={emptyStyle}>
+          Execution data is currently unavailable.
+        </p>
+      )}
+      {!hasData &&
+        statusNotice === null &&
+        detailAvailability !== 'partial' &&
+        detailAvailability !== 'unavailable' && (
+          <p style={emptyStyle}>No execution data recorded yet.</p>
+        )}
       {assignments.length > 0 && (
         <ol aria-label="Agent assignments" style={listStyle}>
           {assignments.map((a, index) => (

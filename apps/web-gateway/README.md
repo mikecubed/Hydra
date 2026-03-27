@@ -9,7 +9,9 @@ for workspace boundary rules, ownership, and governance.
 
 ---
 
-## Local Startup Commands
+## Startup Commands
+
+### Local (same machine)
 
 Run these from the repo root when you want the browser and gateway up together against the local
 daemon:
@@ -28,6 +30,24 @@ daemon:
    npm --workspace @hydra/web-gateway run start:with-web
    ```
 
+3. Open `http://127.0.0.1:4174/workspace` in your browser.
+
+4. **Log in** — there is no browser login screen yet. Open your browser's developer console
+   (F12) and run:
+
+   ```javascript
+   fetch('/auth/login', {
+     method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
+   })
+     .then((r) => r.json())
+     .then(console.log);
+   ```
+
+   A successful response sets the `__session` and `__csrf` cookies. Reload the page and the
+   workspace will initialise.
+
 This starts the gateway on `http://127.0.0.1:4174`, serves the built browser bundle from
 `apps/web/dist`, points daemon-facing calls at `http://127.0.0.1:4173`, and seeds a local operator
 record if one does not already exist in `~/.hydra/web-gateway/operators.json`.
@@ -37,6 +57,62 @@ If the web bundle is already built, you can skip the build step and run:
 ```bash
 npm --workspace @hydra/web-gateway run start
 ```
+
+### Remote host
+
+When running on a server (e.g., `truenas-2.example.com`) that other browsers will reach over the
+network:
+
+1. Set `HYDRA_WEB_GATEWAY_HOST=0.0.0.0` (or a specific interface IP) so the server binds to
+   a reachable interface — the default `127.0.0.1` is loopback-only.
+
+2. Set `HYDRA_WEB_GATEWAY_ORIGIN` to the **exact URL** browsers will use to reach the gateway.
+   The gateway uses this value for origin checks and cookie `Domain` inference. If it does not
+   match what the browser sends, every request will be rejected.
+
+3. Set `HYDRA_DAEMON_URL` if the Hydra daemon is not on `http://127.0.0.1:4173`.
+
+Example:
+
+```bash
+HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
+HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
+HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
+HYDRA_WEB_OPERATOR_ID=admin \
+HYDRA_WEB_OPERATOR_SECRET=password123 \
+npm --workspace @hydra/web-gateway run start:with-web
+```
+
+After the gateway starts, log in from any browser on the network:
+
+```javascript
+// Run in the browser console at http://truenas-2.example.com:4174
+fetch('/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ identity: 'admin', secret: 'password123' }),
+})
+  .then((r) => r.json())
+  .then(console.log);
+```
+
+Then navigate to `/workspace`.
+
+> **`HYDRA_WEB_GATEWAY_HOST` vs `HYDRA_WEB_GATEWAY_ORIGIN`**
+>
+> These control different things. `HYDRA_WEB_GATEWAY_HOST` is the **network interface the server
+> binds to** — it is a local IP or hostname your OS resolves to a network interface. Setting it to
+> a remote hostname that is not a local interface will cause the bind to fail or silently fall back
+> to loopback. Use `0.0.0.0` to accept connections on all interfaces.
+>
+> `HYDRA_WEB_GATEWAY_ORIGIN` is the **public-facing URL** the browser uses to reach the gateway.
+> It is used for origin validation and must match the exact scheme, hostname, and port the browser
+> sends in the `Origin` header.
+
+### Session errors
+
+**`Gateway 401: No valid session found`** means the browser has no `__session` cookie.  
+This always happens before you have logged in. Follow the login step above to create a session.
 
 Environment variables supported by `src/server.ts`:
 

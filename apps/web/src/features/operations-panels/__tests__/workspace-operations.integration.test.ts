@@ -46,6 +46,8 @@ import {
   selectSelectedRouting,
   selectSelectedWorkItemId,
   selectSnapshotStatus,
+  selectSelectedAssignmentCount,
+  selectCouncilTransitionCount,
 } from '../model/selectors.ts';
 import type { OperationsWorkspaceState } from '../model/operations-types.ts';
 
@@ -817,5 +819,273 @@ describe('workspace operations integration', () => {
     ]);
 
     assert.equal(selectDetailFetchStatus(state), 'idle');
+  });
+
+  // ─── Dense assignment and council selectors (T048) ────────────────────
+
+  it('selectSelectedAssignmentCount returns the number of assignments in the selected detail', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const assignments = [
+      makeAssignment({ participantId: 'p-1', state: 'active' }),
+      makeAssignment({ participantId: 'p-2', state: 'waiting' }),
+      makeAssignment({ participantId: 'p-3', state: 'completed' }),
+      makeAssignment({ participantId: 'p-4', state: 'failed' }),
+      makeAssignment({ participantId: 'p-5', state: 'cancelled' }),
+    ];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: makeDetailResponse({ assignments }) },
+    ]);
+
+    assert.equal(selectSelectedAssignmentCount(state), 5);
+  });
+
+  it('selectSelectedAssignmentCount returns 0 when no detail loaded', () => {
+    const state = createInitialOperationsState();
+    assert.equal(selectSelectedAssignmentCount(state), 0);
+  });
+
+  it('selectCouncilTransitionCount returns the count of council transitions', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const council = makeCouncil({
+      transitions: [
+        {
+          id: 'ct-1',
+          label: 'Round 1',
+          status: 'completed',
+          timestamp: '2026-06-01T12:01:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-2',
+          label: 'Round 2',
+          status: 'completed',
+          timestamp: '2026-06-01T12:02:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-3',
+          label: 'Round 3',
+          status: 'completed',
+          timestamp: '2026-06-01T12:03:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-4',
+          label: 'Round 4',
+          status: 'active',
+          timestamp: '2026-06-01T12:04:00.000Z',
+          detail: null,
+        },
+        {
+          id: 'ct-5',
+          label: 'Round 5',
+          status: 'waiting',
+          timestamp: '2026-06-01T12:05:00.000Z',
+          detail: null,
+        },
+      ],
+    });
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      { type: 'selection/detail-loaded', detail: makeDetailResponse({ council }) },
+    ]);
+
+    assert.equal(selectCouncilTransitionCount(state), 5);
+  });
+
+  it('selectCouncilTransitionCount returns 0 when no council', () => {
+    const state = createInitialOperationsState();
+    assert.equal(selectCouncilTransitionCount(state), 0);
+  });
+
+  // ─── Partial-data availability integration (T048) ─────────────────────
+
+  it('partial availability detail is exposed through selectors for UI affordance', () => {
+    const items = [makeQueueItem({ id: 'wi-1', detailAvailability: 'partial' })];
+
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+      {
+        type: 'selection/detail-loaded',
+        detail: makeDetailResponse({ availability: 'partial', assignments: [] }),
+      },
+    ]);
+
+    assert.equal(selectDetailAvailability(state), 'partial');
+    assert.equal(selectDetailFetchStatus(state), 'idle');
+    // The UI should show a partial-availability affordance, not a blank screen.
+    // selectDetailAvailability returns 'partial' so the panel can render accordingly.
+    assert.notEqual(selectDetailAvailability(state), null);
+  });
+});
+
+// ─── Refresh / reconnect / multi-tab regression scenarios ─────────────────
+
+describe('operations polling across refresh/reconnect/multi-tab scenarios', () => {
+  // Refresh scenario: re-initialising the reducer clears selection and
+  // a subsequent snapshot/success repopulates the queue from scratch.
+  it('refresh: re-initialised reducer re-fetches snapshot and clears selection', () => {
+    const items = [
+      makeQueueItem({ id: 'wi-1', title: 'Task A' }),
+      makeQueueItem({ id: 'wi-2', title: 'Task B' }),
+    ];
+
+    // Simulate a pre-refresh state with active selection
+    const preRefresh = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+    ]);
+    assert.equal(selectSelectedWorkItemId(preRefresh), 'wi-1');
+    assert.equal(selectQueueItems(preRefresh).length, 2);
+
+    // Simulate page refresh by creating a fresh initial state (reducer reset)
+    const freshState = createInitialOperationsState();
+    assert.equal(selectSelectedWorkItemId(freshState), null);
+    assert.deepEqual(selectQueueItems(freshState), []);
+    assert.equal(selectSnapshotStatus(freshState), 'idle');
+
+    // First post-refresh polling cycle delivers the snapshot
+    const postRefresh = applyActions(freshState, [
+      { type: 'snapshot/request' },
+      {
+        type: 'snapshot/success',
+        snapshot: makeSnapshot({
+          queue: [makeQueueItem({ id: 'wi-3', title: 'Refreshed task' })],
+          availability: 'ready',
+        }),
+      },
+    ]);
+
+    assert.equal(selectSnapshotStatus(postRefresh), 'ready');
+    assert.equal(selectQueueItems(postRefresh).length, 1);
+    assert.equal(selectQueueItems(postRefresh)[0].title, 'Refreshed task');
+    assert.equal(selectSelectedWorkItemId(postRefresh), null);
+  });
+
+  // Reconnect scenario: a failed fetch cycle followed by a successful one
+  // transitions the reducer through error→loading→success without getting stuck.
+  it('reconnect: error→loading→success lifecycle without getting stuck', () => {
+    const items = [makeQueueItem({ id: 'wi-1', title: 'Task A' })];
+
+    // Initial successful state
+    const connected = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+    ]);
+    assert.equal(selectSnapshotStatus(connected), 'ready');
+    assert.equal(selectFreshness(connected), 'live');
+
+    // Simulate gateway disconnection — fetch cycle fails
+    const disconnected = applyActions(connected, [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/failure' },
+    ]);
+    assert.equal(selectSnapshotStatus(disconnected), 'error');
+    assert.equal(selectFreshness(disconnected), 'stale');
+    // Previous queue data is preserved during error
+    assert.equal(selectQueueItems(disconnected).length, 1);
+
+    // Simulate reconnection — new fetch cycle starts and succeeds
+    const reconnecting = applyActions(disconnected, [{ type: 'snapshot/request' }]);
+    assert.equal(selectSnapshotStatus(reconnecting), 'loading');
+
+    const reconnected = applyActions(reconnecting, [
+      {
+        type: 'snapshot/success',
+        snapshot: makeSnapshot({
+          queue: [
+            makeQueueItem({ id: 'wi-1', title: 'Task A (updated)' }),
+            makeQueueItem({ id: 'wi-4', title: 'New task' }),
+          ],
+          availability: 'ready',
+        }),
+      },
+    ]);
+    assert.equal(selectSnapshotStatus(reconnected), 'ready');
+    assert.equal(selectFreshness(reconnected), 'live');
+    assert.equal(selectQueueItems(reconnected).length, 2);
+    assert.equal(selectQueueItems(reconnected)[0].title, 'Task A (updated)');
+    assert.equal(selectQueueItems(reconnected)[1].title, 'New task');
+  });
+
+  // Multi-tab isolation: two independent state instances can hold different
+  // selections without interfering with each other.
+  it('multi-tab isolation: independent states hold separate selections', () => {
+    const items = [
+      makeQueueItem({ id: 'wi-1', title: 'Task A' }),
+      makeQueueItem({ id: 'wi-2', title: 'Task B' }),
+      makeQueueItem({ id: 'wi-3', title: 'Task C' }),
+    ];
+    const snapshot = makeSnapshot({ queue: items });
+
+    // Tab 1: select wi-1
+    const tab1 = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot },
+      { type: 'selection/select', workItemId: 'wi-1' },
+    ]);
+
+    // Tab 2: select wi-3
+    const tab2 = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot },
+      { type: 'selection/select', workItemId: 'wi-3' },
+    ]);
+
+    assert.equal(selectSelectedWorkItemId(tab1), 'wi-1');
+    assert.equal(selectSelectedWorkItemId(tab2), 'wi-3');
+
+    // Mutating tab1 does not affect tab2
+    const tab1Deselected = applyActions(tab1, [{ type: 'selection/deselect' }]);
+    assert.equal(selectSelectedWorkItemId(tab1Deselected), null);
+    assert.equal(selectSelectedWorkItemId(tab2), 'wi-3');
+
+    // Each tab's queue is independent
+    const tab1Filtered = applyActions(tab1, [
+      { type: 'filters/set-status', statusFilter: ['active'] },
+    ]);
+    assert.equal(selectFilteredQueueItems(tab1Filtered).length, 3);
+    assert.equal(selectFilteredQueueItems(tab2).length, 3);
+  });
+
+  // No chat regression: operations state shape is entirely independent from
+  // the chat workspace state. Verify by inspecting the state structure.
+  it('no chat regression: operations state is structurally independent from chat', () => {
+    const items = [makeQueueItem({ id: 'wi-1' })];
+    const opsState = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/success', snapshot: makeSnapshot({ queue: items }) },
+      { type: 'selection/select', workItemId: 'wi-1' },
+    ]);
+
+    // The operations state must NOT contain chat-related properties
+    const opsKeys = Object.keys(opsState);
+    const chatPropertyNames = [
+      'activeConversationId',
+      'conversations',
+      'drafts',
+      'connection',
+      'artifact',
+    ];
+    for (const chatProp of chatPropertyNames) {
+      assert.equal(
+        opsKeys.includes(chatProp),
+        false,
+        `operations state must not contain chat property "${chatProp}"`,
+      );
+    }
+
+    // Operations state contains only its own expected keys
+    assert.ok(opsKeys.includes('snapshotStatus'));
+    assert.ok(opsKeys.includes('snapshot'));
+    assert.ok(opsKeys.includes('selection'));
+    assert.ok(opsKeys.includes('controls'));
+    assert.ok(opsKeys.includes('filters'));
+
+    // Verify selectors read from the correct state shape
+    assert.equal(selectSelectedWorkItemId(opsState), 'wi-1');
+    assert.equal(selectSnapshotStatus(opsState), 'ready');
   });
 });

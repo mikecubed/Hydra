@@ -641,3 +641,94 @@ describe('follow-up action', () => {
     expect(screen.getByText('Ready for operator input')).toBeInTheDocument();
   });
 });
+
+// ─── Operations controls remain stable during chat control actions ──────────
+
+describe('operations controls remain stable during chat control actions', () => {
+  it('operations panel does not disappear or error while chat cancel is in progress', async () => {
+    let cancelPosted = false;
+
+    installFetchStub((url, init) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Ops stability test')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        if (cancelPosted) {
+          return jsonResponse({
+            turns: [{ ...BASE_TURN, status: 'cancelled' }],
+            totalCount: 1,
+            hasMore: false,
+          });
+        }
+        return jsonResponse({
+          turns: [BASE_TURN],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      if (url === '/conversations/conv-1/turns/turn-1/cancel' && init?.method === 'POST') {
+        cancelPosted = true;
+        return jsonResponse({
+          success: true,
+          turn: { ...BASE_TURN, status: 'cancelled' },
+        });
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
+      // Operations snapshot — always succeeds
+      if (url === '/operations/snapshot') {
+        return jsonResponse({
+          queue: [
+            {
+              id: 'wi-1',
+              title: 'Background task',
+              status: 'active',
+              position: 0,
+              relatedConversationId: null,
+              relatedSessionId: null,
+              ownerLabel: null,
+              lastCheckpointSummary: null,
+              updatedAt: '2026-07-01T12:00:00.000Z',
+              riskSignals: [],
+              detailAvailability: 'ready',
+            },
+          ],
+          health: null,
+          budget: null,
+          availability: 'ready',
+          lastSynchronizedAt: '2026-07-01T12:00:00.000Z',
+          nextCursor: null,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /ops stability test/i });
+    openAndSubscribe('conv-1');
+
+    // Wait for the executing turn to appear
+    expect(await screen.findByText('executing')).toBeInTheDocument();
+
+    // Operations panel heading should be visible before cancel
+    await vi.waitFor(() => {
+      expect(screen.getByText('Operations')).toBeInTheDocument();
+    });
+
+    // Click cancel on the chat turn
+    const cancelBtn = await screen.findByTestId('turn-action-cancel');
+    fireEvent.click(cancelBtn);
+
+    // Wait for cancel to complete
+    await vi.waitFor(() => {
+      expect(screen.getByText('cancelled')).toBeInTheDocument();
+    });
+
+    // After cancel completes, the operations panel must still be visible — not gone or in error
+    expect(screen.getByText('Operations')).toBeInTheDocument();
+  });
+});

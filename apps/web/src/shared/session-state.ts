@@ -8,6 +8,15 @@
  * @hydra/web-contracts that are relevant in the browser workspace
  * (excludes 'logged-out' and 'daemon-unreachable' which the browser
  * models through separate daemonStatus / auth redirect flows).
+ *
+ * **Ownership boundary**: This module is chat-workspace-owned state only.
+ * Operations panel synchronization state lives entirely in
+ * `features/operations-panels/model/` and is managed by
+ * `WorkspaceOperationsPanel` independently. These two state trees must
+ * never be merged — the chat workspace owns conversation/stream state
+ * and the operations panel owns queue/detail/control state. Composition
+ * happens at the layout layer (`workspace-layout.tsx`) via slot injection,
+ * ensuring neither surface can corrupt the other's state.
  */
 
 // ─── Transport Status ───────────────────────────────────────────────────────
