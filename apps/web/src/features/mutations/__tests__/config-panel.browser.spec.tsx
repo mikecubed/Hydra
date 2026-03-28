@@ -3,7 +3,7 @@
  *
  * Covers:
  * - ConfigPanel: renders routing section from mocked SafeConfigView, no forbidden
- *   key substrings, 503 daemon-unreachable message, stub sections present
+ *   key substrings, 503 daemon-unreachable message, models/budgets sections present
  * - ConfirmDialog: cancel does not call onConfirm, confirm calls once,
  *   disabled when isLoading, from/to values visible
  */
@@ -84,13 +84,14 @@ describe('ConfigPanel', () => {
     expect(screen.getByText(/daemon unreachable/i)).toBeDefined();
   });
 
-  it('renders stub sections without crashing', async () => {
+  it('renders models and budgets sections without crashing', async () => {
     const client = makeMockClient();
     await act(async () => {
       render(<ConfigPanel client={client} />);
     });
+    // Empty config → empty-state sections with known aria-labels
     expect(screen.getByLabelText(/models configuration/i)).toBeDefined();
-    expect(screen.getByLabelText(/budgets configuration/i)).toBeDefined();
+    expect(screen.getByLabelText(/budget configuration/i)).toBeDefined();
   });
 });
 
