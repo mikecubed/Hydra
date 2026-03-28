@@ -4,8 +4,17 @@ import type { GatewayErrorResponse, ErrorCategory } from '../gateway-error-respo
 import { ERROR_CATEGORIES, createGatewayErrorResponse } from '../gateway-error-response.ts';
 
 describe('ErrorCategory', () => {
-  it('defines exactly five categories', () => {
-    const expected: ErrorCategory[] = ['auth', 'session', 'validation', 'daemon', 'rate-limit'];
+  it('defines exactly eight categories', () => {
+    const expected: ErrorCategory[] = [
+      'auth',
+      'session',
+      'validation',
+      'daemon',
+      'rate-limit',
+      'stale-revision',
+      'daemon-unavailable',
+      'workflow-conflict',
+    ];
     assert.deepStrictEqual([...ERROR_CATEGORIES], expected);
   });
 });
@@ -80,6 +89,9 @@ describe('GatewayErrorResponse', () => {
       { category: 'validation', code: 'VALIDATION_FAILED' },
       { category: 'daemon', code: 'DAEMON_UNREACHABLE' },
       { category: 'rate-limit', code: 'RATE_LIMITED' },
+      { category: 'stale-revision', code: 'STALE_REVISION' },
+      { category: 'daemon-unavailable', code: 'DAEMON_UNAVAILABLE' },
+      { category: 'workflow-conflict', code: 'WORKFLOW_CONFLICT' },
     ];
 
     for (const { category, code } of cases) {
