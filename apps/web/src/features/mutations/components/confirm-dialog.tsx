@@ -3,8 +3,10 @@
  *
  * Renders nothing when isOpen is false.
  * Confirm button is disabled while isLoading is true.
+ * Optional children are rendered between the from/to summary and the buttons
+ * (e.g., advisory warnings from BudgetsSection).
  */
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
@@ -14,6 +16,7 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   isLoading: boolean;
+  children?: ReactNode;
 }
 
 export function ConfirmDialog({
@@ -24,6 +27,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   isLoading,
+  children,
 }: ConfirmDialogProps): JSX.Element | null {
   if (!isOpen) return null;
 
@@ -33,6 +37,7 @@ export function ConfirmDialog({
       <p>
         Change from <strong>{from}</strong> to <strong>{to}</strong>
       </p>
+      {children}
       <div>
         <button type="button" onClick={onCancel}>
           Cancel
