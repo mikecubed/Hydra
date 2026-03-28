@@ -29,7 +29,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T001** [Ph0] [CONTRACTS] [P1] `config-mutation.ts` — core mutation schemas
+- [x] **T001** [Ph0] [CONTRACTS] [P1] `config-mutation.ts` — core mutation schemas
   ```
   Files:
     ✦ packages/web-contracts/src/config-mutation.ts
@@ -46,7 +46,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T002** [Ph0] [CONTRACTS] [P1] `workflow-launch.ts` — workflow launch schemas
+- [x] **T002** [Ph0] [CONTRACTS] [P1] `workflow-launch.ts` — workflow launch schemas
   ```
   Files:
     ✦ packages/web-contracts/src/workflow-launch.ts
@@ -60,7 +60,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T003** [Ph0] [CONTRACTS] [P1] Extend `audit-schemas.ts` with mutation audit types
+- [x] **T003** [Ph0] [CONTRACTS] [P1] Extend `audit-schemas.ts` with mutation audit types
   ```
   Files:
     ✎ packages/web-contracts/src/audit-schemas.ts
@@ -75,7 +75,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T004** [Ph0] [CONTRACTS] [P1] Gateway-layer contract files (`contracts/` subdir — three new files)
+- [x] **T004** [Ph0] [CONTRACTS] [P1] Gateway-layer contract files (`contracts/` subdir — three new files)
   ```
   Files:
     ✦ packages/web-contracts/src/contracts/config-mutation.ts
@@ -91,7 +91,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T005** [Ph0] [CONTRACTS] [P1] Contract unit tests — `config-mutation.test.ts`
+- [x] **T005** [Ph0] [CONTRACTS] [P1] Contract unit tests — `config-mutation.test.ts`
   ```
   Files:
     ✦ packages/web-contracts/src/__tests__/config-mutation.test.ts
@@ -109,7 +109,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T006** [Ph0] [CONTRACTS] [P1] Extend `index.ts` barrel + Phase 0 quality gate
+- [x] **T006** [Ph0] [CONTRACTS] [P1] Extend `index.ts` barrel + Phase 0 quality gate
   ```
   Files:
     ✎ packages/web-contracts/src/index.ts
@@ -128,7 +128,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T007** [Ph1] [DAEMON] [P1] Scaffold `mutation-routes.ts` with `computeConfigRevision` and `GET /config/safe`
+- [x] **T007** [Ph1] [DAEMON] [P1] Scaffold `mutation-routes.ts` with `computeConfigRevision` and `GET /config/safe`
   ```
   Files:
     ✦ lib/daemon/mutation-routes.ts
@@ -142,7 +142,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T008** [Ph1] [DAEMON] [P1] `POST /config/routing/mode` handler with optimistic-concurrency mutex
+- [x] **T008** [Ph1] [DAEMON] [P1] `POST /config/routing/mode` handler with optimistic-concurrency mutex
   ```
   Files:
     ✎ lib/daemon/mutation-routes.ts
@@ -159,7 +159,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T008a** [Ph1] [DAEMON] [P1] `mutation-lock.ts` — in-repo Promise-chain mutex
+- [x] **T008a** [Ph1] [DAEMON] [P1] `mutation-lock.ts` — in-repo Promise-chain mutex
   ```
   Files:
     ✦ lib/daemon/mutation-lock.ts
@@ -178,7 +178,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T009** [Ph1] [DAEMON] [P1] Register mutation routes in `orchestrator-daemon.ts` + Phase 1 daemon tests
+- [x] **T009** [Ph1] [DAEMON] [P1] Register mutation routes in `orchestrator-daemon.ts` + Phase 1 daemon tests
   ```
   Files:
     ✎ lib/orchestrator-daemon.ts
@@ -205,7 +205,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T010** [Ph2] [GATEWAY] [P1] `daemon-mutations-client.ts` — typed HTTP client for all six daemon endpoints
+- [x] **T010** [Ph2] [GATEWAY] [P1] `daemon-mutations-client.ts` — typed HTTP client for all six daemon endpoints
   ```
   Files:
     ✦ apps/web-gateway/src/mutations/daemon-mutations-client.ts
@@ -219,7 +219,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T011** [Ph2] [GATEWAY] [P1] `request-validator.ts` — Zod validation helpers for mutation request bodies
+- [x] **T011** [Ph2] [GATEWAY] [P1] `request-validator.ts` — Zod validation helpers for mutation request bodies
   ```
   Files:
     ✦ apps/web-gateway/src/mutations/request-validator.ts
@@ -232,7 +232,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T012** [Ph2] [GATEWAY] [P1] `response-translator.ts` — maps daemon error categories to HTTP status + client messages
+- [x] **T012** [Ph2] [GATEWAY] [P1] `response-translator.ts` — maps daemon error categories to HTTP status + client messages
   ```
   Files:
     ✦ apps/web-gateway/src/mutations/response-translator.ts
@@ -248,7 +248,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T012a** [Ph2] [GATEWAY] [P1] Extend `gateway-error-response.ts` with new error categories
+- [x] **T012a** [Ph2] [GATEWAY] [P1] Extend `gateway-error-response.ts` with new error categories
   ```
   Files:
     ✎ apps/web-gateway/src/shared/gateway-error-response.ts
@@ -262,7 +262,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T013** [Ph2] [GATEWAY] [P1] `mutations-routes.ts` Phase 1 routes (`GET /config/safe`, `POST /config/routing/mode`) + register in `index.ts` + update `GATEWAY_ROUTE_PREFIXES`
+- [x] **T013** [Ph2] [GATEWAY] [P1] `mutations-routes.ts` Phase 1 routes (`GET /config/safe`, `POST /config/routing/mode`) + register in `index.ts` + update `GATEWAY_ROUTE_PREFIXES`
   ```
   Files:
     ✦ apps/web-gateway/src/mutations/mutations-routes.ts
@@ -280,7 +280,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T014** [Ph2] [GATEWAY] [P1] Gateway Phase 1 tests — `mutations-routes.test.ts` (P1 cases) + `daemon-mutations-client.test.ts`
+- [x] **T014** [Ph2] [GATEWAY] [P1] Gateway Phase 1 tests — `mutations-routes.test.ts` (P1 cases) + `daemon-mutations-client.test.ts`
   ```
   Files:
     ✦ apps/web-gateway/src/mutations/__tests__/mutations-routes.test.ts
