@@ -115,7 +115,7 @@ describe('DaemonMutationsClient', () => {
 
       assert.equal(fetchMock.mock.callCount(), 1);
       const [url, opts] = fetchMock.mock.calls[0].arguments;
-      assert.equal(url, `${baseUrl}/config/budget`);
+      assert.equal(url, `${baseUrl}/config/usage/budget`);
       assert.equal(opts?.method, 'POST');
       assert.ok('data' in result);
     });
