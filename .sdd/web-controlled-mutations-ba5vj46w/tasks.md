@@ -459,7 +459,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T020** [Ph5] [BROWSER] [P1] `api/mutations-client.ts` — typed browser-side gateway client
+- [x] **T020** [Ph5] [BROWSER] [P1] `api/mutations-client.ts` — typed browser-side gateway client
   ```
   Files:
     ✦ apps/web/src/features/mutations/api/mutations-client.ts
@@ -473,7 +473,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T021** [Ph5] [BROWSER] [P1] `model/use-safe-config.ts` — config fetch hook with revision exposure
+- [x] **T021** [Ph5] [BROWSER] [P1] `model/use-safe-config.ts` — config fetch hook with revision exposure
   ```
   Files:
     ✦ apps/web/src/features/mutations/model/use-safe-config.ts
@@ -488,7 +488,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T022** [Ph5] [BROWSER] [P1] `model/use-mutation.ts` — generic mutation hook
+- [x] **T022** [Ph5] [BROWSER] [P1] `model/use-mutation.ts` — generic mutation hook
   ```
   Files:
     ✦ apps/web/src/features/mutations/model/use-mutation.ts
@@ -504,7 +504,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T023** [Ph5] [BROWSER] [P1] `components/mutation-error-banner.tsx` — dismissible inline error banner
+- [x] **T023** [Ph5] [BROWSER] [P1] `components/mutation-error-banner.tsx` — dismissible inline error banner
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/mutation-error-banner.tsx
@@ -518,7 +518,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T024** [Ph5] [BROWSER] [P1] `components/confirm-dialog.tsx` — reusable single-step confirm dialog
+- [x] **T024** [Ph5] [BROWSER] [P1] `components/confirm-dialog.tsx` — reusable single-step confirm dialog
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/confirm-dialog.tsx
@@ -534,7 +534,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T025** [Ph5] [BROWSER] [P1] `components/routing-section.tsx` — routing mode display + mutation trigger
+- [x] **T025** [Ph5] [BROWSER] [P1] `components/routing-section.tsx` — routing mode display + mutation trigger
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/routing-section.tsx
@@ -551,7 +551,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T026** [Ph5] [BROWSER] [P1] `components/config-panel.tsx` — Phase 1 shell with routing section + stubs
+- [x] **T026** [Ph5] [BROWSER] [P1] `components/config-panel.tsx` — Phase 1 shell with routing section + stubs
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/config-panel.tsx
@@ -567,7 +567,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T027** [Ph5] [BROWSER] [P1] Browser specs — `config-panel.browser.spec.tsx` + `confirm-dialog.browser.spec.tsx`
+- [x] **T027** [Ph5] [BROWSER] [P1] Browser specs — `config-panel.browser.spec.tsx` + `confirm-dialog.browser.spec.tsx`
   ```
   Files:
     ✦ apps/web/src/features/mutations/__tests__/config-panel.browser.spec.tsx
