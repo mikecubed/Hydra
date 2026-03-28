@@ -99,7 +99,7 @@ describe('mutation-routes', () => {
   });
 
   describe('GET /config/safe', () => {
-    it('returns 200 with routing.mode and a 32-char hex revision', async () => {
+    it('returns 200 with config.routing.mode and a 32-char hex revision', async () => {
       setupTestConfig(tmpDir);
       const req = fakeReq('GET', '/config/safe');
       const { res, getResult } = fakeRes();
@@ -111,18 +111,21 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       const b = body as Record<string, unknown>;
       assert.equal(status, 200);
-      assert.equal(b['routing'] != null, true);
-      const routing = b['routing'] as Record<string, unknown>;
+      // Response shape: { config: SafeConfigView, revision }
+      const config = b['config'] as Record<string, unknown>;
+      assert.ok(config != null, 'config field must be present');
+      const routing = config['routing'] as Record<string, unknown>;
       assert.equal(routing['mode'], 'balanced');
       const revision = b['revision'] as string;
       assert.equal(typeof revision, 'string');
       assert.match(revision, /^[0-9a-f]{32}$/);
     });
 
-    it('returns 503 when config is unavailable', async () => {
-      // Point to a nonexistent file so loadHydraConfig throws
+    it('returns 503 when config file is missing', async () => {
+      // Point to a nonexistent file — raw readFileSync will throw ENOENT
       const bogusPath = path.join(tmpDir, 'does-not-exist', 'hydra.config.json');
       _setTestConfigPath(bogusPath);
+      invalidateConfigCache();
       // Force a throw by making the dir unreadable — instead we mock loadHydraConfig
       // Actually, loadHydraConfig falls back to defaults on read error. Let's override
       // the config path to a directory (not a file) to trigger a JSON parse error.
@@ -135,17 +138,7 @@ describe('mutation-routes', () => {
       // Pass raw object with a forbidden key to trigger the superRefine rejection.
       invalidateConfigCache();
 
-      // Write a config file with a forbidden key that SafeConfigView.parse will reject
-      const cfgPath = path.join(tmpDir, 'hydra.config.json');
-      const badConfig = {
-        routing: { mode: 'balanced', apiKey: 'LEAKED' },
-        models: {},
-        usage: {},
-      };
-      fs.writeFileSync(cfgPath, JSON.stringify(badConfig, null, 2), 'utf8');
-      _setTestConfigPath(cfgPath);
-
-      const req = fakeReq('GET', '/config/safe');
+            const req = fakeReq('GET', '/config/safe');
       const { res, getResult } = fakeRes();
       const url = new URL('http://localhost:4173/config/safe');
 

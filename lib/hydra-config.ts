@@ -653,7 +653,7 @@ let _configCache: HydraConfig | null = null;
 let _testConfigPath: string | null = null;
 
 /** Returns the active config file path (real or test-overridden). */
-function activeConfigPath(): string {
+export function activeConfigPath(): string {
   return _testConfigPath ?? CONFIG_PATH;
 }
 
