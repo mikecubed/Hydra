@@ -103,13 +103,13 @@ export class DaemonMutationsClient {
   }
 
   postBudget(body: PatchBudgetRequest): Promise<DaemonMutationsResult<PatchBudgetResponse>> {
-    return this.post('/config/budget', body);
+    return this.post('/config/usage/budget', body);
   }
 
   postWorkflowLaunch(
     body: PostWorkflowLaunchRequest,
   ): Promise<DaemonMutationsResult<PostWorkflowLaunchResponse>> {
-    return this.post('/workflow/launch', body);
+    return this.post('/workflows/launch', body);
   }
 
   getAudit(params?: GetAuditRequest): Promise<DaemonMutationsResult<GetAuditResponse>> {

@@ -260,6 +260,7 @@ function resolveDaemonClientOptions(deps: GatewayAppDeps): DaemonClientOptionLik
 function createProtectedRootRoutes(
   deps: GatewayAppDeps,
   daemonClient: DaemonClient,
+  auditService: AuditService,
 ): Hono<GatewayEnv> {
   const protectedRootRoutes = new Hono<GatewayEnv>();
   protectedRootRoutes.route('/', createConversationRoutes(daemonClient));
@@ -273,7 +274,7 @@ function createProtectedRootRoutes(
   const mutationsClient =
     deps.mutationsClient ??
     new DaemonMutationsClient(deps.mutationsClientOptions ?? defaultOptions);
-  protectedRootRoutes.route('/', createMutationsRouter(mutationsClient));
+  protectedRootRoutes.route('/', createMutationsRouter(mutationsClient, auditService));
 
   return protectedRootRoutes;
 }
@@ -298,7 +299,7 @@ function registerGatewayRoutes(
   const daemonClient =
     deps.daemonClient ??
     new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
-  const protectedRootRoutes = createProtectedRootRoutes(deps, daemonClient);
+  const protectedRootRoutes = createProtectedRootRoutes(deps, daemonClient, runtime.auditService);
   app.route(
     '/',
     createProtectedRouteGroup(protectedRootRoutes, runtime.sessionService, runtime.auditService),
