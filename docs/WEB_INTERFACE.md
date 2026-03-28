@@ -61,8 +61,8 @@ To keep the work easier to reason about, the design has been split into smaller 
 
 ## Next Step
 
-**`web-controlled-mutations`** — safe config read/write through daemon-owned APIs, approved
-workflow-launch surfaces, audit trails, and destructive-action safeguards.
+**`web-hardening-and-packaging`** — packaging integration, accessibility and performance hardening,
+security review and failure-mode drills, contributor and documentation updates.
 
 See [`docs/web-interface/06-phases-and-sdd.md`](./web-interface/06-phases-and-sdd.md) for full phase
 and spec breakdown details.

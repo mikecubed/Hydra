@@ -91,7 +91,8 @@ For each spec:
    **Resolved:** Full turn history with sequence-numbered events and replay buffer.
 3. ~~What event structure best represents council and multi-agent deliberation?~~
    **Resolved:** `AgentExecutionGroup` with participant snapshots; delivered in `web-hydra-operations-panels`.
-4. Which config and workflow mutations are safe enough for early browser phases? ← **Current focus**
+4. ~~Which config and workflow mutations are safe enough for early browser phases?~~
+   **Resolved:** Delivered in `web-controlled-mutations` (PR #221).
 5. When does the repo benefit enough from `turbo` to justify adding it beyond workspaces?
 6. How should browser assets and the gateway runtime be packaged for both npm distribution and the
    existing executable paths?

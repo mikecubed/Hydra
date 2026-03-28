@@ -108,4 +108,33 @@ describe('DestructiveConfirmDialog', () => {
     );
     expect(container.firstChild).toBeNull();
   });
+
+  it('resets to step 1 when isOpen transitions from true to false and back', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    const props = {
+      title: 'Launch evolve',
+      from: 'idle',
+      to: 'running',
+      requiredPhrase: 'CONFIRM',
+      onConfirm,
+      onCancel,
+      isLoading: false,
+    };
+    const { rerender } = render(<DestructiveConfirmDialog isOpen={true} {...props} />);
+    // advance to step 2
+    fireEvent.click(screen.getByText('Confirm'));
+    expect(screen.getByLabelText('Confirmation phrase')).toBeDefined();
+
+    // parent closes dialog
+    rerender(<DestructiveConfirmDialog isOpen={false} {...props} />);
+
+    // parent re-opens dialog
+    rerender(<DestructiveConfirmDialog isOpen={true} {...props} />);
+
+    // should be back at step 1 (ConfirmDialog with from/to), not step 2
+    expect(screen.getByText('idle')).toBeDefined();
+    expect(screen.getByText('running')).toBeDefined();
+    expect(screen.queryByLabelText('Confirmation phrase')).toBeNull();
+  });
 });

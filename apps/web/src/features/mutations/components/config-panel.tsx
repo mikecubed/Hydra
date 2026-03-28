@@ -22,7 +22,7 @@ export interface ConfigPanelProps {
 }
 
 export function ConfigPanel({ client, onBudgetMutated }: ConfigPanelProps): JSX.Element {
-  const { config, revision, isLoading, error, refetch } = useSafeConfig(client);
+  const { config, revision, isLoading, error, errorCategory, refetch } = useSafeConfig(client);
 
   const handleBudgetMutated = useCallback(() => {
     onBudgetMutated?.();
@@ -33,8 +33,7 @@ export function ConfigPanel({ client, onBudgetMutated }: ConfigPanelProps): JSX.
   }
 
   if (error !== null) {
-    const isDaemonUnavailable =
-      error.toLowerCase().includes('unreachable') || error.toLowerCase().includes('daemon');
+    const isDaemonUnavailable = errorCategory === 'daemon-unavailable';
     return (
       <div>
         {isDaemonUnavailable ? (

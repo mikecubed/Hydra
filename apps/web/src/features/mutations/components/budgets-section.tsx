@@ -4,7 +4,7 @@
  * On success calls both onSuccess (config refetch) and onBudgetMutated
  * (operations-panels budget gauge invalidation per spec §6.4).
  */
-import { useState, useCallback, type JSX } from 'react';
+import { useState, useCallback, useRef, type JSX } from 'react';
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
@@ -193,6 +193,28 @@ function collectModelIds(config: SafeConfigView): string[] {
   return [...new Set([...Object.keys(daily), ...Object.keys(weekly)])];
 }
 
+function syncBudgetRows(
+  modelIds: string[],
+  daily: Record<string, number>,
+  weekly: Record<string, number>,
+  prev: Record<string, BudgetRowState>,
+): Record<string, BudgetRowState> {
+  return Object.fromEntries(
+    modelIds.map((id) => [
+      id,
+      Object.hasOwn(prev, id)
+        ? prev[id]
+        : {
+            dailyInput: Object.hasOwn(daily, id) ? String(daily[id]) : '',
+            weeklyInput: Object.hasOwn(weekly, id) ? String(weekly[id]) : '',
+            isDialogOpen: false,
+            isLoading: false,
+            error: null,
+          },
+    ]),
+  );
+}
+
 export function BudgetsSection({
   config,
   revision,
@@ -207,6 +229,13 @@ export function BudgetsSection({
   const [rows, setRows] = useState<Record<string, BudgetRowState>>(() =>
     buildInitialRows(modelIds, daily, weekly),
   );
+
+  const modelIdsKey = modelIds.join(',');
+  const prevModelIdsKeyRef = useRef(modelIdsKey);
+  if (prevModelIdsKeyRef.current !== modelIdsKey) {
+    prevModelIdsKeyRef.current = modelIdsKey;
+    setRows(syncBudgetRows(modelIds, daily, weekly, rows));
+  }
 
   const updateRow = useCallback((id: string, patch: Partial<BudgetRowState>) => {
     setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));

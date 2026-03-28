@@ -64,7 +64,7 @@ describe('ConfigPanel', () => {
     expect(text).not.toMatch(/password/i);
   });
 
-  it('shows daemon-unreachable message when getSafeConfig returns 503', async () => {
+  it('shows generic error banner when getSafeConfig returns category "daemon"', async () => {
     const client = makeMockClient({
       getSafeConfig: vi.fn().mockRejectedValue(
         new MutationsRequestError(503, {
@@ -79,7 +79,27 @@ describe('ConfigPanel', () => {
     await act(async () => {
       render(<ConfigPanel client={client} />);
     });
-    expect(screen.getByText(/daemon unreachable/i)).toBeDefined();
+    // 'daemon' category → generic error banner, NOT the daemon-unreachable banner
+    expect(screen.queryByText('Config unavailable — daemon unreachable')).toBeNull();
+    expect(screen.getByText('Daemon unreachable')).toBeDefined();
+  });
+
+  it('shows daemon-unreachable banner when getSafeConfig returns category "daemon-unavailable"', async () => {
+    const client = makeMockClient({
+      getSafeConfig: vi.fn().mockRejectedValue(
+        new MutationsRequestError(503, {
+          ok: false,
+          code: 'DAEMON_UNAVAILABLE',
+          category: 'daemon-unavailable',
+          message: 'Gateway cannot reach daemon',
+          httpStatus: 503,
+        }),
+      ),
+    });
+    await act(async () => {
+      render(<ConfigPanel client={client} />);
+    });
+    expect(screen.getByText('Config unavailable — daemon unreachable')).toBeDefined();
   });
 
   it('renders models and budgets sections without crashing', async () => {

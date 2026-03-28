@@ -6,7 +6,7 @@
  * Exact match only — no trim, no normalize (SEC-09 / R-4).
  * Cancel at Step 2 closes the entire flow; re-initiating starts at Step 1.
  */
-import { useState, useCallback, type JSX, type ChangeEvent } from 'react';
+import { useState, useCallback, useEffect, type JSX, type ChangeEvent } from 'react';
 import { ConfirmDialog } from './confirm-dialog.tsx';
 
 export interface DestructiveConfirmDialogProps {
@@ -32,6 +32,13 @@ export function DestructiveConfirmDialog({
 }: DestructiveConfirmDialogProps): JSX.Element | null {
   const [step, setStep] = useState<1 | 2>(1);
   const [phraseInput, setPhraseInput] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) {
+      setStep(1);
+      setPhraseInput('');
+    }
+  }, [isOpen]);
 
   const handleStep1Confirm = useCallback(() => {
     setStep(2);

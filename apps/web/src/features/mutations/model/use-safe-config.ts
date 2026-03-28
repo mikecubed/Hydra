@@ -14,6 +14,7 @@ export interface SafeConfigState {
   revision: string | null;
   isLoading: boolean;
   error: string | null;
+  errorCategory: string | null;
   refetch: () => void;
 }
 
@@ -22,6 +23,7 @@ export function useSafeConfig(client: MutationsClient): SafeConfigState {
   const [revision, setRevision] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCategory, setErrorCategory] = useState<string | null>(null);
 
   const fetchConfig = useCallback(() => {
     setIsLoading(true);
@@ -31,12 +33,15 @@ export function useSafeConfig(client: MutationsClient): SafeConfigState {
         setConfig(res.config);
         setRevision(res.revision);
         setError(null);
+        setErrorCategory(null);
       })
       .catch((err: unknown) => {
         if (err instanceof MutationsRequestError) {
           setError(err.gatewayError.message);
+          setErrorCategory(err.gatewayError.category);
         } else {
           setError('Unexpected error loading config');
+          setErrorCategory(null);
         }
       })
       .finally(() => {
@@ -48,5 +53,5 @@ export function useSafeConfig(client: MutationsClient): SafeConfigState {
     fetchConfig();
   }, [fetchConfig]);
 
-  return { config, revision, isLoading, error, refetch: fetchConfig };
+  return { config, revision, isLoading, error, errorCategory, refetch: fetchConfig };
 }

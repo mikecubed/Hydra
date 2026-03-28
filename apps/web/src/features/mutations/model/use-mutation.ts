@@ -26,6 +26,7 @@ export function useMutation<TRequest, TResponse>(
 
   const mutate = useCallback(
     async (body: TRequest) => {
+      if (isLoading) return;
       setIsLoading(true);
       setError(null);
       try {
@@ -41,7 +42,7 @@ export function useMutation<TRequest, TResponse>(
         setIsLoading(false);
       }
     },
-    [mutationFn, options],
+    [isLoading, mutationFn, options],
   );
 
   const reset = useCallback(() => {

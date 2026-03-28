@@ -97,7 +97,7 @@ describe('DaemonMutationsClient', () => {
   });
 
   describe('postBudget', () => {
-    it('sends POST /config/budget with body', async () => {
+    it('sends POST /config/usage/budget with body', async () => {
       const responseData = {
         snapshot: { routing: { mode: 'economy' } },
         appliedRevision: 'rev-4',
