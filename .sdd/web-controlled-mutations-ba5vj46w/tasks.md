@@ -316,7 +316,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T015** [Ph3] [DAEMON] [P2] `POST /config/models/:agent/active` handler
+- [x] **T015** [Ph3] [DAEMON] [P2] `POST /config/models/:agent/active` handler
   ```
   Files:
     ✎ lib/daemon/mutation-routes.ts
@@ -338,7 +338,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T016** [Ph3] [DAEMON] [P2] `POST /config/usage/budget` handler + `POST /workflows/launch` handler
+- [x] **T016** [Ph3] [DAEMON] [P2] `POST /config/usage/budget` handler + `POST /workflows/launch` handler
   ```
   Files:
     ✎ lib/daemon/mutation-routes.ts
@@ -360,7 +360,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T017** [Ph3] [DAEMON] [P3] `GET /audit` handler + extend daemon tests
+- [x] **T017** [Ph3] [DAEMON] [P3] `GET /audit` handler + extend daemon tests
   ```
   Files:
     ✎ lib/daemon/mutation-routes.ts
@@ -382,7 +382,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T017a** [Ph3] [DAEMON] [P1] Phase 3 quality gate
+- [x] **T017a** [Ph3] [DAEMON] [P1] Phase 3 quality gate
   ```
   Files:
     (no new files — validation-only task)
