@@ -14,10 +14,11 @@ describe('mutation-lock', () => {
       release2();
     });
 
-    // Second hasn't acquired yet because first hasn't released
-    await new Promise((r) => {
-      setTimeout(r, 20);
-    });
+    // Second hasn't acquired yet because first hasn't released.
+    // `await Promise.resolve()` drains all currently-queued microtasks; the
+    // second ticket is blocked on the first lock (an unresolved promise) so it
+    // is not in the microtask queue — this check is deterministic.
+    await Promise.resolve();
     assert.deepStrictEqual(order, ['acquired-1']);
 
     release1();
@@ -34,9 +35,8 @@ describe('mutation-lock', () => {
       r();
     });
 
-    await new Promise((r) => {
-      setTimeout(r, 10);
-    });
+    // Same reasoning: blocked on the mutex chain, not a timing race.
+    await Promise.resolve();
     assert.equal(secondAcquired, false, 'second should not yet have acquired');
 
     release();

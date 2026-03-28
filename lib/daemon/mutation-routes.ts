@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import z from 'zod';
+import { z } from 'zod';
 import {
   loadHydraConfig,
   saveHydraConfig,
@@ -32,8 +32,16 @@ import { sendJson, sendError, readJsonBody } from './http-utils.ts';
 const FORBIDDEN_KEY = /(apiKey|secret|hash|password)/i;
 
 function hasForbiddenKey(val: unknown, path_: string[] = []): string | null {
-  if (typeof val !== 'object' || val === null) return null;
-  for (const key of Object.keys(val)) {
+  if (val === null || val === undefined) return null;
+  if (Array.isArray(val)) {
+    for (const item of val) {
+      const nested = hasForbiddenKey(item, path_);
+      if (nested !== null) return nested;
+    }
+    return null;
+  }
+  if (typeof val !== 'object') return null;
+  for (const key of Object.keys(val as Record<string, unknown>)) {
     if (FORBIDDEN_KEY.test(key)) return [...path_, key].join('.');
     const nested = hasForbiddenKey((val as Record<string, unknown>)[key], [...path_, key]);
     if (nested !== null) return nested;
@@ -526,3 +534,6 @@ export function _clearWorkflowLaunchesForTest(): void {
 export function _injectWorkflowLaunchForTest(entry: WorkflowEntry): void {
   workflowLaunches.push(entry);
 }
+
+/** Expose hasForbiddenKey for unit testing. Not part of the public API. */
+export { hasForbiddenKey as _hasForbiddenKeyForTest };

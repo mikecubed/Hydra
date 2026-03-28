@@ -16,6 +16,7 @@ import {
   _injectAuditRecordsForTest,
   _clearWorkflowLaunchesForTest,
   _injectWorkflowLaunchForTest,
+  _hasForbiddenKeyForTest,
 } from '../../lib/daemon/mutation-routes.ts';
 import type { MutationAuditRecord } from '@hydra/web-contracts';
 
@@ -747,5 +748,47 @@ describe('mutation-routes', () => {
       const handled = await handleMutationRoute(req, res, url);
       assert.equal(handled, false);
     });
+  });
+});
+
+describe('hasForbiddenKey', () => {
+  it('returns null for plain safe objects', () => {
+    assert.equal(_hasForbiddenKeyForTest({ routing: { mode: 'economy' } }), null);
+  });
+
+  it('detects a forbidden key at the top level', () => {
+    assert.notEqual(_hasForbiddenKeyForTest({ apiKey: 'secret' }), null);
+  });
+
+  it('detects a forbidden key nested in an object', () => {
+    assert.notEqual(_hasForbiddenKeyForTest({ models: { claude: { password: 'x' } } }), null);
+  });
+
+  it('detects a forbidden key nested inside an array element', () => {
+    const result = _hasForbiddenKeyForTest({ items: [{ apiKey: 'leaked' }] });
+    assert.notEqual(result, null);
+  });
+
+  it('detects a forbidden key in a deeply nested array', () => {
+    const result = _hasForbiddenKeyForTest({ a: [{ b: [{ secret: 'x' }] }] });
+    assert.notEqual(result, null);
+  });
+
+  it('returns null for arrays containing only safe objects', () => {
+    assert.equal(
+      _hasForbiddenKeyForTest({ items: [{ tier: 'default' }, { mode: 'balanced' }] }),
+      null,
+    );
+  });
+
+  it('returns null for null and undefined inputs', () => {
+    assert.equal(_hasForbiddenKeyForTest(null), null);
+    // eslint-disable-next-line unicorn/no-useless-undefined
+    assert.equal(_hasForbiddenKeyForTest(undefined), null);
+  });
+
+  it('returns null for primitives', () => {
+    assert.equal(_hasForbiddenKeyForTest('plain-string'), null);
+    assert.equal(_hasForbiddenKeyForTest(42), null);
   });
 });

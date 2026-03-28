@@ -4,7 +4,7 @@
  * On success calls both onSuccess (config refetch) and onBudgetMutated
  * (operations-panels budget gauge invalidation per spec §6.4).
  */
-import { useState, useCallback, useRef, type JSX } from 'react';
+import { useState, useCallback, useMemo, type JSX } from 'react';
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
@@ -231,11 +231,15 @@ export function BudgetsSection({
   );
 
   const modelIdsKey = modelIds.join(',');
-  const prevModelIdsKeyRef = useRef(modelIdsKey);
-  if (prevModelIdsKeyRef.current !== modelIdsKey) {
-    prevModelIdsKeyRef.current = modelIdsKey;
-    setRows(syncBudgetRows(modelIds, daily, weekly, rows));
-  }
+
+  // Derive rows for all current model IDs without a render-phase setState.
+  // `modelIdsKey` proxies `modelIds` as a stable string; `rows` tracks user
+  // interaction state. `daily`/`weekly` change reference every render but are
+  // only needed when the model-ID set changes — already covered by `modelIdsKey`.
+  const effectiveRows = useMemo(
+    () => syncBudgetRows(modelIds, daily, weekly, rows),
+    [modelIdsKey, rows],
+  );
 
   const updateRow = useCallback((id: string, patch: Partial<BudgetRowState>) => {
     setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -243,9 +247,17 @@ export function BudgetsSection({
 
   const handleConfirm = useCallback(
     (id: string) => {
-      void applyBudget({ id, rows, updateRow, client, revision, onSuccess, onBudgetMutated });
+      void applyBudget({
+        id,
+        rows: effectiveRows,
+        updateRow,
+        client,
+        revision,
+        onSuccess,
+        onBudgetMutated,
+      });
     },
-    [rows, client, revision, onSuccess, onBudgetMutated, updateRow],
+    [effectiveRows, client, revision, onSuccess, onBudgetMutated, updateRow],
   );
 
   if (modelIds.length === 0) {
@@ -263,7 +275,7 @@ export function BudgetsSection({
         <BudgetRow
           key={id}
           id={id}
-          row={rows[id]}
+          row={effectiveRows[id]}
           currentDaily={daily[id]}
           currentWeekly={weekly[id]}
           onDailyChange={(v) => {

@@ -4,7 +4,7 @@
  * Renders one row per agent in SafeConfigView.models. On stale-revision
  * error (409), shows a non-blocking inline toast per row.
  */
-import { useState, useCallback, useRef, type JSX } from 'react';
+import { useState, useCallback, useMemo, type JSX } from 'react';
 import type { SafeConfigView, ModelTier } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
@@ -132,11 +132,12 @@ export function ModelsSection({
   );
 
   const agentsKey = agents.join(',');
-  const prevAgentsKeyRef = useRef(agentsKey);
-  if (prevAgentsKeyRef.current !== agentsKey) {
-    prevAgentsKeyRef.current = agentsKey;
-    setRows(buildModelRows(agents, models, rows));
-  }
+
+  // Derive rows for all current agents without a render-phase setState.
+  // `agentsKey` proxies `agents` as a stable string; `rows` tracks user
+  // interaction state. `models` changes reference every render but is only
+  // needed when the agent set changes — already covered by `agentsKey`.
+  const effectiveRows = useMemo(() => buildModelRows(agents, models, rows), [agentsKey, rows]);
 
   const updateRow = useCallback((agent: string, patch: Partial<RowState>) => {
     setRows((prev) => ({ ...prev, [agent]: { ...prev[agent], ...patch } }));
@@ -144,7 +145,7 @@ export function ModelsSection({
 
   const handleConfirm = useCallback(
     async (agent: string) => {
-      const row = rows[agent];
+      const row = effectiveRows[agent];
       updateRow(agent, { isLoading: true });
       try {
         await client.postModelTier(agent, { tier: row.selectedTier, expectedRevision: revision });
@@ -159,7 +160,7 @@ export function ModelsSection({
         });
       }
     },
-    [rows, client, revision, onSuccess, updateRow],
+    [effectiveRows, client, revision, onSuccess, updateRow],
   );
 
   if (agents.length === 0) {
@@ -178,7 +179,7 @@ export function ModelsSection({
           key={agent}
           agent={agent}
           currentTier={resolveCurrentTier(models[agent])}
-          row={rows[agent]}
+          row={effectiveRows[agent]}
           onTierChange={(tier) => {
             updateRow(agent, { selectedTier: tier });
           }}
