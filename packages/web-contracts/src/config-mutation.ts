@@ -24,8 +24,15 @@ export type AgentId = z.infer<typeof AgentId>;
 const FORBIDDEN_KEY = /(apiKey|secret|hash|password)/i;
 
 function hasForbiddenKey(val: unknown, path: string[] = []): string | null {
-  if (val === null || val === undefined || typeof val !== 'object' || Array.isArray(val))
+  if (val === null || val === undefined) return null;
+  if (Array.isArray(val)) {
+    for (const item of val) {
+      const nested = hasForbiddenKey(item, path);
+      if (nested !== null) return nested;
+    }
     return null;
+  }
+  if (typeof val !== 'object') return null;
   for (const key of Object.keys(val as Record<string, unknown>)) {
     if (FORBIDDEN_KEY.test(key)) return [...path, key].join('.');
     const nested = hasForbiddenKey((val as Record<string, unknown>)[key], [...path, key]);

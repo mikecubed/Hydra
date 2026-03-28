@@ -132,8 +132,8 @@ function buildInitialRows(
     modelIds.map((id) => [
       id,
       {
-        dailyInput: formatLimit(daily[id]),
-        weeklyInput: formatLimit(weekly[id]),
+        dailyInput: Object.hasOwn(daily, id) ? String(daily[id]) : '',
+        weeklyInput: Object.hasOwn(weekly, id) ? String(weekly[id]) : '',
         isDialogOpen: false,
         isLoading: false,
         error: null,

@@ -45,7 +45,7 @@ function categoryFromStatus(status: number, payload: unknown): ErrorCategory {
 
 function codeFromCategory(category: ErrorCategory): string {
   if (category === 'stale-revision') return 'STALE_REVISION';
-  if (category === 'daemon-unavailable') return 'DAEMON_UNREACHABLE';
+  if (category === 'daemon-unavailable') return 'DAEMON_UNAVAILABLE';
   if (category === 'workflow-conflict') return 'WORKFLOW_CONFLICT';
   if (category === 'validation') return 'VALIDATION_FAILED';
   return 'DAEMON_ERROR';
@@ -68,7 +68,7 @@ function translateMutationsDaemonResponse(status: number, payload: unknown): Gat
 
 function translateMutationsFetchFailure(): GatewayErrorResponse {
   return createGatewayErrorResponse({
-    code: 'DAEMON_UNREACHABLE',
+    code: 'DAEMON_UNAVAILABLE',
     category: 'daemon-unavailable',
     message: 'Daemon unreachable',
   });

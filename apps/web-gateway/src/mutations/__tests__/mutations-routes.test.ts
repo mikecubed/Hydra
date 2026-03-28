@@ -130,7 +130,7 @@ describe('Mutations routes — GET /config/safe (T013)', () => {
     mockClient.getSafeConfig.mock.mockImplementation(() =>
       Promise.resolve({
         error: createGatewayErrorResponse({
-          code: 'DAEMON_UNREACHABLE',
+          code: 'DAEMON_UNAVAILABLE',
           category: 'daemon-unavailable',
           message: 'Daemon unreachable',
         }),
@@ -227,7 +227,7 @@ describe('Mutations routes — POST /config/routing/mode (T013)', () => {
     mockClient.postRoutingMode.mock.mockImplementation(() =>
       Promise.resolve({
         error: createGatewayErrorResponse({
-          code: 'DAEMON_UNREACHABLE',
+          code: 'DAEMON_UNAVAILABLE',
           category: 'daemon-unavailable',
           message: 'Daemon unreachable',
         }),
@@ -692,7 +692,7 @@ describe('Mutations routes — GET /audit (T019)', () => {
     mockClient.getAudit.mock.mockImplementation(() =>
       Promise.resolve({
         error: createGatewayErrorResponse({
-          code: 'DAEMON_UNREACHABLE',
+          code: 'DAEMON_UNAVAILABLE',
           category: 'daemon-unavailable',
           message: 'Daemon unreachable',
         }),
@@ -864,7 +864,7 @@ describe('Mutations routes — rejected-attempt audit coverage (T019b)', () => {
     mockClient.postBudget.mock.mockImplementation(() =>
       Promise.resolve({
         error: createGatewayErrorResponse({
-          code: 'DAEMON_UNREACHABLE',
+          code: 'DAEMON_UNAVAILABLE',
           category: 'daemon-unavailable',
           message: 'Daemon unreachable',
         }),

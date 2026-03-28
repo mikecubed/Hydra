@@ -1,6 +1,6 @@
 # Hydra Web Interface
 
-> **Status:** Active — specs 1–6 delivered; `web-controlled-mutations` in progress
+> **Status:** Active — specs 1–7 delivered; `web-hardening-and-packaging` pending
 > **Scope:** Browser-native Hydra workspace with full REPL-grade capabilities, strict quality gates, and SDD-driven delivery
 
 This document is the entry point for Hydra's web-interface design set.
@@ -56,7 +56,7 @@ To keep the work easier to reason about, the design has been split into smaller 
 | 4   | `web-gateway-conversation-transport` | ✅ Delivered                             |
 | 5   | `web-chat-workspace`                 | ✅ Delivered (phases 1–8, PRs #173–#185) |
 | 6   | `web-hydra-operations-panels`        | ✅ Delivered (US1–US6, PRs #201–#209)    |
-| 7   | **`web-controlled-mutations`**       | 🔄 In progress                           |
+| 7   | **`web-controlled-mutations`**       | ✅ Delivered (PR #221)                   |
 | 8   | `web-hardening-and-packaging`        | ⬜ Pending                               |
 
 ## Next Step

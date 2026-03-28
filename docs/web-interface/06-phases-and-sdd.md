@@ -45,7 +45,7 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 - budgets and daemon health: ✅ delivered
 - council and multi-agent execution visualization: ✅ delivered
 
-### Phase 4 — Controlled Mutations and Operational Workflows 🔄 In Progress
+### Phase 4 — Controlled Mutations and Operational Workflows ✅ Complete
 
 - safe config read/write subset through daemon-owned APIs;
 - approved workflow-launch surfaces;
@@ -68,7 +68,7 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 | 4   | **`web-gateway-conversation-transport`** | ✅ Delivered — gateway REST + WebSocket mediation, session binding, reconnect/resume, daemon transport amendments |
 | 5   | **`web-chat-workspace`**                 | ✅ Delivered (phases 1–8, PRs #173–#185)                                                                          |
 | 6   | **`web-hydra-operations-panels`**        | ✅ Delivered — Hydra-native operations visibility and daemon-authorized controls (US1–US6, PRs #201–#209)         |
-| 7   | **`web-controlled-mutations`**           | 🔄 In progress                                                                                                    |
+| 7   | **`web-controlled-mutations`**           | ✅ Delivered (PR #221)                                                                                            |
 | 8   | **`web-hardening-and-packaging`**        | ⬜ Pending                                                                                                        |
 
 ## Recommended Workflow

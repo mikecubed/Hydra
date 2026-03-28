@@ -69,6 +69,28 @@ describe('SafeConfigView', () => {
       { name: 'ZodError' },
     );
   });
+
+  it('rejects forbidden keys nested inside arrays', () => {
+    assert.throws(
+      () =>
+        SafeConfigView.parse({
+          ...validConfig,
+          extra: [{ apiKey: 'secret-in-array' }],
+        }),
+      { name: 'ZodError' },
+    );
+  });
+
+  it('rejects forbidden keys in deeply nested arrays', () => {
+    assert.throws(
+      () =>
+        SafeConfigView.parse({
+          ...validConfig,
+          extra: [{ inner: [{ password: 'deep' }] }],
+        }),
+      { name: 'ZodError' },
+    );
+  });
 });
 
 describe('RoutingModeMutationRequest', () => {
