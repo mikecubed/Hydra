@@ -84,7 +84,7 @@ async function executeLaunch(
     if (err instanceof MutationsRequestError) {
       if (err.gatewayError.category === 'workflow-conflict')
         return { conflict: 'Workflow already running' };
-      if (err.gatewayError.httpStatus === 503)
+      if (err.gatewayError.category === 'daemon-unavailable')
         return { error: 'Config unavailable — daemon unreachable' };
       return { error: err.gatewayError.message };
     }

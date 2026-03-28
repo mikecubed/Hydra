@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, act } from '@testing-library/react';
 
 import type { MutationsClient } from '../api/mutations-client.ts';
+import { MutationsRequestError } from '../api/mutations-client.ts';
+import type { GatewayErrorBody } from '../../../shared/gateway-errors.ts';
 import { WorkflowLaunchPanel } from '../components/workflow-launch-panel.tsx';
 
 afterEach(() => {
@@ -74,6 +76,44 @@ describe('WorkflowLaunchPanel', () => {
     fireEvent.click(screen.getByText('Launch'));
     fireEvent.click(screen.getByText('Cancel'));
     expect(postWorkflowLaunch).not.toHaveBeenCalled();
+  });
+
+  it('daemon-unavailable category shows daemon unreachable message', async () => {
+    const body: GatewayErrorBody = {
+      ok: false,
+      code: 'DAEMON_UNREACHABLE',
+      category: 'daemon-unavailable',
+      message: 'daemon is down',
+      httpStatus: 503,
+    };
+    const postWorkflowLaunch = vi.fn().mockRejectedValue(new MutationsRequestError(503, body));
+    const client = makeMockClient({ postWorkflowLaunch });
+    render(<WorkflowLaunchPanel revision="rev-1" client={client} />);
+    fireEvent.click(screen.getByText('Launch'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Confirm'));
+    });
+    expect(screen.getByText('Config unavailable — daemon unreachable')).toBeDefined();
+  });
+
+  it('generic daemon 503 does NOT show the daemon unreachable message', async () => {
+    const body: GatewayErrorBody = {
+      ok: false,
+      code: 'SERVICE_OVERLOADED',
+      category: 'daemon',
+      message: 'Service temporarily unavailable',
+      httpStatus: 503,
+    };
+    const postWorkflowLaunch = vi.fn().mockRejectedValue(new MutationsRequestError(503, body));
+    const client = makeMockClient({ postWorkflowLaunch });
+    render(<WorkflowLaunchPanel revision="rev-1" client={client} />);
+    fireEvent.click(screen.getByText('Launch'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Confirm'));
+    });
+    // Should show the generic message from the error body, not the special daemon unreachable text
+    expect(screen.queryByText('Config unavailable — daemon unreachable')).toBeNull();
+    expect(screen.getByText('Service temporarily unavailable')).toBeDefined();
   });
 
   it('confirming tasks launch with mocked success: task ID shown in panel', async () => {

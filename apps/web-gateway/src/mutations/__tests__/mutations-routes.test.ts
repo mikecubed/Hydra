@@ -178,6 +178,8 @@ describe('Mutations routes — POST /config/routing/mode (T013)', () => {
       }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postRoutingMode.mock.callCount(), 0);
   });
 
@@ -189,12 +191,16 @@ describe('Mutations routes — POST /config/routing/mode (T013)', () => {
       }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postRoutingMode.mock.callCount(), 0);
   });
 
   it('returns 400 on empty/null body', async () => {
     const res = await app.request(buildRequest('POST', '/config/routing/mode', { body: '' }));
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postRoutingMode.mock.callCount(), 0);
   });
 
@@ -466,6 +472,8 @@ describe('Mutations routes — POST /config/models/:agent/active (T019)', () => 
       buildRequest('POST', '/config/models/unknown-bot/active', { body: JSON.stringify(body) }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postModelTier.mock.callCount(), 0);
   });
 
@@ -475,6 +483,8 @@ describe('Mutations routes — POST /config/models/:agent/active (T019)', () => 
       buildRequest('POST', '/config/models/claude/active', { body: JSON.stringify(body) }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postModelTier.mock.callCount(), 0);
   });
 
@@ -545,6 +555,8 @@ describe('Mutations routes — POST /config/usage/budget (T019)', () => {
       buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postBudget.mock.callCount(), 0);
   });
 
@@ -559,6 +571,8 @@ describe('Mutations routes — POST /config/usage/budget (T019)', () => {
       buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postBudget.mock.callCount(), 0);
   });
 
@@ -625,6 +639,8 @@ describe('Mutations routes — POST /workflows/launch (T019)', () => {
       buildRequest('POST', '/workflows/launch', { body: JSON.stringify(body) }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postWorkflowLaunch.mock.callCount(), 0);
   });
 
@@ -634,6 +650,8 @@ describe('Mutations routes — POST /workflows/launch (T019)', () => {
       buildRequest('POST', '/workflows/launch', { body: JSON.stringify(body) }),
     );
     assert.equal(res.status, 400);
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.code, 'VALIDATION_FAILED');
     assert.equal(mockClient.postWorkflowLaunch.mock.callCount(), 0);
   });
 

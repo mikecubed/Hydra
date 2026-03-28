@@ -139,9 +139,20 @@ export function ModelsSection({
   // needed when the agent set changes — already covered by `agentsKey`.
   const effectiveRows = useMemo(() => buildModelRows(agents, models, rows), [agentsKey, rows]);
 
-  const updateRow = useCallback((agent: string, patch: Partial<RowState>) => {
-    setRows((prev) => ({ ...prev, [agent]: { ...prev[agent], ...patch } }));
-  }, []);
+  const updateRow = useCallback(
+    (agent: string, patch: Partial<RowState>) => {
+      setRows((prev) => {
+        const baseline: RowState = prev[agent] ?? {
+          selectedTier: resolveCurrentTier(models[agent] ?? { active: 'default' }),
+          isDialogOpen: false,
+          isLoading: false,
+          toast: null,
+        };
+        return { ...prev, [agent]: { ...baseline, ...patch } };
+      });
+    },
+    [models],
+  );
 
   const handleConfirm = useCallback(
     async (agent: string) => {

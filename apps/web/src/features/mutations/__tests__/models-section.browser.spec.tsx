@@ -77,4 +77,43 @@ describe('ModelsSection — row sync', () => {
     });
     expect(screen.queryByLabelText(/Model config for gemini/i)).toBeNull();
   });
+
+  it('changing tier on a newly-appeared agent retains a valid selected value', async () => {
+    const client = makeMockClient();
+    const onSuccess = vi.fn();
+    const config1 = makeConfig(['claude']);
+    const config2 = makeConfig(['claude', 'gemini']);
+
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => {
+      ({ rerender } = render(
+        <ModelsSection config={config1} revision="r1" client={client} onSuccess={onSuccess} />,
+      ));
+    });
+
+    // Rerender with a new agent
+    await act(async () => {
+      rerender(
+        <ModelsSection config={config2} revision="r2" client={client} onSuccess={onSuccess} />,
+      );
+    });
+
+    // The new agent row should exist
+    expect(screen.getByLabelText(/Model config for gemini/i)).toBeDefined();
+
+    // Change its tier — this exercises updateRow for an agent not in `rows` state
+    const geminiSelect = screen.getByLabelText('Tier', {
+      selector: '#tier-select-gemini',
+    });
+    if (!(geminiSelect instanceof HTMLSelectElement)) {
+      throw new TypeError('Expected gemini tier control to be a select element');
+    }
+    await act(async () => {
+      geminiSelect.value = 'fast';
+      geminiSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // The select should now reflect the new value (not crash or show undefined)
+    expect(geminiSelect.value).toBe('fast');
+  });
 });

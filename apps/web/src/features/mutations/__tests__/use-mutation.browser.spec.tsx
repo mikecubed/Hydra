@@ -96,6 +96,32 @@ describe('useMutation', () => {
     expect(fn).toHaveBeenCalledOnce();
   });
 
+  it('same-tick concurrency: only one call enters mutationFn', async () => {
+    let resolveFirst!: () => void;
+    const first = new Promise<void>((res) => {
+      resolveFirst = res;
+    });
+    const fn = vi.fn().mockReturnValueOnce(first).mockResolvedValue(null);
+
+    const { result } = renderHook(() => useMutation(fn));
+
+    // Fire two mutate calls synchronously in the same tick — before any rerender
+    await act(async () => {
+      void result.current.mutate({ call: 1 });
+      void result.current.mutate({ call: 2 });
+    });
+
+    // Resolve the first (and only) inflight call
+    await act(async () => {
+      resolveFirst();
+      await Promise.resolve();
+    });
+
+    // The ref-based guard must block the second synchronous call
+    expect(fn).toHaveBeenCalledOnce();
+    expect(fn).toHaveBeenCalledWith({ call: 1 });
+  });
+
   it('reset clears error and loading', async () => {
     const fn = vi.fn().mockRejectedValue(makeError('err'));
     const { result } = renderHook(() => useMutation(fn));

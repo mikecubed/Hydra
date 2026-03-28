@@ -78,7 +78,7 @@ async function handlePostMutation<TData, TResult>(
     );
     return c.json(
       createGatewayErrorResponse({
-        code: 'VALIDATION_ERROR',
+        code: 'VALIDATION_FAILED',
         category: 'validation',
         message: validated.message,
       }),
@@ -209,7 +209,7 @@ async function handleWorkflowLaunch(
     );
     return c.json(
       createGatewayErrorResponse({
-        code: 'VALIDATION_ERROR',
+        code: 'VALIDATION_FAILED',
         category: 'validation',
         message: validated.message,
       }),
@@ -261,7 +261,7 @@ async function handleAuditGet(
   if (!validated.ok) {
     return c.json(
       createGatewayErrorResponse({
-        code: 'VALIDATION_ERROR',
+        code: 'VALIDATION_FAILED',
         category: 'validation',
         message: validated.message,
       }),

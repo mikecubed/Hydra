@@ -20,7 +20,7 @@ export function translateMutationError(category: ErrorCategory): {
     case 'daemon-unavailable':
       return { status: 503, message: 'Daemon unreachable', code: 'DAEMON_UNAVAILABLE' };
     case 'validation':
-      return { status: 400, message: 'Validation error', code: 'VALIDATION_ERROR' };
+      return { status: 400, message: 'Validation error', code: 'VALIDATION_FAILED' };
     case 'workflow-conflict':
       return { status: 409, message: 'Workflow already running', code: 'WORKFLOW_CONFLICT' };
     case 'auth':

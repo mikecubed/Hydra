@@ -3,7 +3,7 @@
  *
  * Manages loading state and error string; calls onSuccess callback on success.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { MutationsRequestError } from '../api/mutations-client.ts';
 
 export interface UseMutationOptions<TResponse> {
@@ -17,16 +17,22 @@ export interface UseMutationResult<TRequest> {
   reset: () => void;
 }
 
+function setInflight(ref: { current: boolean }, value: boolean): void {
+  ref.current = value;
+}
+
 export function useMutation<TRequest, TResponse>(
   mutationFn: (body: TRequest) => Promise<TResponse>,
   options?: UseMutationOptions<TResponse>,
 ): UseMutationResult<TRequest> {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inflight = useRef(false);
 
   const mutate = useCallback(
     async (body: TRequest) => {
-      if (isLoading) return;
+      if (inflight.current) return;
+      setInflight(inflight, true);
       setIsLoading(true);
       setError(null);
       try {
@@ -39,10 +45,11 @@ export function useMutation<TRequest, TResponse>(
           setError('Unexpected error');
         }
       } finally {
+        setInflight(inflight, false);
         setIsLoading(false);
       }
     },
-    [isLoading, mutationFn, options],
+    [mutationFn, options],
   );
 
   const reset = useCallback(() => {
