@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 
-// ─── AuditEventType enum (12 in-scope types) ────────────────────────────────
+// ─── AuditEventType enum (18 in-scope types) ────────────────────────────────
 
 export const AuditEventType = z.enum([
   'auth.attempt.success',
@@ -20,6 +20,12 @@ export const AuditEventType = z.enum([
   'session.daemon-restored',
   'session.idle-reauth',
   'session.idle-timeout',
+  'config.routing.mode.changed',
+  'config.models.active.changed',
+  'config.usage.budget.changed',
+  'workflow.launched',
+  'config.mutation.rejected',
+  'workflow.launch.rejected',
 ]);
 export type AuditEventType = z.infer<typeof AuditEventType>;
 
@@ -36,3 +42,35 @@ export const AuditRecord = z.object({
   sourceIp: z.string().optional(),
 });
 export type AuditRecord = z.infer<typeof AuditRecord>;
+
+// ─── MutationAuditRecord ─────────────────────────────────────────────────────
+
+export const MutationAuditRecord = z.object({
+  id: z.string().min(1),
+  timestamp: z.iso.datetime(),
+  eventType: AuditEventType,
+  operatorId: z.string().nullable(),
+  sessionId: z.string().nullable(),
+  targetField: z.string(),
+  beforeValue: z.unknown(),
+  afterValue: z.unknown(),
+  outcome: z.enum(['success', 'failure']),
+  rejectionReason: z.string().nullable(),
+  sourceIp: z.string(),
+});
+export type MutationAuditRecord = z.infer<typeof MutationAuditRecord>;
+
+// ─── AuditPageRequest / AuditPageResponse ────────────────────────────────────
+
+export const AuditPageRequest = z.object({
+  limit: z.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+});
+export type AuditPageRequest = z.infer<typeof AuditPageRequest>;
+
+export const AuditPageResponse = z.object({
+  records: z.array(MutationAuditRecord),
+  nextCursor: z.string().nullable(),
+  totalCount: z.number().nullable().optional(),
+});
+export type AuditPageResponse = z.infer<typeof AuditPageResponse>;

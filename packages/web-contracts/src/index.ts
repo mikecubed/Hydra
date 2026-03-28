@@ -169,3 +169,48 @@ export {
   WorkItemControlEntry,
   BatchControlDiscoveryResponse,
 } from './contracts/operations-control.ts';
+
+// ─── Mutation contracts (Phase 5) ────────────────────────────────────────────
+
+export {
+  RoutingMode,
+  ModelTier,
+  AgentId,
+  SafeConfigView,
+  RoutingModeMutationRequest,
+  ModelTierMutationRequest,
+  BudgetMutationRequest,
+  ConfigMutationResponse,
+} from './config-mutation.ts';
+
+export {
+  WorkflowName,
+  WorkflowLaunchRequest,
+  WorkflowLaunchResponse,
+} from './workflow-launch.ts';
+
+export {
+  MutationAuditRecord,
+  AuditPageRequest,
+  AuditPageResponse,
+} from './audit-schemas.ts';
+
+export {
+  GetSafeConfigResponse,
+  PatchRoutingModeRequest,
+  PatchRoutingModeResponse,
+  PatchModelTierRequest,
+  PatchModelTierResponse,
+  PatchBudgetRequest,
+  PatchBudgetResponse,
+} from './contracts/config-mutation.ts';
+
+export {
+  PostWorkflowLaunchRequest,
+  PostWorkflowLaunchResponse,
+} from './contracts/workflow-launch.ts';
+
+export {
+  GetAuditRequest,
+  GetAuditResponse,
+} from './contracts/audit-read.ts';
