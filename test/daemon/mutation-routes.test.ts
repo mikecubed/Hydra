@@ -4,7 +4,11 @@ import type http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { _setTestConfigPath, invalidateConfigCache, loadHydraConfig } from '../../lib/hydra-config.ts';
+import {
+  _setTestConfigPath,
+  invalidateConfigCache,
+  loadHydraConfig,
+} from '../../lib/hydra-config.ts';
 import {
   handleMutationRoute,
   computeConfigRevision,
@@ -33,8 +37,18 @@ function setupTestConfig(dir: string, initial: Record<string, unknown> = {}): st
   const seed = {
     routing: { mode: 'balanced' },
     models: {
-      claude: { default: 'claude-sonnet-4-6', fast: 'claude-haiku', cheap: 'claude-haiku', active: 'default' },
-      gemini: { default: 'gemini-pro', fast: 'gemini-flash', cheap: 'gemini-flash', active: 'default' },
+      claude: {
+        default: 'claude-sonnet-4-6',
+        fast: 'claude-haiku',
+        cheap: 'claude-haiku',
+        active: 'default',
+      },
+      gemini: {
+        default: 'gemini-pro',
+        fast: 'gemini-flash',
+        cheap: 'gemini-flash',
+        active: 'default',
+      },
       codex: { default: 'gpt-5.4', fast: 'gpt-4.1', cheap: 'gpt-4.1', active: 'default' },
     },
     usage: {
@@ -53,7 +67,9 @@ function cleanupDir(dir: string): void {
   invalidateConfigCache();
   try {
     fs.rmSync(dir, { recursive: true, force: true });
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 /** Create a fake IncomingMessage from method + url + optional body */
@@ -78,7 +94,10 @@ function fakeReq(
 }
 
 /** Collect response from a ServerResponse-like writable */
-function fakeRes(): { res: http.ServerResponse; getResult: () => { status: number; body: unknown } } {
+function fakeRes(): {
+  res: http.ServerResponse;
+  getResult: () => { status: number; body: unknown };
+} {
   const chunks: Buffer[] = [];
   let statusCode = 200;
   const res = {
@@ -629,7 +648,10 @@ describe('mutation-routes', () => {
       const resp = body as Record<string, unknown>;
       const records = resp['records'] as unknown[];
       assert.equal(records.length, 2);
-      assert.ok(resp['nextCursor'] !== null, 'nextCursor should be non-null when more records exist');
+      assert.ok(
+        resp['nextCursor'] !== null,
+        'nextCursor should be non-null when more records exist',
+      );
       assert.equal(resp['totalCount'], 5);
     });
 

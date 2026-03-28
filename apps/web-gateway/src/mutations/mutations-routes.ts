@@ -6,6 +6,7 @@
  * POST /workflows/launch, GET /audit.
  */
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { GatewayEnv } from '../shared/types.ts';
 import type { AuditService } from '../audit/audit-service.ts';
@@ -18,6 +19,8 @@ import {
   validateAuditParams,
 } from './request-validator.ts';
 import { translateMutationError } from './response-translator.ts';
+import type { ValidationResult } from './request-validator.ts';
+import type { DaemonMutationsResult } from './daemon-mutations-client.ts';
 
 async function tryAudit(
   auditService: AuditService | undefined,
@@ -33,6 +36,73 @@ async function tryAudit(
   } catch {
     /* never fail the request on audit write errors */
   }
+}
+
+interface PostMutationOpts<TData, TResult> {
+  c: Context<GatewayEnv>;
+  auditService: AuditService | undefined;
+  validated: ValidationResult<TData>;
+  execute: (data: TData) => Promise<DaemonMutationsResult<TResult>>;
+  successEvent: string;
+  successDetail: (data: TData) => Record<string, unknown>;
+  failureContext?: Record<string, unknown>;
+}
+
+async function handlePostMutation<TData, TResult>(
+  opts: PostMutationOpts<TData, TResult>,
+): Promise<Response> {
+  const {
+    c,
+    auditService,
+    validated,
+    execute,
+    successEvent,
+    successDetail,
+    failureContext = {},
+  } = opts;
+  const operatorId = c.get('operatorId');
+  const sessionId = c.get('sessionId');
+  if (!validated.ok) {
+    await tryAudit(
+      auditService,
+      'config.mutation.rejected',
+      operatorId,
+      sessionId,
+      {
+        path: c.req.path,
+        ...failureContext,
+        reason: validated.message,
+      },
+      'failure',
+    );
+    return c.json({ error: validated.message }, 400);
+  }
+  const result = await execute(validated.data);
+  if ('error' in result) {
+    const { status, message } = translateMutationError(result.error.category);
+    await tryAudit(
+      auditService,
+      'config.mutation.rejected',
+      operatorId,
+      sessionId,
+      {
+        path: c.req.path,
+        ...failureContext,
+        reason: message,
+      },
+      'failure',
+    );
+    return c.json({ error: message }, status as ContentfulStatusCode);
+  }
+  await tryAudit(
+    auditService,
+    successEvent,
+    operatorId,
+    sessionId,
+    successDetail(validated.data),
+    'success',
+  );
+  return c.json(result.data);
 }
 
 function createConfigMutationsRouter(
@@ -52,61 +122,44 @@ function createConfigMutationsRouter(
 
   app.post('/config/routing/mode', async (c) => {
     const body: unknown = await c.req.json().catch(() => null);
-    const validated = validateRoutingModeBody(body);
-    const operatorId = c.get('operatorId');
-    const sessionId = c.get('sessionId');
-    if (!validated.ok) {
-      await tryAudit(auditService, 'config.mutation.rejected', operatorId, sessionId, { path: c.req.path, reason: validated.message }, 'failure');
-      return c.json({ error: validated.message }, 400);
-    }
-    const result = await daemonClient.postRoutingMode(validated.data);
-    if ('error' in result) {
-      const { status, message } = translateMutationError(result.error.category);
-      await tryAudit(auditService, 'config.mutation.rejected', operatorId, sessionId, { path: c.req.path, reason: message }, 'failure');
-      return c.json({ error: message }, status as ContentfulStatusCode);
-    }
-    await tryAudit(auditService, 'config.routing.mode.changed', operatorId, sessionId, { mode: validated.data.mode }, 'success');
-    return c.json(result.data);
+    return handlePostMutation({
+      c,
+      auditService,
+      validated: validateRoutingModeBody(body),
+      execute: (data) => daemonClient.postRoutingMode(data),
+      successEvent: 'config.routing.mode.changed',
+      successDetail: (data) => ({ mode: data.mode }),
+    });
   });
 
   app.post('/config/models/:agent/active', async (c) => {
     const agent = c.req.param('agent');
     const body: unknown = await c.req.json().catch(() => null);
-    const validated = validateModelTierBody(agent, body);
-    const operatorId = c.get('operatorId');
-    const sessionId = c.get('sessionId');
-    if (!validated.ok) {
-      await tryAudit(auditService, 'config.mutation.rejected', operatorId, sessionId, { path: c.req.path, agent, reason: validated.message }, 'failure');
-      return c.json({ error: validated.message }, 400);
-    }
-    const { tier, expectedRevision } = validated.data;
-    const result = await daemonClient.postModelTier(agent, { tier, expectedRevision });
-    if ('error' in result) {
-      const { status, message } = translateMutationError(result.error.category);
-      await tryAudit(auditService, 'config.mutation.rejected', operatorId, sessionId, { path: c.req.path, agent, reason: message }, 'failure');
-      return c.json({ error: message }, status as ContentfulStatusCode);
-    }
-    await tryAudit(auditService, 'config.models.active.changed', operatorId, sessionId, { agent, tier }, 'success');
-    return c.json(result.data);
+    return handlePostMutation({
+      c,
+      auditService,
+      validated: validateModelTierBody(agent, body),
+      execute: (data) =>
+        daemonClient.postModelTier(agent, {
+          tier: data.tier,
+          expectedRevision: data.expectedRevision,
+        }),
+      successEvent: 'config.models.active.changed',
+      successDetail: (data) => ({ agent, tier: data.tier }),
+      failureContext: { agent },
+    });
   });
 
   app.post('/config/usage/budget', async (c) => {
     const body: unknown = await c.req.json().catch(() => null);
-    const validated = validateBudgetBody(body);
-    const operatorId = c.get('operatorId');
-    const sessionId = c.get('sessionId');
-    if (!validated.ok) {
-      await tryAudit(auditService, 'config.mutation.rejected', operatorId, sessionId, { path: c.req.path, reason: validated.message }, 'failure');
-      return c.json({ error: validated.message }, 400);
-    }
-    const result = await daemonClient.postBudget(validated.data);
-    if ('error' in result) {
-      const { status, message } = translateMutationError(result.error.category);
-      await tryAudit(auditService, 'config.mutation.rejected', operatorId, sessionId, { path: c.req.path, reason: message }, 'failure');
-      return c.json({ error: message }, status as ContentfulStatusCode);
-    }
-    await tryAudit(auditService, 'config.usage.budget.changed', operatorId, sessionId, { modelId: validated.data.modelId }, 'success');
-    return c.json(result.data);
+    return handlePostMutation({
+      c,
+      auditService,
+      validated: validateBudgetBody(body),
+      execute: (data) => daemonClient.postBudget(data),
+      successEvent: 'config.usage.budget.changed',
+      successDetail: (data) => ({ modelId: data.modelId }),
+    });
   });
 
   return app;
@@ -124,16 +177,37 @@ function createWorkflowAuditRouter(
     const operatorId = c.get('operatorId');
     const sessionId = c.get('sessionId');
     if (!validated.ok) {
-      await tryAudit(auditService, 'workflow.launch.rejected', operatorId, sessionId, { path: c.req.path, reason: validated.message }, 'failure');
+      await tryAudit(
+        auditService,
+        'workflow.launch.rejected',
+        operatorId,
+        sessionId,
+        { path: c.req.path, reason: validated.message },
+        'failure',
+      );
       return c.json({ error: validated.message }, 400);
     }
     const result = await daemonClient.postWorkflowLaunch(validated.data);
     if ('error' in result) {
       const { status, message } = translateMutationError(result.error.category);
-      await tryAudit(auditService, 'workflow.launch.rejected', operatorId, sessionId, { workflow: validated.data.workflow, reason: message }, 'failure');
+      await tryAudit(
+        auditService,
+        'workflow.launch.rejected',
+        operatorId,
+        sessionId,
+        { workflow: validated.data.workflow, reason: message },
+        'failure',
+      );
       return c.json({ error: message }, status as ContentfulStatusCode);
     }
-    await tryAudit(auditService, 'workflow.launched', operatorId, sessionId, { workflow: result.data.workflow, taskId: result.data.taskId }, 'success');
+    await tryAudit(
+      auditService,
+      'workflow.launched',
+      operatorId,
+      sessionId,
+      { workflow: result.data.workflow, taskId: result.data.taskId },
+      'success',
+    );
     return c.json(result.data, 202);
   });
 

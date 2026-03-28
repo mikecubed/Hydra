@@ -42,25 +42,33 @@ describe('DestructiveConfirmDialog', () => {
 
   it('submit button is disabled with wrong case: "confirm" vs "CONFIRM"', () => {
     renderAtStep2();
-    fireEvent.change(screen.getByLabelText('Confirmation phrase'), { target: { value: 'confirm' } });
+    fireEvent.change(screen.getByLabelText('Confirmation phrase'), {
+      target: { value: 'confirm' },
+    });
     expect(screen.getByText('Submit')).toHaveAttribute('disabled');
   });
 
   it('submit button is disabled with trailing space: "CONFIRM "', () => {
     renderAtStep2();
-    fireEvent.change(screen.getByLabelText('Confirmation phrase'), { target: { value: 'CONFIRM ' } });
+    fireEvent.change(screen.getByLabelText('Confirmation phrase'), {
+      target: { value: 'CONFIRM ' },
+    });
     expect(screen.getByText('Submit')).toHaveAttribute('disabled');
   });
 
   it('submit button is disabled with leading space: " CONFIRM"', () => {
     renderAtStep2();
-    fireEvent.change(screen.getByLabelText('Confirmation phrase'), { target: { value: ' CONFIRM' } });
+    fireEvent.change(screen.getByLabelText('Confirmation phrase'), {
+      target: { value: ' CONFIRM' },
+    });
     expect(screen.getByText('Submit')).toHaveAttribute('disabled');
   });
 
   it('submit button is ENABLED only on exact phrase match', () => {
     renderAtStep2();
-    fireEvent.change(screen.getByLabelText('Confirmation phrase'), { target: { value: 'CONFIRM' } });
+    fireEvent.change(screen.getByLabelText('Confirmation phrase'), {
+      target: { value: 'CONFIRM' },
+    });
     expect(screen.getByText('Submit')).not.toHaveAttribute('disabled');
   });
 

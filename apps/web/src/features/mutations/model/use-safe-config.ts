@@ -4,7 +4,7 @@
  * Does not auto-poll; call `refetch()` to refresh.
  * Revision is extracted from `GetSafeConfigResponse.revision` for use by mutation callers.
  */
-import { useState, useEffect, useCallback, type JSX } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
@@ -50,6 +50,3 @@ export function useSafeConfig(client: MutationsClient): SafeConfigState {
 
   return { config, revision, isLoading, error, refetch: fetchConfig };
 }
-
-// Suppress unused JSX import warning — react-jsx transform requires React in scope
-void (undefined as unknown as typeof JSX);

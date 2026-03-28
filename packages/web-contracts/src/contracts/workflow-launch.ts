@@ -1,14 +1,15 @@
 /**
  * Workflow launch contracts — gateway-layer request/response types for
  * launching daemon workflows.
+ *
+ * PostWorkflowLaunchRequest and PostWorkflowLaunchResponse are re-exported
+ * directly so both their runtime Zod schema values and inferred TypeScript
+ * types are available to consumers under the gateway-layer names.
  */
-import { z } from 'zod';
-import { WorkflowLaunchRequest, WorkflowLaunchResponse } from '../workflow-launch.ts';
 
 // ─── POST workflow launch ────────────────────────────────────────────────────
 
-export const PostWorkflowLaunchRequest = WorkflowLaunchRequest;
-export type PostWorkflowLaunchRequest = z.infer<typeof PostWorkflowLaunchRequest>;
-
-export const PostWorkflowLaunchResponse = WorkflowLaunchResponse;
-export type PostWorkflowLaunchResponse = z.infer<typeof PostWorkflowLaunchResponse>;
+export {
+  WorkflowLaunchRequest as PostWorkflowLaunchRequest,
+  WorkflowLaunchResponse as PostWorkflowLaunchResponse,
+} from '../workflow-launch.ts';

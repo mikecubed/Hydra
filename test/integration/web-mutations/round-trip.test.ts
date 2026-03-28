@@ -179,7 +179,7 @@ describe('T039 — Gateway round-trip: all six mutation/read endpoints', () => {
     const parsed = GetSafeConfigResponse.safeParse(body);
     assert.ok(
       parsed.success,
-      `GetSafeConfigResponse schema: ${JSON.stringify('error' in parsed ? parsed.error.issues : [])}`,
+      `GetSafeConfigResponse schema: ${JSON.stringify(parsed.success ? [] : parsed.error.issues)}`,
     );
   });
 
@@ -243,7 +243,7 @@ describe('T039 — Gateway round-trip: all six mutation/read endpoints', () => {
     const parsed = GetAuditResponse.safeParse(await res.json());
     assert.ok(
       parsed.success,
-      `GetAuditResponse schema: ${JSON.stringify('error' in parsed ? parsed.error.issues : [])}`,
+      `GetAuditResponse schema: ${JSON.stringify(parsed.success ? [] : parsed.error.issues)}`,
     );
   });
 
@@ -499,7 +499,6 @@ describe('T041 — Audit cursor pagination round-trip', () => {
       pageCount++;
       if (pageCount > 60) {
         assert.fail('Infinite pagination: exceeded 60 pages');
-        break;
       }
     } while (cursor != null);
 

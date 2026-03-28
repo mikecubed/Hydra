@@ -514,7 +514,12 @@ describe('Mutations routes — POST /config/usage/budget (T019)', () => {
   });
 
   it('returns 200 on valid body', async () => {
-    const body = { modelId: 'claude-opus-4', dailyLimit: 100_000, weeklyLimit: 500_000, expectedRevision: 'rev-1' };
+    const body = {
+      modelId: 'claude-opus-4',
+      dailyLimit: 100_000,
+      weeklyLimit: 500_000,
+      expectedRevision: 'rev-1',
+    };
     const res = await app.request(
       buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }),
     );
@@ -523,7 +528,12 @@ describe('Mutations routes — POST /config/usage/budget (T019)', () => {
   });
 
   it('returns 400 for non-positive dailyLimit (T019-AC2)', async () => {
-    const body = { modelId: 'claude-opus-4', dailyLimit: -1, weeklyLimit: 100_000, expectedRevision: 'rev-1' };
+    const body = {
+      modelId: 'claude-opus-4',
+      dailyLimit: -1,
+      weeklyLimit: 100_000,
+      expectedRevision: 'rev-1',
+    };
     const res = await app.request(
       buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }),
     );
@@ -532,7 +542,12 @@ describe('Mutations routes — POST /config/usage/budget (T019)', () => {
   });
 
   it('returns 400 when both limits are null', async () => {
-    const body = { modelId: 'claude-opus-4', dailyLimit: null, weeklyLimit: null, expectedRevision: 'rev-1' };
+    const body = {
+      modelId: 'claude-opus-4',
+      dailyLimit: null,
+      weeklyLimit: null,
+      expectedRevision: 'rev-1',
+    };
     const res = await app.request(
       buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }),
     );
@@ -545,7 +560,12 @@ describe('Mutations routes — POST /config/usage/budget (T019)', () => {
     const req = new Request(`${ORIGIN}/config/usage/budget`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: ORIGIN },
-      body: JSON.stringify({ modelId: 'x', dailyLimit: 100, weeklyLimit: null, expectedRevision: 'rev-1' }),
+      body: JSON.stringify({
+        modelId: 'x',
+        dailyLimit: 100,
+        weeklyLimit: null,
+        expectedRevision: 'rev-1',
+      }),
     });
     const res = await gw.app.request(req);
     gw.heartbeat.stop();
@@ -708,14 +728,25 @@ describe('Mutations route wiring — rate limit (T019 T-3)', () => {
         extensionDurationMs: 3600_000,
         idleTimeoutMs: 1800_000,
       },
-      mutationsClientOptions: { baseUrl: 'http://localhost:4173', fetchFn: fetchMock, timeoutMs: 5000 },
-      daemonClientOptions: { baseUrl: 'http://localhost:4173', fetchFn: fetchMock, timeoutMs: 5000 },
+      mutationsClientOptions: {
+        baseUrl: 'http://localhost:4173',
+        fetchFn: fetchMock,
+        timeoutMs: 5000,
+      },
+      daemonClientOptions: {
+        baseUrl: 'http://localhost:4173',
+        fetchFn: fetchMock,
+        timeoutMs: 5000,
+      },
     });
     await gw.operatorStore.createOperator('admin', 'Admin');
     await gw.operatorStore.addCredential('admin', 'password123');
   });
 
-  afterEach(() => { gw.heartbeat.stop(); fetchMock.mock.resetCalls(); });
+  afterEach(() => {
+    gw.heartbeat.stop();
+    fetchMock.mock.resetCalls();
+  });
 
   it('POST mutations return 429 when rate limited', async () => {
     // Log in to get cookies
@@ -737,9 +768,27 @@ describe('Mutations route wiring — rate limit (T019 T-3)', () => {
     const exhaustBody = JSON.stringify({ mode: 'economy', expectedRevision: 'rev-1' });
     for (let i = 0; i < 31; i++) {
       fetchMock.mock.mockImplementation(() =>
-        Promise.resolve(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })),
+        Promise.resolve(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+        ),
       );
-      await gw.app.request(new Request(`${ORIGIN}/config/routing/mode`, {
+      await gw.app.request(
+        new Request(`${ORIGIN}/config/routing/mode`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin: ORIGIN,
+            'x-csrf-token': jar['__csrf'],
+            cookie: `__session=${jar['__session']}; __csrf=${jar['__csrf']}`,
+          },
+          body: exhaustBody,
+        }),
+      );
+    }
+
+    // 32nd request should be rate-limited
+    const res = await gw.app.request(
+      new Request(`${ORIGIN}/config/routing/mode`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -748,20 +797,8 @@ describe('Mutations route wiring — rate limit (T019 T-3)', () => {
           cookie: `__session=${jar['__session']}; __csrf=${jar['__csrf']}`,
         },
         body: exhaustBody,
-      }));
-    }
-
-    // 32nd request should be rate-limited
-    const res = await gw.app.request(new Request(`${ORIGIN}/config/routing/mode`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        origin: ORIGIN,
-        'x-csrf-token': jar['__csrf'],
-        cookie: `__session=${jar['__session']}; __csrf=${jar['__csrf']}`,
-      },
-      body: exhaustBody,
-    }));
+      }),
+    );
     assert.equal(res.status, 429);
   });
 });
@@ -790,7 +827,9 @@ describe('Mutations routes — rejected-attempt audit coverage (T019b)', () => {
 
   it('writes audit record on validation failure (T019b-AC3)', async () => {
     const body = { mode: 'turbo', expectedRevision: 'rev-1' }; // invalid mode
-    const res = await app.request(buildRequest('POST', '/config/routing/mode', { body: JSON.stringify(body) }));
+    const res = await app.request(
+      buildRequest('POST', '/config/routing/mode', { body: JSON.stringify(body) }),
+    );
     assert.equal(res.status, 400);
     const records = auditStore.getRecords();
     assert.equal(records.length, 1);
@@ -799,8 +838,14 @@ describe('Mutations routes — rejected-attempt audit coverage (T019b)', () => {
   });
 
   it('writes audit record on workflow validation failure', async () => {
-    const body = { workflow: 'badname', idempotencyKey: '00000000-0000-4000-8000-000000000099', expectedRevision: 'rev-1' };
-    const res = await app.request(buildRequest('POST', '/workflows/launch', { body: JSON.stringify(body) }));
+    const body = {
+      workflow: 'badname',
+      idempotencyKey: '00000000-0000-4000-8000-000000000099',
+      expectedRevision: 'rev-1',
+    };
+    const res = await app.request(
+      buildRequest('POST', '/workflows/launch', { body: JSON.stringify(body) }),
+    );
     assert.equal(res.status, 400);
     const records = auditStore.getRecords();
     assert.equal(records.length, 1);
@@ -818,8 +863,15 @@ describe('Mutations routes — rejected-attempt audit coverage (T019b)', () => {
         }),
       } as DaemonMutationsResult<PatchRoutingModeResponse>),
     );
-    const body = { modelId: 'claude-opus-4', dailyLimit: 100, weeklyLimit: null, expectedRevision: 'rev-1' };
-    const res = await app.request(buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }));
+    const body = {
+      modelId: 'claude-opus-4',
+      dailyLimit: 100,
+      weeklyLimit: null,
+      expectedRevision: 'rev-1',
+    };
+    const res = await app.request(
+      buildRequest('POST', '/config/usage/budget', { body: JSON.stringify(body) }),
+    );
     assert.equal(res.status, 503);
     const records = auditStore.getRecords();
     assert.equal(records.length, 1);
@@ -829,7 +881,12 @@ describe('Mutations routes — rejected-attempt audit coverage (T019b)', () => {
   it('writes audit record on successful workflow launch', async () => {
     mockClient.postWorkflowLaunch.mock.mockImplementation(() =>
       Promise.resolve({
-        data: { taskId: 'tid-1', workflow: 'tasks' as const, launchedAt: '2026-03-28T04:00:00.000Z', destructive: false },
+        data: {
+          taskId: 'tid-1',
+          workflow: 'tasks' as const,
+          launchedAt: '2026-03-28T04:00:00.000Z',
+          destructive: false,
+        },
       } as DaemonMutationsResult<PostWorkflowLaunchResponse>),
     );
     const body = {
@@ -837,7 +894,9 @@ describe('Mutations routes — rejected-attempt audit coverage (T019b)', () => {
       idempotencyKey: '00000000-0000-4000-8000-000000000004',
       expectedRevision: 'rev-1',
     };
-    const res = await app.request(buildRequest('POST', '/workflows/launch', { body: JSON.stringify(body) }));
+    const res = await app.request(
+      buildRequest('POST', '/workflows/launch', { body: JSON.stringify(body) }),
+    );
     assert.equal(res.status, 202);
     const records = auditStore.getRecords();
     assert.equal(records.length, 1);

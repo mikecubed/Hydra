@@ -20,7 +20,10 @@ import {
 import { configMutex } from './mutation-lock.ts';
 // Type-only imports from @hydra/web-contracts — erased at compile time so the
 // daemon tarball stays self-contained (no runtime dep on the private workspace pkg).
-import type { SafeConfigView as SafeConfigViewType, MutationAuditRecord } from '@hydra/web-contracts';
+import type {
+  SafeConfigView as SafeConfigViewType,
+  MutationAuditRecord,
+} from '@hydra/web-contracts';
 import { sendJson, sendError, readJsonBody } from './http-utils.ts';
 
 // ── Local schemas (mirror @hydra/web-contracts — single source of truth for types,
@@ -169,9 +172,10 @@ function getAuditPage(
   const page = sorted.slice(startIdx, startIdx + limit);
   const hasMore = startIdx + limit < sorted.length;
   const lastRecord = page.at(-1);
-  const nextCursor = hasMore && lastRecord !== undefined
-    ? Buffer.from(lastRecord.timestamp).toString('base64url')
-    : null;
+  const nextCursor =
+    hasMore && lastRecord !== undefined
+      ? Buffer.from(lastRecord.timestamp).toString('base64url')
+      : null;
 
   return { records: page, nextCursor, totalCount };
 }
@@ -193,7 +197,10 @@ function handleGetConfigSafe(_req: IncomingMessage, res: ServerResponse): void {
 async function handlePostRoutingMode(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readJsonBody(req);
   const parsed = routingModeMutationSchema.safeParse(body);
-  if (!parsed.success) { sendError(res, 400, 'Invalid request body'); return; }
+  if (!parsed.success) {
+    sendError(res, 400, 'Invalid request body');
+    return;
+  }
 
   const release = await configMutex.acquire();
   try {
@@ -205,21 +212,45 @@ async function handlePostRoutingMode(req: IncomingMessage, res: ServerResponse):
       return;
     }
     const beforeValue = config.routing.mode;
-    const updated = saveHydraConfig({ ...config, routing: { ...config.routing, mode: parsed.data.mode } });
+    const updated = saveHydraConfig({
+      ...config,
+      routing: { ...config.routing, mode: parsed.data.mode },
+    });
     try {
-      appendAuditRecord(buildAuditRecord({
-        eventType: 'config.routing.mode.changed', targetField: 'config.routing.mode',
-        beforeValue, afterValue: parsed.data.mode, outcome: 'success', rejectionReason: null,
-      }));
-    } catch { /* R-2 */ }
-    sendJson(res, 200, { snapshot: buildSafeView(updated), appliedRevision: computeConfigRevision(updated), timestamp: new Date().toISOString() });
-  } finally { release(); }
+      appendAuditRecord(
+        buildAuditRecord({
+          eventType: 'config.routing.mode.changed',
+          targetField: 'config.routing.mode',
+          beforeValue,
+          afterValue: parsed.data.mode,
+          outcome: 'success',
+          rejectionReason: null,
+        }),
+      );
+    } catch {
+      /* R-2 */
+    }
+    sendJson(res, 200, {
+      snapshot: buildSafeView(updated),
+      appliedRevision: computeConfigRevision(updated),
+      timestamp: new Date().toISOString(),
+    });
+  } finally {
+    release();
+  }
 }
 
-async function handlePostModelActive(req: IncomingMessage, res: ServerResponse, agent: string): Promise<void> {
+async function handlePostModelActive(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agent: string,
+): Promise<void> {
   const body = await readJsonBody(req);
   const parsed = modelTierMutationSchema.safeParse(body);
-  if (!parsed.success) { sendError(res, 400, 'Invalid request body'); return; }
+  if (!parsed.success) {
+    sendError(res, 400, 'Invalid request body');
+    return;
+  }
 
   const release = await configMutex.acquire();
   try {
@@ -227,43 +258,82 @@ async function handlePostModelActive(req: IncomingMessage, res: ServerResponse, 
     const config = loadHydraConfig();
     const modelsConfig = config.models as Record<string, Record<string, unknown>> | undefined;
     if (!modelsConfig || !Object.prototype.hasOwnProperty.call(modelsConfig, agent)) {
-      sendError(res, 400, `Unknown or ineligible agent: ${agent}`); return;
+      sendError(res, 400, `Unknown or ineligible agent: ${agent}`);
+      return;
     }
     if (parsed.data.expectedRevision !== computeConfigRevision(config)) {
-      sendJson(res, 409, { error: 'stale-revision' }); return;
+      sendJson(res, 409, { error: 'stale-revision' });
+      return;
     }
     const beforeValue = modelsConfig[agent]['active'];
-    const updatedModels = { ...modelsConfig, [agent]: { ...modelsConfig[agent], active: parsed.data.tier } };
+    const updatedModels = {
+      ...modelsConfig,
+      [agent]: { ...modelsConfig[agent], active: parsed.data.tier },
+    };
     const updated = saveHydraConfig({ ...config, models: updatedModels });
     try {
-      appendAuditRecord(buildAuditRecord({
-        eventType: 'config.models.active.changed', targetField: `config.models.${agent}.active`,
-        beforeValue, afterValue: parsed.data.tier, outcome: 'success', rejectionReason: null,
-      }));
-    } catch { /* R-2 */ }
-    sendJson(res, 200, { snapshot: buildSafeView(updated), appliedRevision: computeConfigRevision(updated), timestamp: new Date().toISOString() });
-  } finally { release(); }
-}
-
-type UsageBudgetShape = { dailyTokenBudget?: Record<string, number>; weeklyTokenBudget?: Record<string, number>; [key: string]: unknown };
-
-function warnIfDailyExceedsWeekly(modelId: string, daily: number | undefined, weekly: number | undefined): void {
-  if (daily !== undefined && weekly !== undefined && daily > weekly) {
-    process.stderr.write(`${JSON.stringify({ level: 'warn', msg: 'budget dailyLimit exceeds weeklyLimit', modelId, dailyLimit: daily, weeklyLimit: weekly })}\n`);
+      appendAuditRecord(
+        buildAuditRecord({
+          eventType: 'config.models.active.changed',
+          targetField: `config.models.${agent}.active`,
+          beforeValue,
+          afterValue: parsed.data.tier,
+          outcome: 'success',
+          rejectionReason: null,
+        }),
+      );
+    } catch {
+      /* R-2 */
+    }
+    sendJson(res, 200, {
+      snapshot: buildSafeView(updated),
+      appliedRevision: computeConfigRevision(updated),
+      timestamp: new Date().toISOString(),
+    });
+  } finally {
+    release();
   }
 }
 
-function applyBudgetLimits(usage: UsageBudgetShape, modelId: string, dailyLimit: number | null, weeklyLimit: number | null): UsageBudgetShape {
+type UsageBudgetShape = {
+  dailyTokenBudget?: Record<string, number>;
+  weeklyTokenBudget?: Record<string, number>;
+  [key: string]: unknown;
+};
+
+function warnIfDailyExceedsWeekly(
+  modelId: string,
+  daily: number | undefined,
+  weekly: number | undefined,
+): void {
+  if (daily !== undefined && weekly !== undefined && daily > weekly) {
+    process.stderr.write(
+      `${JSON.stringify({ level: 'warn', msg: 'budget dailyLimit exceeds weeklyLimit', modelId, dailyLimit: daily, weeklyLimit: weekly })}\n`,
+    );
+  }
+}
+
+function applyBudgetLimits(
+  usage: UsageBudgetShape,
+  modelId: string,
+  dailyLimit: number | null,
+  weeklyLimit: number | null,
+): UsageBudgetShape {
   const updated: UsageBudgetShape = { ...usage };
-  if (dailyLimit !== null) updated.dailyTokenBudget = { ...(usage.dailyTokenBudget ?? {}), [modelId]: dailyLimit };
-  if (weeklyLimit !== null) updated.weeklyTokenBudget = { ...(usage.weeklyTokenBudget ?? {}), [modelId]: weeklyLimit };
+  if (dailyLimit !== null)
+    updated.dailyTokenBudget = { ...(usage.dailyTokenBudget ?? {}), [modelId]: dailyLimit };
+  if (weeklyLimit !== null)
+    updated.weeklyTokenBudget = { ...(usage.weeklyTokenBudget ?? {}), [modelId]: weeklyLimit };
   return updated;
 }
 
 async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readJsonBody(req);
   const parsed = budgetMutationSchema.safeParse(body);
-  if (!parsed.success) { sendError(res, 400, 'Invalid request body'); return; }
+  if (!parsed.success) {
+    sendError(res, 400, 'Invalid request body');
+    return;
+  }
 
   const release = await configMutex.acquire();
   try {
@@ -274,10 +344,14 @@ async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse):
 
     const hasDaily = Object.prototype.hasOwnProperty.call(usage.dailyTokenBudget ?? {}, modelId);
     const hasWeekly = Object.prototype.hasOwnProperty.call(usage.weeklyTokenBudget ?? {}, modelId);
-    if (!hasDaily && !hasWeekly) { sendError(res, 400, `Unknown modelId: ${modelId}`); return; }
+    if (!hasDaily && !hasWeekly) {
+      sendError(res, 400, `Unknown modelId: ${modelId}`);
+      return;
+    }
 
     if (parsed.data.expectedRevision !== computeConfigRevision(config)) {
-      sendJson(res, 409, { error: 'stale-revision' }); return;
+      sendJson(res, 409, { error: 'stale-revision' });
+      return;
     }
     const beforeDaily = usage.dailyTokenBudget?.[modelId];
     const beforeWeekly = usage.weeklyTokenBudget?.[modelId];
@@ -289,27 +363,50 @@ async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse):
 
     const updated = saveHydraConfig({ ...config, usage: updatedUsage });
     try {
-      appendAuditRecord(buildAuditRecord({
-        eventType: 'config.usage.budget.changed', targetField: `config.usage.budget.${modelId}`,
-        beforeValue: { daily: beforeDaily, weekly: beforeWeekly },
-        afterValue: { daily: effectiveDaily, weekly: effectiveWeekly },
-        outcome: 'success', rejectionReason: null,
-      }));
-    } catch { /* R-2 */ }
-    sendJson(res, 200, { snapshot: buildSafeView(updated), appliedRevision: computeConfigRevision(updated), timestamp: new Date().toISOString() });
-  } finally { release(); }
+      appendAuditRecord(
+        buildAuditRecord({
+          eventType: 'config.usage.budget.changed',
+          targetField: `config.usage.budget.${modelId}`,
+          beforeValue: { daily: beforeDaily, weekly: beforeWeekly },
+          afterValue: { daily: effectiveDaily, weekly: effectiveWeekly },
+          outcome: 'success',
+          rejectionReason: null,
+        }),
+      );
+    } catch {
+      /* R-2 */
+    }
+    sendJson(res, 200, {
+      snapshot: buildSafeView(updated),
+      appliedRevision: computeConfigRevision(updated),
+      timestamp: new Date().toISOString(),
+    });
+  } finally {
+    release();
+  }
 }
 
 async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readJsonBody(req);
   const parsed = workflowLaunchSchema.safeParse(body);
-  if (!parsed.success) { sendError(res, 400, 'Invalid request body'); return; }
+  if (!parsed.success) {
+    sendError(res, 400, 'Invalid request body');
+    return;
+  }
 
   const { workflow, idempotencyKey, label } = parsed.data;
   const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString();
-  const existing = workflowLaunches.find((e) => e.idempotencyKey === idempotencyKey && e.launchedAt >= sixtySecondsAgo);
+  const existing = workflowLaunches.find(
+    (e) => e.idempotencyKey === idempotencyKey && e.launchedAt >= sixtySecondsAgo,
+  );
   if (existing) {
-    sendJson(res, 202, { taskId: existing.taskId, workflow: existing.workflow, launchedAt: existing.launchedAt, destructive: DESTRUCTIVE_WORKFLOWS.has(existing.workflow), label: label ?? null });
+    sendJson(res, 202, {
+      taskId: existing.taskId,
+      workflow: existing.workflow,
+      launchedAt: existing.launchedAt,
+      destructive: DESTRUCTIVE_WORKFLOWS.has(existing.workflow),
+      label: label ?? null,
+    });
     return;
   }
 
@@ -317,24 +414,52 @@ async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerRespons
   try {
     invalidateConfigCache();
     const config = loadHydraConfig();
-    const conflict = workflowLaunches.find((e) => e.workflow === workflow && (e.status === 'running' || e.status === 'pending'));
-    if (conflict) { sendJson(res, 409, { error: 'workflow-conflict', taskId: conflict.taskId }); return; }
-    if (parsed.data.expectedRevision !== computeConfigRevision(config)) { sendJson(res, 409, { error: 'stale-revision' }); return; }
+    const conflict = workflowLaunches.find(
+      (e) => e.workflow === workflow && (e.status === 'running' || e.status === 'pending'),
+    );
+    if (conflict) {
+      sendJson(res, 409, { error: 'workflow-conflict', taskId: conflict.taskId });
+      return;
+    }
+    if (parsed.data.expectedRevision !== computeConfigRevision(config)) {
+      sendJson(res, 409, { error: 'stale-revision' });
+      return;
+    }
 
     const taskId = crypto.randomUUID();
     const launchedAt = new Date().toISOString();
     workflowLaunches.push({ taskId, workflow, idempotencyKey, launchedAt, status: 'pending' });
     try {
-      appendAuditRecord(buildAuditRecord({ eventType: 'workflow.launched', targetField: `workflow.${workflow}`, beforeValue: null, afterValue: taskId, outcome: 'success', rejectionReason: null }));
-    } catch { /* R-2 */ }
-    sendJson(res, 202, { taskId, workflow, launchedAt, destructive: DESTRUCTIVE_WORKFLOWS.has(workflow), label: label ?? null });
-  } finally { release(); }
+      appendAuditRecord(
+        buildAuditRecord({
+          eventType: 'workflow.launched',
+          targetField: `workflow.${workflow}`,
+          beforeValue: null,
+          afterValue: taskId,
+          outcome: 'success',
+          rejectionReason: null,
+        }),
+      );
+    } catch {
+      /* R-2 */
+    }
+    sendJson(res, 202, {
+      taskId,
+      workflow,
+      launchedAt,
+      destructive: DESTRUCTIVE_WORKFLOWS.has(workflow),
+      label: label ?? null,
+    });
+  } finally {
+    release();
+  }
 }
 
 function handleGetAudit(res: ServerResponse, url: URL): void {
   const limitParam = url.searchParams.get('limit');
   const cursor = url.searchParams.get('cursor');
-  const parsed = limitParam === null || Number.isNaN(Number(limitParam)) ? 20 : Math.max(1, Number(limitParam));
+  const parsed =
+    limitParam === null || Number.isNaN(Number(limitParam)) ? 20 : Math.max(1, Number(limitParam));
   const limit = Math.min(parsed, 100);
   const { records, nextCursor, totalCount } = getAuditPage(auditRecords, limit, cursor);
   sendJson(res, 200, { records, nextCursor, totalCount });
@@ -350,11 +475,26 @@ export async function handleMutationRoute(
   const method = req.method ?? 'GET';
   const { pathname } = url;
 
-  if (method === 'GET' && pathname === '/config/safe') { handleGetConfigSafe(req, res); return true; }
-  if (method === 'POST' && pathname === '/config/routing/mode') { await handlePostRoutingMode(req, res); return true; }
-  if (method === 'POST' && pathname === '/config/usage/budget') { await handlePostUsageBudget(req, res); return true; }
-  if (method === 'POST' && pathname === '/workflows/launch') { await handlePostWorkflowLaunch(req, res); return true; }
-  if (method === 'GET' && pathname === '/audit') { handleGetAudit(res, url); return true; }
+  if (method === 'GET' && pathname === '/config/safe') {
+    handleGetConfigSafe(req, res);
+    return true;
+  }
+  if (method === 'POST' && pathname === '/config/routing/mode') {
+    await handlePostRoutingMode(req, res);
+    return true;
+  }
+  if (method === 'POST' && pathname === '/config/usage/budget') {
+    await handlePostUsageBudget(req, res);
+    return true;
+  }
+  if (method === 'POST' && pathname === '/workflows/launch') {
+    await handlePostWorkflowLaunch(req, res);
+    return true;
+  }
+  if (method === 'GET' && pathname === '/audit') {
+    handleGetAudit(res, url);
+    return true;
+  }
 
   const modelActiveMatch = /^\/config\/models\/([^/]+)\/active$/.exec(pathname);
   if (method === 'POST' && modelActiveMatch !== null) {

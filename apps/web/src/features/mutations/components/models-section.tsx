@@ -48,7 +48,15 @@ interface ModelRowProps {
   onConfirm: () => void;
 }
 
-function ModelRow({ agent, currentTier, row, onTierChange, onOpen, onClose, onConfirm }: ModelRowProps): JSX.Element {
+function ModelRow({
+  agent,
+  currentTier,
+  row,
+  onTierChange,
+  onOpen,
+  onClose,
+  onConfirm,
+}: ModelRowProps): JSX.Element {
   const isUnchanged = row.selectedTier === currentTier;
   return (
     <div aria-label={`Model config for ${agent}`}>
@@ -58,13 +66,25 @@ function ModelRow({ agent, currentTier, row, onTierChange, onOpen, onClose, onCo
       <select
         id={`tier-select-${agent}`}
         value={row.selectedTier}
-        onChange={(e) => { onTierChange(e.target.value as ModelTier); }}
+        onChange={(e) => {
+          onTierChange(e.target.value as ModelTier);
+        }}
         disabled={row.isLoading}
       >
-        {MODEL_TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
+        {MODEL_TIERS.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
       </select>
-      <button type="button" onClick={onOpen} disabled={isUnchanged || row.isLoading}>Apply</button>
-      {row.toast !== null && <span role="status" aria-live="polite">{row.toast}</span>}
+      <button type="button" onClick={onOpen} disabled={isUnchanged || row.isLoading}>
+        Apply
+      </button>
+      {row.toast !== null && (
+        <span role="status" aria-live="polite">
+          {row.toast}
+        </span>
+      )}
       <ConfirmDialog
         isOpen={row.isDialogOpen}
         title={`Change ${agent} model tier`}
@@ -78,13 +98,26 @@ function ModelRow({ agent, currentTier, row, onTierChange, onOpen, onClose, onCo
   );
 }
 
-export function ModelsSection({ config, revision, client, onSuccess }: ModelsSectionProps): JSX.Element {
+export function ModelsSection({
+  config,
+  revision,
+  client,
+  onSuccess,
+}: ModelsSectionProps): JSX.Element {
   const models = config.models ?? {};
   const agents = Object.keys(models);
 
   const [rows, setRows] = useState<Record<string, RowState>>(
     Object.fromEntries(
-      agents.map((a) => [a, { selectedTier: resolveCurrentTier(models[a]), isDialogOpen: false, isLoading: false, toast: null }]),
+      agents.map((a) => [
+        a,
+        {
+          selectedTier: resolveCurrentTier(models[a]),
+          isDialogOpen: false,
+          isLoading: false,
+          toast: null,
+        },
+      ]),
     ),
   );
 
@@ -92,21 +125,32 @@ export function ModelsSection({ config, revision, client, onSuccess }: ModelsSec
     setRows((prev) => ({ ...prev, [agent]: { ...prev[agent], ...patch } }));
   }, []);
 
-  const handleConfirm = useCallback(async (agent: string) => {
-    const row = rows[agent];
-    updateRow(agent, { isLoading: true });
-    try {
-      await client.postModelTier(agent, { tier: row.selectedTier, expectedRevision: revision });
-      updateRow(agent, { isLoading: false, isDialogOpen: false, toast: null });
-      onSuccess();
-    } catch (err: unknown) {
-      const isStale = err instanceof MutationsRequestError && err.gatewayError.httpStatus === 409;
-      updateRow(agent, { isLoading: false, isDialogOpen: false, toast: resolveToast(err, isStale) });
-    }
-  }, [rows, client, revision, onSuccess, updateRow]);
+  const handleConfirm = useCallback(
+    async (agent: string) => {
+      const row = rows[agent];
+      updateRow(agent, { isLoading: true });
+      try {
+        await client.postModelTier(agent, { tier: row.selectedTier, expectedRevision: revision });
+        updateRow(agent, { isLoading: false, isDialogOpen: false, toast: null });
+        onSuccess();
+      } catch (err: unknown) {
+        const isStale = err instanceof MutationsRequestError && err.gatewayError.httpStatus === 409;
+        updateRow(agent, {
+          isLoading: false,
+          isDialogOpen: false,
+          toast: resolveToast(err, isStale),
+        });
+      }
+    },
+    [rows, client, revision, onSuccess, updateRow],
+  );
 
   if (agents.length === 0) {
-    return <section aria-label="Models configuration"><p>No model configuration available.</p></section>;
+    return (
+      <section aria-label="Models configuration">
+        <p>No model configuration available.</p>
+      </section>
+    );
   }
 
   return (
@@ -118,10 +162,18 @@ export function ModelsSection({ config, revision, client, onSuccess }: ModelsSec
           agent={agent}
           currentTier={resolveCurrentTier(models[agent])}
           row={rows[agent]}
-          onTierChange={(tier) => { updateRow(agent, { selectedTier: tier }); }}
-          onOpen={() => { updateRow(agent, { isDialogOpen: true }); }}
-          onClose={() => { updateRow(agent, { isDialogOpen: false }); }}
-          onConfirm={() => { void handleConfirm(agent); }}
+          onTierChange={(tier) => {
+            updateRow(agent, { selectedTier: tier });
+          }}
+          onOpen={() => {
+            updateRow(agent, { isDialogOpen: true });
+          }}
+          onClose={() => {
+            updateRow(agent, { isDialogOpen: false });
+          }}
+          onConfirm={() => {
+            void handleConfirm(agent);
+          }}
         />
       ))}
     </section>

@@ -15,7 +15,9 @@ describe('mutation-lock', () => {
     });
 
     // Second hasn't acquired yet because first hasn't released
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => {
+      setTimeout(r, 20);
+    });
     assert.deepStrictEqual(order, ['acquired-1']);
 
     release1();
@@ -32,7 +34,9 @@ describe('mutation-lock', () => {
       r();
     });
 
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => {
+      setTimeout(r, 10);
+    });
     assert.equal(secondAcquired, false, 'second should not yet have acquired');
 
     release();

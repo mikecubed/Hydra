@@ -32,15 +32,14 @@ export function RoutingSection({
   const [pendingMode, setPendingMode] = useState<RoutingMode | null>(null);
 
   const { mutate, isLoading, error, reset } = useMutation(
-    (body: { mode: RoutingMode; expectedRevision: string }) =>
-      client.postRoutingMode(body),
+    (body: { mode: RoutingMode; expectedRevision: string }) => client.postRoutingMode(body),
     { onSuccess },
   );
 
   const handleSelectChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
-      const selected: RoutingMode = val;
+      const selected = val as RoutingMode;
       if (selected === currentMode) return;
       setPendingMode(selected);
     },

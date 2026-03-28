@@ -32,15 +32,23 @@ interface LaunchDialogProps {
   onCancel: () => void;
 }
 
-function LaunchDialog({ isOpen, workflow, isLoading, onConfirm, onCancel }: LaunchDialogProps): JSX.Element {
+function LaunchDialog({
+  isOpen,
+  workflow,
+  isLoading,
+  onConfirm,
+  onCancel,
+}: LaunchDialogProps): JSX.Element {
   if (DESTRUCTIVE_WORKFLOWS.has(workflow)) {
     return (
       <DestructiveConfirmDialog
         isOpen={isOpen}
         title={`Launch ${workflow}`}
-        from="idle" to="running"
+        from="idle"
+        to="running"
         requiredPhrase={workflow.toUpperCase()}
-        onConfirm={onConfirm} onCancel={onCancel}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
         isLoading={isLoading}
       />
     );
@@ -49,11 +57,39 @@ function LaunchDialog({ isOpen, workflow, isLoading, onConfirm, onCancel }: Laun
     <ConfirmDialog
       isOpen={isOpen}
       title={`Launch ${workflow}`}
-      from="idle" to="running"
-      onConfirm={onConfirm} onCancel={onCancel}
+      from="idle"
+      to="running"
+      onConfirm={onConfirm}
+      onCancel={onCancel}
       isLoading={isLoading}
     />
   );
+}
+
+type LaunchOutcome = { taskId: string } | { conflict: string } | { error: string };
+
+async function executeLaunch(
+  client: MutationsClient,
+  workflow: WorkflowName,
+  revision: string,
+): Promise<LaunchOutcome> {
+  try {
+    const result = await client.postWorkflowLaunch({
+      workflow,
+      idempotencyKey: randomUUID(),
+      expectedRevision: revision,
+    });
+    return { taskId: result.taskId };
+  } catch (err: unknown) {
+    if (err instanceof MutationsRequestError) {
+      if (err.gatewayError.code === 'workflow-conflict')
+        return { conflict: 'Workflow already running' };
+      if (err.gatewayError.httpStatus === 503)
+        return { error: 'Config unavailable — daemon unreachable' };
+      return { error: err.gatewayError.message };
+    }
+    return { error: 'Unexpected error' };
+  }
 }
 
 export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelProps): JSX.Element {
@@ -71,31 +107,18 @@ export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelPro
     setLaunchedTaskId(null);
   }, []);
 
-  const handleCancel = useCallback(() => { setIsDialogOpen(false); }, []);
+  const handleCancel = useCallback(() => {
+    setIsDialogOpen(false);
+  }, []);
 
   const handleConfirm = useCallback(async () => {
     setIsLoading(true);
+    setIsDialogOpen(false);
     try {
-      const result = await client.postWorkflowLaunch({
-        workflow: selectedWorkflow,
-        idempotencyKey: randomUUID(),
-        expectedRevision: revision,
-      });
-      setLaunchedTaskId(result.taskId);
-      setIsDialogOpen(false);
-    } catch (err: unknown) {
-      setIsDialogOpen(false);
-      if (err instanceof MutationsRequestError) {
-        if (err.gatewayError.code === 'workflow-conflict') {
-          setConflictMessage('Workflow already running');
-        } else if (err.gatewayError.httpStatus === 503) {
-          setError('Config unavailable — daemon unreachable');
-        } else {
-          setError(err.gatewayError.message);
-        }
-      } else {
-        setError('Unexpected error');
-      }
+      const outcome = await executeLaunch(client, selectedWorkflow, revision);
+      if ('taskId' in outcome) setLaunchedTaskId(outcome.taskId);
+      else if ('conflict' in outcome) setConflictMessage(outcome.conflict);
+      else setError(outcome.error);
     } finally {
       setIsLoading(false);
     }
@@ -108,25 +131,41 @@ export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelPro
         <legend>Select workflow</legend>
         {WORKFLOWS.map((wf) => (
           <label key={wf}>
-            <input type="radio" name="workflow" value={wf}
+            <input
+              type="radio"
+              name="workflow"
+              value={wf}
               checked={selectedWorkflow === wf}
-              onChange={() => { setSelectedWorkflow(wf); }}
+              onChange={() => {
+                setSelectedWorkflow(wf);
+              }}
             />
             {wf}
           </label>
         ))}
       </fieldset>
-      <button type="button" onClick={handleLaunch} disabled={isLoading}>Launch</button>
+      <button type="button" onClick={handleLaunch} disabled={isLoading}>
+        Launch
+      </button>
       {conflictMessage !== null && <p role="alert">{conflictMessage}</p>}
       {launchedTaskId !== null && (
-        <p>Workflow launched — <a href={`#task-${launchedTaskId}`}>Task #{launchedTaskId}</a></p>
+        <p>
+          Workflow launched — <a href={`#task-${launchedTaskId}`}>Task #{launchedTaskId}</a>
+        </p>
       )}
-      <MutationErrorBanner message={error} onDismiss={() => { setError(null); }} />
+      <MutationErrorBanner
+        message={error}
+        onDismiss={() => {
+          setError(null);
+        }}
+      />
       <LaunchDialog
         isOpen={isDialogOpen}
         workflow={selectedWorkflow}
         isLoading={isLoading}
-        onConfirm={() => { void handleConfirm(); }}
+        onConfirm={() => {
+          void handleConfirm();
+        }}
         onCancel={handleCancel}
       />
     </section>

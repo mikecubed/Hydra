@@ -14,7 +14,7 @@ export const WorkflowLaunchRequest = z
   .object({
     workflow: WorkflowName,
     label: z.string().nullable().optional(),
-    idempotencyKey: z.string().uuid(),
+    idempotencyKey: z.uuid(),
     expectedRevision: z.string(),
   })
   .strict();

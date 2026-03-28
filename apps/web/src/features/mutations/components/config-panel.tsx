@@ -34,8 +34,7 @@ export function ConfigPanel({ client, onBudgetMutated }: ConfigPanelProps): JSX.
 
   if (error !== null) {
     const isDaemonUnavailable =
-      error.toLowerCase().includes('unreachable') ||
-      error.toLowerCase().includes('daemon');
+      error.toLowerCase().includes('unreachable') || error.toLowerCase().includes('daemon');
     return (
       <div>
         {isDaemonUnavailable ? (

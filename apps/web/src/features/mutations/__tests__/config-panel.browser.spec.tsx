@@ -21,9 +21,7 @@ afterEach(() => {
 
 // ─── Mock client factory ─────────────────────────────────────────────────────
 
-function makeMockClient(
-  overrides: Partial<MutationsClient> = {},
-): MutationsClient {
+function makeMockClient(overrides: Partial<MutationsClient> = {}): MutationsClient {
   return {
     getSafeConfig: vi.fn().mockResolvedValue({
       config: { routing: { mode: 'economy' } },

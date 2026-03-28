@@ -10,13 +10,30 @@ export interface MutationErrorBannerProps {
   onDismiss: () => void;
 }
 
-export function MutationErrorBanner({ message, onDismiss }: MutationErrorBannerProps): JSX.Element | null {
+export function MutationErrorBanner({
+  message,
+  onDismiss,
+}: MutationErrorBannerProps): JSX.Element | null {
   if (message === null) return null;
 
   return (
-    <div role="alert" aria-live="polite" style={{ color: 'red', padding: '8px', border: '1px solid red', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div
+      role="alert"
+      aria-live="polite"
+      style={{
+        color: 'red',
+        padding: '8px',
+        border: '1px solid red',
+        borderRadius: '4px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+      }}
+    >
       <span>{message}</span>
-      <button type="button" aria-label="Dismiss error" onClick={onDismiss}>✕</button>
+      <button type="button" aria-label="Dismiss error" onClick={onDismiss}>
+        ✕
+      </button>
     </div>
   );
 }
