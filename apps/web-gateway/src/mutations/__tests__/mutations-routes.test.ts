@@ -81,7 +81,7 @@ function buildTestApp(mutClient: DaemonMutationsClient): Hono {
     c.set('sessionId' as never, 'test-session-123' as never);
     await next();
   });
-  app.route('/mutations', createMutationsRouter(mutClient));
+  app.route('/', createMutationsRouter(mutClient));
   return app;
 }
 
@@ -97,9 +97,9 @@ function buildRequest(
   });
 }
 
-// ── Unit tests: GET /mutations/config/safe ────────────────────────────────────
+// ── Unit tests: GET /config/safe ────────────────────────────────────
 
-describe('Mutations routes — GET /mutations/config/safe (T013)', () => {
+describe('Mutations routes — GET /config/safe (T013)', () => {
   let mockClient: MockMutClient;
   let app: Hono;
 
@@ -109,7 +109,7 @@ describe('Mutations routes — GET /mutations/config/safe (T013)', () => {
   });
 
   it('returns 200 with safe config data', async () => {
-    const res = await app.request(buildRequest('GET', '/mutations/config/safe'));
+    const res = await app.request(buildRequest('GET', '/config/safe'));
     assert.equal(res.status, 200);
     const body = (await res.json()) as GetSafeConfigResponse;
     assert.equal(body.revision, 'rev-1');
@@ -127,16 +127,16 @@ describe('Mutations routes — GET /mutations/config/safe (T013)', () => {
       } as DaemonMutationsResult<GetSafeConfigResponse>),
     );
 
-    const res = await app.request(buildRequest('GET', '/mutations/config/safe'));
+    const res = await app.request(buildRequest('GET', '/config/safe'));
     assert.equal(res.status, 503);
     const body = (await res.json()) as { error: string };
     assert.equal(body.error, 'Daemon unreachable');
   });
 });
 
-// ── Unit tests: POST /mutations/config/routing/mode ───────────────────────────
+// ── Unit tests: POST /config/routing/mode ───────────────────────────
 
-describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () => {
+describe('Mutations routes — POST /config/routing/mode (T013)', () => {
   let mockClient: MockMutClient;
   let app: Hono;
 
@@ -148,7 +148,7 @@ describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () =
   it('returns 200 with mutation response on valid body', async () => {
     const body = { mode: 'balanced', expectedRevision: 'rev-1' };
     const res = await app.request(
-      buildRequest('POST', '/mutations/config/routing/mode', {
+      buildRequest('POST', '/config/routing/mode', {
         body: JSON.stringify(body),
       }),
     );
@@ -161,7 +161,7 @@ describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () =
   it('returns 400 on invalid mode value', async () => {
     const body = { mode: 'turbo', expectedRevision: 'rev-1' };
     const res = await app.request(
-      buildRequest('POST', '/mutations/config/routing/mode', {
+      buildRequest('POST', '/config/routing/mode', {
         body: JSON.stringify(body),
       }),
     );
@@ -172,7 +172,7 @@ describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () =
   it('returns 400 on missing expectedRevision', async () => {
     const body = { mode: 'economy' };
     const res = await app.request(
-      buildRequest('POST', '/mutations/config/routing/mode', {
+      buildRequest('POST', '/config/routing/mode', {
         body: JSON.stringify(body),
       }),
     );
@@ -181,9 +181,7 @@ describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () =
   });
 
   it('returns 400 on empty/null body', async () => {
-    const res = await app.request(
-      buildRequest('POST', '/mutations/config/routing/mode', { body: '' }),
-    );
+    const res = await app.request(buildRequest('POST', '/config/routing/mode', { body: '' }));
     assert.equal(res.status, 400);
     assert.equal(mockClient.postRoutingMode.mock.callCount(), 0);
   });
@@ -202,7 +200,7 @@ describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () =
 
     const body = { mode: 'economy', expectedRevision: 'rev-old' };
     const res = await app.request(
-      buildRequest('POST', '/mutations/config/routing/mode', {
+      buildRequest('POST', '/config/routing/mode', {
         body: JSON.stringify(body),
       }),
     );
@@ -224,7 +222,7 @@ describe('Mutations routes — POST /mutations/config/routing/mode (T013)', () =
 
     const body = { mode: 'balanced', expectedRevision: 'rev-1' };
     const res = await app.request(
-      buildRequest('POST', '/mutations/config/routing/mode', {
+      buildRequest('POST', '/config/routing/mode', {
         body: JSON.stringify(body),
       }),
     );
@@ -323,8 +321,8 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
     fetchMock.mock.resetCalls();
   });
 
-  it('rejects unauthenticated GET /mutations/config/safe with 401', async () => {
-    const req = gwRequest('GET', '/mutations/config/safe', { headers: { origin: ORIGIN } });
+  it('rejects unauthenticated GET /config/safe with 401', async () => {
+    const req = gwRequest('GET', '/config/safe', { headers: { origin: ORIGIN } });
     const res = await gw.app.request(req);
     assert.equal(res.status, 401);
     const body = (await res.json()) as { ok: boolean; category: string };
@@ -332,7 +330,7 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
     assert.equal(body.category, 'auth');
   });
 
-  it('GET /mutations/config/safe with valid session succeeds', async () => {
+  it('GET /config/safe with valid session succeeds', async () => {
     const cookies = await login(gw);
 
     fetchMock.mock.mockImplementation(() =>
@@ -344,7 +342,7 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
       ),
     );
 
-    const req = gwRequest('GET', '/mutations/config/safe', {
+    const req = gwRequest('GET', '/config/safe', {
       cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
       headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
     });
@@ -352,10 +350,10 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
     assert.equal(res.status, 200);
   });
 
-  it('POST /mutations/config/routing/mode missing CSRF → 403', async () => {
+  it('POST /config/routing/mode missing CSRF → 403', async () => {
     const cookies = await login(gw);
 
-    const req = gwRequest('POST', '/mutations/config/routing/mode', {
+    const req = gwRequest('POST', '/config/routing/mode', {
       body: JSON.stringify({ mode: 'balanced', expectedRevision: 'rev-1' }),
       cookies: { __session: cookies['__session'] },
       headers: { origin: ORIGIN },
@@ -364,13 +362,13 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
     assert.equal(res.status, 403);
   });
 
-  it('POST /mutations/config/routing/mode with expired session → 401', async () => {
+  it('POST /config/routing/mode with expired session → 401', async () => {
     const cookies = await login(gw);
 
     // Advance clock past session lifetime
     clock.advance(3700_000);
 
-    const req = gwRequest('POST', '/mutations/config/routing/mode', {
+    const req = gwRequest('POST', '/config/routing/mode', {
       body: JSON.stringify({ mode: 'balanced', expectedRevision: 'rev-1' }),
       cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
       headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
@@ -379,7 +377,7 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
     assert.equal(res.status, 401);
   });
 
-  it('POST /mutations/config/routing/mode with valid session and CSRF → calls daemon', async () => {
+  it('POST /config/routing/mode with valid session and CSRF → calls daemon', async () => {
     const cookies = await login(gw);
 
     fetchMock.mock.mockImplementation(() =>
@@ -395,7 +393,7 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
       ),
     );
 
-    const req = gwRequest('POST', '/mutations/config/routing/mode', {
+    const req = gwRequest('POST', '/config/routing/mode', {
       body: JSON.stringify({ mode: 'balanced', expectedRevision: 'rev-1' }),
       cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
       headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },
@@ -406,10 +404,10 @@ describe('Mutations route wiring — auth/CSRF (T014)', () => {
     assert.equal(body.appliedRevision, 'rev-2');
   });
 
-  it('POST /mutations/config/routing/mode with invalid mode → 400 (daemon never called)', async () => {
+  it('POST /config/routing/mode with invalid mode → 400 (daemon never called)', async () => {
     const cookies = await login(gw);
 
-    const req = gwRequest('POST', '/mutations/config/routing/mode', {
+    const req = gwRequest('POST', '/config/routing/mode', {
       body: JSON.stringify({ mode: 'turbo', expectedRevision: 'rev-1' }),
       cookies: { __session: cookies['__session'], __csrf: cookies['__csrf'] },
       headers: { origin: ORIGIN, 'x-csrf-token': cookies['__csrf'] },

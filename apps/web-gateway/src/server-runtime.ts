@@ -16,7 +16,7 @@ const GATEWAY_ROUTE_PREFIXES = [
   '/turns',
   '/artifacts',
   '/operations',
-  '/mutations',
+  '/config',
   '/audit',
   '/healthz',
   '/ws',

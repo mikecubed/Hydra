@@ -273,7 +273,7 @@ function createProtectedRootRoutes(
   const mutationsClient =
     deps.mutationsClient ??
     new DaemonMutationsClient(deps.mutationsClientOptions ?? defaultOptions);
-  protectedRootRoutes.route('/mutations', createMutationsRouter(mutationsClient));
+  protectedRootRoutes.route('/', createMutationsRouter(mutationsClient));
 
   return protectedRootRoutes;
 }
