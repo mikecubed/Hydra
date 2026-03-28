@@ -6,8 +6,16 @@
  * It is gateway-internal — not exported via @hydra/web-contracts.
  */
 
-/** The five gateway error categories per FR-027. */
-export type ErrorCategory = 'auth' | 'session' | 'validation' | 'daemon' | 'rate-limit';
+/** The eight gateway error categories per FR-027. */
+export type ErrorCategory =
+  | 'auth'
+  | 'session'
+  | 'validation'
+  | 'daemon'
+  | 'rate-limit'
+  | 'stale-revision'
+  | 'daemon-unavailable'
+  | 'workflow-conflict';
 
 /** Ordered list of all valid categories (useful for exhaustiveness checks). */
 export const ERROR_CATEGORIES: readonly ErrorCategory[] = [
@@ -16,6 +24,9 @@ export const ERROR_CATEGORIES: readonly ErrorCategory[] = [
   'validation',
   'daemon',
   'rate-limit',
+  'stale-revision',
+  'daemon-unavailable',
+  'workflow-conflict',
 ] as const;
 
 /** Structured error response for all gateway error surfaces. */

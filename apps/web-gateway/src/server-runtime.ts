@@ -16,6 +16,8 @@ const GATEWAY_ROUTE_PREFIXES = [
   '/turns',
   '/artifacts',
   '/operations',
+  '/mutations',
+  '/audit',
   '/healthz',
   '/ws',
 ] as const;
