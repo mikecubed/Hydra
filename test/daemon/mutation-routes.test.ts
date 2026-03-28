@@ -1,11 +1,19 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
+import type http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { _setTestConfigPath, invalidateConfigCache, loadHydraConfig } from '../../lib/hydra-config.ts';
-import { handleMutationRoute, computeConfigRevision } from '../../lib/daemon/mutation-routes.ts';
+import {
+  handleMutationRoute,
+  computeConfigRevision,
+  _clearAuditStoreForTest,
+  _injectAuditRecordsForTest,
+  _clearWorkflowLaunchesForTest,
+  _injectWorkflowLaunchForTest,
+} from '../../lib/daemon/mutation-routes.ts';
+import type { MutationAuditRecord } from '@hydra/web-contracts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -24,8 +32,15 @@ function setupTestConfig(dir: string, initial: Record<string, unknown> = {}): st
   const cfgPath = path.join(dir, 'hydra.config.json');
   const seed = {
     routing: { mode: 'balanced' },
-    models: { claude: { default: 'claude-sonnet-4-6' } },
-    usage: {},
+    models: {
+      claude: { default: 'claude-sonnet-4-6', fast: 'claude-haiku', cheap: 'claude-haiku', active: 'default' },
+      gemini: { default: 'gemini-pro', fast: 'gemini-flash', cheap: 'gemini-flash', active: 'default' },
+      codex: { default: 'gpt-5.4', fast: 'gpt-4.1', cheap: 'gpt-4.1', active: 'default' },
+    },
+    usage: {
+      dailyTokenBudget: { 'claude-opus-4-6': 5000000, 'gemini-pro': 3000000 },
+      weeklyTokenBudget: { 'claude-opus-4-6': 25000000, 'gemini-pro': 15000000 },
+    },
     ...initial,
   };
   fs.writeFileSync(cfgPath, JSON.stringify(seed, null, 2), 'utf8');
@@ -85,6 +100,23 @@ function fakeRes(): { res: http.ServerResponse; getResult: () => { status: numbe
   };
 }
 
+function makeAuditRecord(overrides: Partial<MutationAuditRecord> = {}): MutationAuditRecord {
+  return {
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    eventType: 'config.routing.mode.changed',
+    operatorId: null,
+    sessionId: null,
+    targetField: 'config.routing.mode',
+    beforeValue: 'balanced',
+    afterValue: 'economy',
+    outcome: 'success',
+    rejectionReason: null,
+    sourceIp: '',
+    ...overrides,
+  };
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('mutation-routes', () => {
@@ -92,6 +124,8 @@ describe('mutation-routes', () => {
 
   beforeEach(() => {
     tmpDir = tmpConfigDir();
+    _clearAuditStoreForTest();
+    _clearWorkflowLaunchesForTest();
   });
 
   afterEach(() => {
@@ -111,7 +145,6 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       const b = body as Record<string, unknown>;
       assert.equal(status, 200);
-      // Response shape: { config: SafeConfigView, revision }
       const config = b['config'] as Record<string, unknown>;
       assert.ok(config != null, 'config field must be present');
       const routing = config['routing'] as Record<string, unknown>;
@@ -121,24 +154,13 @@ describe('mutation-routes', () => {
       assert.match(revision, /^[0-9a-f]{32}$/);
     });
 
-    it('returns 503 when config file is missing', async () => {
-      // Point to a nonexistent file — raw readFileSync will throw ENOENT
+    it('returns 503 when config file is missing (EISDIR)', async () => {
       const bogusPath = path.join(tmpDir, 'does-not-exist', 'hydra.config.json');
+      fs.mkdirSync(bogusPath, { recursive: true });
       _setTestConfigPath(bogusPath);
       invalidateConfigCache();
-      // Force a throw by making the dir unreadable — instead we mock loadHydraConfig
-      // Actually, loadHydraConfig falls back to defaults on read error. Let's override
-      // the config path to a directory (not a file) to trigger a JSON parse error.
-      fs.mkdirSync(bogusPath, { recursive: true });
-      // Now bogusPath IS a directory — readFileSync will throw EISDIR
-      // But loadHydraConfig catches and returns defaults. We need a different approach.
-      // Let's force an error by using _setTestConfig with something that SafeConfigView.parse rejects.
 
-      // SafeConfigView rejects if a forbidden key (apiKey, secret, etc.) exists.
-      // Pass raw object with a forbidden key to trigger the superRefine rejection.
-      invalidateConfigCache();
-
-            const req = fakeReq('GET', '/config/safe');
+      const req = fakeReq('GET', '/config/safe');
       const { res, getResult } = fakeRes();
       const url = new URL('http://localhost:4173/config/safe');
 
@@ -218,9 +240,7 @@ describe('mutation-routes', () => {
     it('returns 400 on missing expectedRevision field', async () => {
       setupTestConfig(tmpDir);
 
-      const req = fakeReq('POST', '/config/routing/mode', {
-        mode: 'economy',
-      });
+      const req = fakeReq('POST', '/config/routing/mode', { mode: 'economy' });
       const { res, getResult } = fakeRes();
       const url = new URL('http://localhost:4173/config/routing/mode');
 
@@ -252,6 +272,446 @@ describe('mutation-routes', () => {
 
       const statuses = [r1.status, r2.status].sort();
       assert.deepStrictEqual(statuses, [200, 409]);
+    });
+  });
+
+  describe('POST /config/models/:agent/active', () => {
+    it('returns 200 with updated tier in snapshot', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/models/claude/active', {
+        tier: 'fast',
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/models/claude/active');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 200);
+      const resp = body as Record<string, unknown>;
+      assert.ok(resp['snapshot']);
+      assert.equal(typeof resp['appliedRevision'], 'string');
+      const snapshot = resp['snapshot'] as Record<string, unknown>;
+      const models = snapshot['models'] as Record<string, Record<string, unknown>>;
+      assert.equal(models['claude']?.['active'], 'fast');
+    });
+
+    it('returns 400 for unknown agent', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/models/unknown-agent/active', {
+        tier: 'fast',
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/models/unknown-agent/active');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status } = getResult();
+      assert.equal(status, 400);
+    });
+
+    it('returns 409 on stale revision', async () => {
+      setupTestConfig(tmpDir);
+
+      const req = fakeReq('POST', '/config/models/gemini/active', {
+        tier: 'cheap',
+        expectedRevision: 'stalerevisionstalerevisionstaler',
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/models/gemini/active');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 409);
+      assert.equal((body as Record<string, unknown>)['error'], 'stale-revision');
+    });
+
+    it('returns 400 for invalid tier value', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/models/claude/active', {
+        tier: 'turbo',
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/models/claude/active');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status } = getResult();
+      assert.equal(status, 400);
+    });
+  });
+
+  describe('POST /config/usage/budget', () => {
+    it('returns 200 on valid budget mutation', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/usage/budget', {
+        modelId: 'claude-opus-4-6',
+        dailyLimit: 8000000,
+        weeklyLimit: 40000000,
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/usage/budget');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 200);
+      const resp = body as Record<string, unknown>;
+      assert.ok(resp['snapshot']);
+      assert.equal(typeof resp['appliedRevision'], 'string');
+    });
+
+    it('returns 400 when both dailyLimit and weeklyLimit are null', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/usage/budget', {
+        modelId: 'claude-opus-4-6',
+        dailyLimit: null,
+        weeklyLimit: null,
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/usage/budget');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status } = getResult();
+      assert.equal(status, 400);
+    });
+
+    it('returns 400 when dailyLimit is non-positive', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/usage/budget', {
+        modelId: 'claude-opus-4-6',
+        dailyLimit: -100,
+        weeklyLimit: 40000000,
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/usage/budget');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status } = getResult();
+      assert.equal(status, 400);
+    });
+
+    it('returns 400 for unknown modelId', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/config/usage/budget', {
+        modelId: 'unknown-model-xyz',
+        dailyLimit: 1000000,
+        weeklyLimit: null,
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/usage/budget');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status } = getResult();
+      assert.equal(status, 400);
+    });
+  });
+
+  describe('POST /workflows/launch', () => {
+    it('returns 202 with destructive:false for "tasks" workflow', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/workflows/launch', {
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 202);
+      const resp = body as Record<string, unknown>;
+      assert.equal(typeof resp['taskId'], 'string');
+      assert.equal(resp['workflow'], 'tasks');
+      assert.equal(resp['destructive'], false);
+    });
+
+    it('returns 202 with destructive:true for "evolve" workflow', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/workflows/launch', {
+        workflow: 'evolve',
+        idempotencyKey: crypto.randomUUID(),
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 202);
+      const resp = body as Record<string, unknown>;
+      assert.equal(resp['destructive'], true);
+    });
+
+    it('returns 409 when same workflow is already running', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      // Inject an already-running 'tasks' workflow
+      _injectWorkflowLaunchForTest({
+        taskId: 'existing-task-001',
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        launchedAt: new Date().toISOString(),
+        status: 'running',
+      });
+
+      const req = fakeReq('POST', '/workflows/launch', {
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 409);
+      assert.equal((body as Record<string, unknown>)['error'], 'workflow-conflict');
+    });
+
+    it('returns 400 for unknown workflow name', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq('POST', '/workflows/launch', {
+        workflow: 'unknown-workflow',
+        idempotencyKey: crypto.randomUUID(),
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status } = getResult();
+      assert.equal(status, 400);
+    });
+
+    it('deduplicates idempotent launches within 60 seconds', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+      const idempotencyKey = crypto.randomUUID();
+
+      // First launch
+      const req1 = fakeReq('POST', '/workflows/launch', {
+        workflow: 'nightly',
+        idempotencyKey,
+        expectedRevision: revision,
+      });
+      const { res: res1, getResult: getResult1 } = fakeRes();
+      await handleMutationRoute(req1, res1, new URL('http://localhost:4173/workflows/launch'));
+      const { body: body1 } = getResult1();
+      const firstTaskId = (body1 as Record<string, unknown>)['taskId'];
+
+      // Second launch with same idempotencyKey — should return same taskId
+      const req2 = fakeReq('POST', '/workflows/launch', {
+        workflow: 'nightly',
+        idempotencyKey,
+        expectedRevision: revision,
+      });
+      const { res: res2, getResult: getResult2 } = fakeRes();
+      await handleMutationRoute(req2, res2, new URL('http://localhost:4173/workflows/launch'));
+      const { status: status2, body: body2 } = getResult2();
+
+      assert.equal(status2, 202);
+      assert.equal((body2 as Record<string, unknown>)['taskId'], firstTaskId);
+    });
+  });
+
+  describe('GET /audit', () => {
+    it('returns 200 with empty records when store is empty', async () => {
+      setupTestConfig(tmpDir);
+
+      const req = fakeReq('GET', '/audit');
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/audit');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 200);
+      const resp = body as Record<string, unknown>;
+      assert.deepEqual(resp['records'], []);
+      assert.equal(resp['nextCursor'], null);
+    });
+
+    it('returns first page with nextCursor when more records exist', async () => {
+      setupTestConfig(tmpDir);
+
+      // Inject 5 records with distinct timestamps
+      const now = Date.now();
+      for (let i = 0; i < 5; i++) {
+        _injectAuditRecordsForTest([
+          makeAuditRecord({ timestamp: new Date(now + i * 1000).toISOString() }),
+        ]);
+      }
+
+      const req = fakeReq('GET', '/audit?limit=2');
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/audit?limit=2');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 200);
+      const resp = body as Record<string, unknown>;
+      const records = resp['records'] as unknown[];
+      assert.equal(records.length, 2);
+      assert.ok(resp['nextCursor'] !== null, 'nextCursor should be non-null when more records exist');
+      assert.equal(resp['totalCount'], 5);
+    });
+
+    it('returns next page of records with no overlap', async () => {
+      setupTestConfig(tmpDir);
+
+      const now = Date.now();
+      const allRecords: MutationAuditRecord[] = [];
+      for (let i = 0; i < 5; i++) {
+        const r = makeAuditRecord({ timestamp: new Date(now + i * 1000).toISOString() });
+        allRecords.push(r);
+      }
+      _injectAuditRecordsForTest(allRecords);
+
+      // Get page 1
+      const { res: res1, getResult: get1 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', '/audit?limit=2'),
+        res1,
+        new URL('http://localhost:4173/audit?limit=2'),
+      );
+      const page1 = get1().body as Record<string, unknown>;
+      const cursor = page1['nextCursor'] as string;
+      const page1Ids = (page1['records'] as MutationAuditRecord[]).map((r) => r.id);
+
+      // Get page 2 using cursor
+      const { res: res2, getResult: get2 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', `/audit?limit=2&cursor=${cursor}`),
+        res2,
+        new URL(`http://localhost:4173/audit?limit=2&cursor=${cursor}`),
+      );
+      const page2 = get2().body as Record<string, unknown>;
+      const page2Ids = (page2['records'] as MutationAuditRecord[]).map((r) => r.id);
+
+      assert.equal(page2Ids.length, 2);
+      // No overlap between pages
+      for (const id of page2Ids) {
+        assert.ok(!page1Ids.includes(id), `Record ${id} appeared in both pages`);
+      }
+    });
+
+    it('returns last partial page with null nextCursor', async () => {
+      setupTestConfig(tmpDir);
+
+      const now = Date.now();
+      for (let i = 0; i < 5; i++) {
+        _injectAuditRecordsForTest([
+          makeAuditRecord({ timestamp: new Date(now + i * 1000).toISOString() }),
+        ]);
+      }
+
+      // Page 1
+      const { res: res1, getResult: get1 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', '/audit?limit=2'),
+        res1,
+        new URL('http://localhost:4173/audit?limit=2'),
+      );
+      const cursor1 = (get1().body as Record<string, unknown>)['nextCursor'] as string;
+
+      // Page 2
+      const { res: res2, getResult: get2 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', `/audit?limit=2&cursor=${cursor1}`),
+        res2,
+        new URL(`http://localhost:4173/audit?limit=2&cursor=${cursor1}`),
+      );
+      const cursor2 = (get2().body as Record<string, unknown>)['nextCursor'] as string;
+
+      // Page 3 — last page with only 1 record
+      const { res: res3, getResult: get3 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', `/audit?limit=2&cursor=${cursor2}`),
+        res3,
+        new URL(`http://localhost:4173/audit?limit=2&cursor=${cursor2}`),
+      );
+      const page3 = get3().body as Record<string, unknown>;
+      const page3Records = page3['records'] as MutationAuditRecord[];
+
+      assert.equal(page3Records.length, 1);
+      assert.equal(page3['nextCursor'], null);
     });
   });
 
