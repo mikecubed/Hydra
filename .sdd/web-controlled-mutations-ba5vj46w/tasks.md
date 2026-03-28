@@ -727,7 +727,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T035** [Ph7] [BROWSER] [P3] `model/use-audit-page.ts` — cursor-based paginated audit hook
+- [x] **T035** [Ph7] [BROWSER] [P3] `model/use-audit-page.ts` — cursor-based paginated audit hook
   ```
   Files:
     ✦ apps/web/src/features/mutations/model/use-audit-page.ts
@@ -743,7 +743,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T036** [Ph7] [BROWSER] [P3] `components/audit-row.tsx` — single audit record row renderer
+- [x] **T036** [Ph7] [BROWSER] [P3] `components/audit-row.tsx` — single audit record row renderer
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/audit-row.tsx
@@ -756,7 +756,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T037** [Ph7] [BROWSER] [P3] `components/audit-panel.tsx` — paginated audit table with empty state
+- [x] **T037** [Ph7] [BROWSER] [P3] `components/audit-panel.tsx` — paginated audit table with empty state
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/audit-panel.tsx
@@ -771,7 +771,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T038** [Ph7] [BROWSER] [P3] Browser spec — `audit-panel.browser.spec.tsx`
+- [x] **T038** [Ph7] [BROWSER] [P3] Browser spec — `audit-panel.browser.spec.tsx`
   ```
   Files:
     ✦ apps/web/src/features/mutations/__tests__/audit-panel.browser.spec.tsx
