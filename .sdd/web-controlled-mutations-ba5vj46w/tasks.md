@@ -596,7 +596,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T028** [Ph6] [BROWSER] [P2] `components/models-section.tsx` — per-agent tier selector with confirmation
+- [x] **T028** [Ph6] [BROWSER] [P2] `components/models-section.tsx` — per-agent tier selector with confirmation
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/models-section.tsx
@@ -612,7 +612,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T029** [Ph6] [BROWSER] [P2] `components/budgets-section.tsx` — per-model budget inputs with cross-field advisory
+- [x] **T029** [Ph6] [BROWSER] [P2] `components/budgets-section.tsx` — per-model budget inputs with cross-field advisory
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/budgets-section.tsx
@@ -627,7 +627,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T030** [Ph6] [BROWSER] [P2] `components/destructive-confirm-dialog.tsx` — two-step typed-phrase confirm dialog
+- [x] **T030** [Ph6] [BROWSER] [P2] `components/destructive-confirm-dialog.tsx` — two-step typed-phrase confirm dialog
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/destructive-confirm-dialog.tsx
@@ -643,7 +643,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T031** [Ph6] [BROWSER] [P2] `components/workflow-launch-panel.tsx` — workflow selector + gated launch
+- [x] **T031** [Ph6] [BROWSER] [P2] `components/workflow-launch-panel.tsx` — workflow selector + gated launch
   ```
   Files:
     ✦ apps/web/src/features/mutations/components/workflow-launch-panel.tsx
@@ -661,7 +661,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T032** [Ph6] [BROWSER] [P2] Browser spec — `destructive-confirm-dialog.browser.spec.tsx`
+- [x] **T032** [Ph6] [BROWSER] [P2] Browser spec — `destructive-confirm-dialog.browser.spec.tsx`
   ```
   Files:
     ✦ apps/web/src/features/mutations/__tests__/destructive-confirm-dialog.browser.spec.tsx
@@ -678,7 +678,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T033** [Ph6] [BROWSER] [P2] Browser spec — `workflow-launch-panel.browser.spec.tsx`
+- [x] **T033** [Ph6] [BROWSER] [P2] Browser spec — `workflow-launch-panel.browser.spec.tsx`
   ```
   Files:
     ✦ apps/web/src/features/mutations/__tests__/workflow-launch-panel.browser.spec.tsx
@@ -693,7 +693,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T034** [Ph6] [BROWSER] [P2] Wire `ModelsSection` + `BudgetsSection` into `config-panel.tsx`
+- [x] **T034** [Ph6] [BROWSER] [P2] Wire `ModelsSection` + `BudgetsSection` into `config-panel.tsx`
   ```
   Files:
     ✎ apps/web/src/features/mutations/components/config-panel.tsx
@@ -708,7 +708,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T034a** [Ph6] [BROWSER] [P2] Integration test: config panel live data + budget gauge refresh
+- [x] **T034a** [Ph6] [BROWSER] [P2] Integration test: config panel live data + budget gauge refresh
   ```
   Files:
     ✦ apps/web/src/features/mutations/__tests__/config-panel-integration.browser.spec.tsx
