@@ -400,7 +400,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T018** [Ph4] [GATEWAY] [P2] Extend `mutations-routes.ts` with remaining four routes
+- [x] **T018** [Ph4] [GATEWAY] [P2] Extend `mutations-routes.ts` with remaining four routes
   ```
   Files:
     ✎ apps/web-gateway/src/mutations/mutations-routes.ts
@@ -415,7 +415,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T019** [Ph4] [GATEWAY] [P2] Extend `mutations-routes.test.ts` with Phase 4 test cases
+- [x] **T019** [Ph4] [GATEWAY] [P2] Extend `mutations-routes.test.ts` with Phase 4 test cases
   ```
   Files:
     ✎ apps/web-gateway/src/mutations/__tests__/mutations-routes.test.ts
@@ -437,7 +437,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T019b** [Ph4] [GATEWAY] [P2] Rejected-attempt audit coverage test
+- [x] **T019b** [Ph4] [GATEWAY] [P2] Rejected-attempt audit coverage test
   ```
   Files:
     ✎ apps/web-gateway/src/mutations/__tests__/mutations-routes.test.ts
