@@ -26,6 +26,7 @@ export const WorkflowLaunchResponse = z
     workflow: WorkflowName,
     launchedAt: z.iso.datetime(),
     destructive: z.boolean(),
+    label: z.string().nullable().optional(),
   })
   .strict();
 export type WorkflowLaunchResponse = z.infer<typeof WorkflowLaunchResponse>;

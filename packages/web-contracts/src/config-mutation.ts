@@ -21,7 +21,7 @@ export type AgentId = z.infer<typeof AgentId>;
 
 // ─── SafeConfigView ──────────────────────────────────────────────────────────
 
-const FORBIDDEN_KEY = /(apiKey|secret|hash|password)/i;
+const FORBIDDEN_KEY = /(apiKey|secret|hash|password|credential)/i;
 
 function hasForbiddenKey(val: unknown, path: string[] = []): string | null {
   if (val === null || val === undefined) return null;

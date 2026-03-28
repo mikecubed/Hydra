@@ -213,7 +213,6 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       assert.equal(status, 200);
       const resp = body as Record<string, unknown>;
-      assert.ok(resp['snapshot']);
       assert.equal(typeof resp['appliedRevision'], 'string');
       assert.equal(typeof resp['timestamp'], 'string');
       const snapshot = resp['snapshot'] as Record<string, unknown>;
@@ -254,7 +253,7 @@ describe('mutation-routes', () => {
 
       const { status, body } = getResult();
       assert.equal(status, 400);
-      assert.ok((body as Record<string, unknown>)['error']);
+      assert.equal((body as Record<string, unknown>)['error'], 'Invalid request body');
     });
 
     it('returns 400 on missing expectedRevision field', async () => {
@@ -269,7 +268,7 @@ describe('mutation-routes', () => {
 
       const { status, body } = getResult();
       assert.equal(status, 400);
-      assert.ok((body as Record<string, unknown>)['error']);
+      assert.equal((body as Record<string, unknown>)['error'], 'Invalid request body');
     });
 
     it('concurrency: two simultaneous requests yield exactly one 200 and one 409', async () => {
@@ -315,7 +314,6 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       assert.equal(status, 200);
       const resp = body as Record<string, unknown>;
-      assert.ok(resp['snapshot']);
       assert.equal(typeof resp['appliedRevision'], 'string');
       const snapshot = resp['snapshot'] as Record<string, unknown>;
       const models = snapshot['models'] as Record<string, Record<string, unknown>>;
@@ -403,8 +401,11 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       assert.equal(status, 200);
       const resp = body as Record<string, unknown>;
-      assert.ok(resp['snapshot']);
       assert.equal(typeof resp['appliedRevision'], 'string');
+      const snapshot = resp['snapshot'] as Record<string, unknown>;
+      const usage = snapshot['usage'] as Record<string, Record<string, unknown>>;
+      assert.equal(usage['dailyTokenBudget']?.['claude-opus-4-6'], 8_000_000);
+      assert.equal(usage['weeklyTokenBudget']?.['claude-opus-4-6'], 40_000_000);
     });
 
     it('returns 400 when both dailyLimit and weeklyLimit are null', async () => {
@@ -552,6 +553,38 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       assert.equal(status, 409);
       assert.equal((body as Record<string, unknown>)['error'], 'workflow-conflict');
+    });
+
+    it('allows re-launch when conflicting entry is older than 5 minutes', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      // Inject a stale 'tasks' entry (6 minutes ago — beyond the 5-min window)
+      const staleTime = new Date(Date.now() - 6 * 60_000).toISOString();
+      _injectWorkflowLaunchForTest({
+        taskId: 'stale-task-001',
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        launchedAt: staleTime,
+        status: 'pending',
+      });
+
+      const req = fakeReq('POST', '/workflows/launch', {
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 202);
+      assert.equal(typeof (body as Record<string, unknown>)['taskId'], 'string');
     });
 
     it('returns 400 for unknown workflow name', async () => {
@@ -779,6 +812,17 @@ describe('hasForbiddenKey', () => {
       _hasForbiddenKeyForTest({ items: [{ tier: 'default' }, { mode: 'balanced' }] }),
       null,
     );
+  });
+
+  it('returns the key for top-level credential fields', () => {
+    const result = _hasForbiddenKeyForTest({ credential: 'gh_abc123' });
+    assert.notEqual(result, null);
+    assert.ok((result as string).includes('credential'));
+  });
+
+  it('returns the key for nested credential fields', () => {
+    const result = _hasForbiddenKeyForTest({ agent: { apiCredential: 'secret' } });
+    assert.notEqual(result, null);
   });
 
   it('returns null for null and undefined inputs', () => {

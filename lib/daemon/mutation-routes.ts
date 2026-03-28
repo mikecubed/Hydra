@@ -29,7 +29,7 @@ import { sendJson, sendError, readJsonBody } from './http-utils.ts';
 // ── Local schemas (mirror @hydra/web-contracts — single source of truth for types,
 // local Zod for daemon runtime validation to avoid bundling the workspace package) ──
 
-const FORBIDDEN_KEY = /(apiKey|secret|hash|password)/i;
+const FORBIDDEN_KEY = /(apiKey|secret|hash|password|credential)/i;
 
 function hasForbiddenKey(val: unknown, path_: string[] = []): string | null {
   if (val === null || val === undefined) return null;
@@ -197,7 +197,10 @@ function handleGetConfigSafe(_req: IncomingMessage, res: ServerResponse): void {
     JSON.parse(raw); // throws if corrupt
     const config = loadHydraConfig();
     sendJson(res, 200, { config: buildSafeView(config), revision: computeConfigRevision(config) });
-  } catch {
+  } catch (err: unknown) {
+    process.stderr.write(
+      `${JSON.stringify({ level: 'error', msg: 'config read failed', err: String(err) })}\n`,
+    );
     sendError(res, 503, 'daemon-unavailable');
   }
 }
@@ -403,27 +406,38 @@ async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerRespons
   }
 
   const { workflow, idempotencyKey, label } = parsed.data;
-  const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString();
-  const existing = workflowLaunches.find(
-    (e) => e.idempotencyKey === idempotencyKey && e.launchedAt >= sixtySecondsAgo,
-  );
-  if (existing) {
-    sendJson(res, 202, {
-      taskId: existing.taskId,
-      workflow: existing.workflow,
-      launchedAt: existing.launchedAt,
-      destructive: DESTRUCTIVE_WORKFLOWS.has(existing.workflow),
-      label: label ?? null,
-    });
-    return;
-  }
 
+  // All checks inside the mutex to prevent TOCTOU races between concurrent requests.
   const release = await configMutex.acquire();
   try {
+    // Idempotency: return the existing task if the same key was used within 60 s.
+    const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString();
+    const existing = workflowLaunches.find(
+      (e) => e.idempotencyKey === idempotencyKey && e.launchedAt >= sixtySecondsAgo,
+    );
+    if (existing) {
+      sendJson(res, 202, {
+        taskId: existing.taskId,
+        workflow: existing.workflow,
+        launchedAt: existing.launchedAt,
+        destructive: DESTRUCTIVE_WORKFLOWS.has(existing.workflow),
+        label: label ?? null,
+      });
+      return;
+    }
+
     invalidateConfigCache();
     const config = loadHydraConfig();
+
+    // Conflict: block concurrent same-workflow launches. Uses a 5-minute window so
+    // stale 'pending' entries (whose lifecycle wasn't explicitly completed) expire
+    // and allow re-launching without a daemon restart.
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString();
     const conflict = workflowLaunches.find(
-      (e) => e.workflow === workflow && (e.status === 'running' || e.status === 'pending'),
+      (e) =>
+        e.workflow === workflow &&
+        (e.status === 'running' || e.status === 'pending') &&
+        e.launchedAt >= fiveMinutesAgo,
     );
     if (conflict) {
       sendJson(res, 409, { error: 'workflow-conflict', taskId: conflict.taskId });
@@ -449,7 +463,7 @@ async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerRespons
         }),
       );
     } catch {
-      /* R-2 */
+      /* audit failure must not suppress 202 — R-2 */
     }
     sendJson(res, 202, {
       taskId,
