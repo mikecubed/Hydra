@@ -82,7 +82,7 @@ async function executeLaunch(
     return { taskId: result.taskId };
   } catch (err: unknown) {
     if (err instanceof MutationsRequestError) {
-      if (err.gatewayError.code === 'workflow-conflict')
+      if (err.gatewayError.category === 'workflow-conflict')
         return { conflict: 'Workflow already running' };
       if (err.gatewayError.httpStatus === 503)
         return { error: 'Config unavailable — daemon unreachable' };

@@ -16,7 +16,10 @@ import type {
   GetAuditResponse,
 } from '@hydra/web-contracts';
 import { createMutationsRouter } from '../mutations-routes.ts';
-import { createGatewayErrorResponse } from '../../shared/gateway-error-response.ts';
+import {
+  createGatewayErrorResponse,
+  type GatewayErrorResponse,
+} from '../../shared/gateway-error-response.ts';
 import { createGatewayApp, type GatewayApp } from '../../index.ts';
 import { FakeClock } from '../../shared/clock.ts';
 import { AuditStore } from '../../audit/audit-store.ts';
@@ -136,8 +139,10 @@ describe('Mutations routes — GET /config/safe (T013)', () => {
 
     const res = await app.request(buildRequest('GET', '/config/safe'));
     assert.equal(res.status, 503);
-    const body = (await res.json()) as { error: string };
-    assert.equal(body.error, 'Daemon unreachable');
+    const body = (await res.json()) as GatewayErrorResponse;
+    assert.equal(body.ok, false);
+    assert.equal(body.category, 'daemon-unavailable');
+    assert.ok(body.message.includes('Daemon unreachable'));
   });
 });
 
@@ -212,8 +217,10 @@ describe('Mutations routes — POST /config/routing/mode (T013)', () => {
       }),
     );
     assert.equal(res.status, 409);
-    const data = (await res.json()) as { error: string };
-    assert.ok(data.error.includes('reload and retry'));
+    const data = (await res.json()) as GatewayErrorResponse;
+    assert.equal(data.ok, false);
+    assert.equal(data.category, 'stale-revision');
+    assert.ok(data.message.includes('reload and retry'));
   });
 
   it('returns 503 when daemon is unavailable', async () => {

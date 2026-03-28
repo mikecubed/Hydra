@@ -7,10 +7,12 @@ import { AuditPageResponse } from '../audit-schemas.ts';
 
 // ─── GET audit ───────────────────────────────────────────────────────────────
 
-export const GetAuditRequest = z.object({
-  limit: z.number().int().min(1).max(100).optional(),
-  cursor: z.string().optional(),
-});
+export const GetAuditRequest = z
+  .object({
+    limit: z.number().int().min(1).max(100).optional(),
+    cursor: z.string().optional(),
+  })
+  .strict();
 export type GetAuditRequest = z.infer<typeof GetAuditRequest>;
 
 export const GetAuditResponse = AuditPageResponse;

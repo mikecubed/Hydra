@@ -74,12 +74,37 @@ function readCsrfTokenFromDocument(): string | null {
 }
 
 async function extractGatewayError(response: Response): Promise<GatewayErrorBody> {
+  let raw: unknown;
   try {
-    const parsed = parseGatewayError((await response.json()) as unknown);
-    if (parsed) return parsed;
+    raw = await response.json();
   } catch {
-    // fall through to synthetic error
+    return syntheticError(response);
   }
+
+  const parsed = parseGatewayError(raw);
+  if (parsed) return parsed;
+
+  // Handle legacy/non-structured { error: string } shape from some gateway paths
+  if (
+    raw !== null &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    typeof (raw as Record<string, unknown>)['error'] === 'string' &&
+    (raw as Record<string, unknown>)['error'] !== ''
+  ) {
+    return {
+      ok: false,
+      code: 'HTTP_ERROR',
+      category: response.status >= 500 ? 'daemon' : 'validation',
+      message: (raw as Record<string, unknown>)['error'] as string,
+      httpStatus: response.status,
+    };
+  }
+
+  return syntheticError(response);
+}
+
+function syntheticError(response: Response): GatewayErrorBody {
   return {
     ok: false,
     code: 'HTTP_ERROR',

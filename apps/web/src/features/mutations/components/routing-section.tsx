@@ -5,6 +5,7 @@
  * Selecting a different mode opens ConfirmDialog; on confirm calls postRoutingMode.
  */
 import { useState, useCallback, type JSX } from 'react';
+import type { ChangeEvent } from 'react';
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { useMutation } from '../model/use-mutation.ts';
@@ -37,7 +38,7 @@ export function RoutingSection({
   );
 
   const handleSelectChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
+    (e: ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
       const selected = val as RoutingMode;
       if (selected === currentMode) return;
