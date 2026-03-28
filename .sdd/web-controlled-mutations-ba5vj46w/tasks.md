@@ -793,7 +793,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T039** [Ph8] [INTEGRATION] [P1] Round-trip integration tests — all six mutation/read endpoints
+- [x] **T039** [Ph8] [INTEGRATION] [P1] Round-trip integration tests — all six mutation/read endpoints
   ```
   Files:
     ✦ test/integration/web-mutations/round-trip.test.ts  (or equivalent integration test location)
@@ -809,7 +809,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T040** [Ph8] [INTEGRATION] [P1] Concurrent optimistic-concurrency determinism test
+- [x] **T040** [Ph8] [INTEGRATION] [P1] Concurrent optimistic-concurrency determinism test
   ```
   Files:
     ✎ test/integration/web-mutations/round-trip.test.ts  (or a sibling file)
@@ -822,7 +822,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T041** [Ph8] [INTEGRATION] [P3] Audit cursor pagination round-trip test
+- [x] **T041** [Ph8] [INTEGRATION] [P3] Audit cursor pagination round-trip test
   ```
   Files:
     ✎ test/integration/web-mutations/round-trip.test.ts  (or a sibling file)
@@ -838,7 +838,7 @@ Priority codes: **P1** = must-have (US1–US2), **P2** = should-have (US3–US5)
 
 ---
 
-- [ ] **T042** [Ph8] [ALL] [P1] Project-wide quality gate + ESLint import boundary check
+- [x] **T042** [Ph8] [ALL] [P1] Project-wide quality gate + ESLint import boundary check
   ```
   Files:
     (no new files — this is a validation-only task)
