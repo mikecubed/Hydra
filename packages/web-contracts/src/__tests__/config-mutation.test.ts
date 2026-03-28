@@ -51,6 +51,24 @@ describe('SafeConfigView', () => {
       name: 'ZodError',
     });
   });
+
+  it('rejects nested forbidden keys (e.g. routing.apiKey)', () => {
+    assert.throws(
+      () => SafeConfigView.parse({ routing: { mode: 'economy', apiKey: 'nested-bad' } }),
+      { name: 'ZodError' },
+    );
+  });
+
+  it('rejects deeply nested forbidden keys (e.g. models.foo.secret)', () => {
+    assert.throws(
+      () =>
+        SafeConfigView.parse({
+          ...validConfig,
+          models: { 'gpt-4': { default: 'gpt-4', secret: 'leak' } },
+        }),
+      { name: 'ZodError' },
+    );
+  });
 });
 
 describe('RoutingModeMutationRequest', () => {

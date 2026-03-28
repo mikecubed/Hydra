@@ -2,7 +2,8 @@
  * Config mutation schemas — safe configuration view and mutation request/response types.
  *
  * SafeConfigView uses a z.unknown() → superRefine → pipe → strip pipeline:
- * 1. superRefine rejects any top-level key matching /(apiKey|secret|hash|password)/i
+ * 1. superRefine recursively rejects any key matching /(apiKey|secret|hash|password)/i
+ *    in the raw input (before strip removes undeclared fields)
  * 2. pipe feeds into a stripped object schema so undeclared keys are silently removed
  */
 import { z } from 'zod';
@@ -21,6 +22,16 @@ export type AgentId = z.infer<typeof AgentId>;
 // ─── SafeConfigView ──────────────────────────────────────────────────────────
 
 const FORBIDDEN_KEY = /(apiKey|secret|hash|password)/i;
+
+function hasForbiddenKey(val: unknown, path: string[] = []): string | null {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+  for (const key of Object.keys(val as Record<string, unknown>)) {
+    if (FORBIDDEN_KEY.test(key)) return [...path, key].join('.');
+    const nested = hasForbiddenKey((val as Record<string, unknown>)[key], [...path, key]);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
 
 const SafeConfigViewInner = z
   .object({
@@ -51,12 +62,9 @@ const SafeConfigViewInner = z
 export const SafeConfigView = z
   .unknown()
   .superRefine((val, ctx) => {
-    if (val && typeof val === 'object' && !Array.isArray(val)) {
-      for (const key of Object.keys(val as Record<string, unknown>)) {
-        if (FORBIDDEN_KEY.test(key)) {
-          ctx.addIssue({ code: 'custom', message: `Forbidden key: ${key}`, path: [key] });
-        }
-      }
+    const found = hasForbiddenKey(val);
+    if (found !== null) {
+      ctx.addIssue({ code: 'custom', message: `Forbidden key: ${found}`, path: [found] });
     }
   })
   .pipe(SafeConfigViewInner);
