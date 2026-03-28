@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import z from 'zod';
 import {
   loadHydraConfig,
   saveHydraConfig,
@@ -17,12 +18,38 @@ import {
   HYDRA_RUNTIME_ROOT,
 } from '../hydra-config.ts';
 import { configMutex } from './mutation-lock.ts';
-import {
-  SafeConfigView,
-  RoutingModeMutationRequest,
-  MutationAuditRecord,
-} from '@hydra/web-contracts';
+// Type-only imports from @hydra/web-contracts — erased at compile time so the
+// daemon tarball stays self-contained (no runtime dep on the private workspace pkg).
+import type { SafeConfigView as SafeConfigViewType, MutationAuditRecord } from '@hydra/web-contracts';
 import { sendJson, sendError, readJsonBody } from './http-utils.ts';
+
+// ── Local schemas (mirror @hydra/web-contracts — single source of truth for types,
+// local Zod for daemon runtime validation to avoid bundling the workspace package) ──
+
+const FORBIDDEN_KEY = /(apiKey|secret|hash|password)/i;
+
+function hasForbiddenKey(val: unknown, path_: string[] = []): string | null {
+  if (typeof val !== 'object' || val === null) return null;
+  for (const key of Object.keys(val)) {
+    if (FORBIDDEN_KEY.test(key)) return [...path_, key].join('.');
+    const nested = hasForbiddenKey((val as Record<string, unknown>)[key], [...path_, key]);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+const safeConfigViewSchema = z
+  .unknown()
+  .superRefine((val, ctx) => {
+    const found = hasForbiddenKey(val);
+    if (found) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `forbidden key: ${found}` });
+  })
+  .pipe(z.object({ routing: z.unknown(), models: z.unknown(), usage: z.unknown() }).strip());
+
+const routingModeMutationSchema = z.object({
+  mode: z.enum(['economy', 'balanced', 'performance']),
+  expectedRevision: z.string(),
+});
 
 // ── Revision ─────────────────────────────────────────────────────────────────
 
@@ -64,7 +91,7 @@ export async function handleMutationRoute(
       JSON.parse(raw); // throws if corrupt
       const config = loadHydraConfig();
       const safeInput = { routing: config.routing, models: config.models, usage: config.usage };
-      const safeView = SafeConfigView.parse(safeInput);
+      const safeView = safeConfigViewSchema.parse(safeInput) as SafeConfigViewType;
       const revision = computeConfigRevision(config);
       // Return { config: SafeConfigView, revision } matching GetSafeConfigResponse contract
       sendJson(res, 200, { config: safeView, revision });
@@ -77,7 +104,7 @@ export async function handleMutationRoute(
   // POST /config/routing/mode
   if (method === 'POST' && pathname === '/config/routing/mode') {
     const body = await readJsonBody(req);
-    const parsed = RoutingModeMutationRequest.safeParse(body);
+    const parsed = routingModeMutationSchema.safeParse(body);
     if (!parsed.success) {
       sendError(res, 400, 'Invalid request body');
       return true;
@@ -121,7 +148,7 @@ export async function handleMutationRoute(
       }
 
       const safeInput = { routing: updated.routing, models: updated.models, usage: updated.usage };
-      const safeView = SafeConfigView.parse(safeInput);
+      const safeView = safeConfigViewSchema.parse(safeInput) as SafeConfigViewType;
       sendJson(res, 200, {
         snapshot: safeView,
         appliedRevision,
