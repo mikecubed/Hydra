@@ -12,6 +12,8 @@ import { ConfirmDialog } from './confirm-dialog.tsx';
 import { MutationErrorBanner } from './mutation-error-banner.tsx';
 
 interface BudgetRowState {
+  serverDailyInput: string;
+  serverWeeklyInput: string;
   dailyInput: string;
   weeklyInput: string;
   isDialogOpen: boolean;
@@ -57,6 +59,15 @@ interface BudgetRowProps {
   onCloseDialog: () => void;
   onConfirm: () => void;
   onDismissError: () => void;
+}
+
+interface RenderBudgetRowsArgs {
+  modelIds: string[];
+  effectiveRows: Record<string, BudgetRowState>;
+  daily: Record<string, number>;
+  weekly: Record<string, number>;
+  updateRow: (id: string, patch: Partial<BudgetRowState>) => void;
+  handleConfirm: (id: string) => void;
 }
 
 function BudgetRow({
@@ -123,6 +134,43 @@ function BudgetRow({
   );
 }
 
+function renderBudgetRows({
+  modelIds,
+  effectiveRows,
+  daily,
+  weekly,
+  updateRow,
+  handleConfirm,
+}: RenderBudgetRowsArgs): JSX.Element[] {
+  return modelIds.map((id) => (
+    <BudgetRow
+      key={id}
+      id={id}
+      row={effectiveRows[id]}
+      currentDaily={daily[id]}
+      currentWeekly={weekly[id]}
+      onDailyChange={(v) => {
+        updateRow(id, { dailyInput: v });
+      }}
+      onWeeklyChange={(v) => {
+        updateRow(id, { weeklyInput: v });
+      }}
+      onOpenDialog={() => {
+        updateRow(id, { isDialogOpen: true });
+      }}
+      onCloseDialog={() => {
+        updateRow(id, { isDialogOpen: false });
+      }}
+      onConfirm={() => {
+        handleConfirm(id);
+      }}
+      onDismissError={() => {
+        updateRow(id, { error: null });
+      }}
+    />
+  ));
+}
+
 function buildInitialRows(
   modelIds: string[],
   daily: Record<string, number>,
@@ -132,6 +180,8 @@ function buildInitialRows(
     modelIds.map((id) => [
       id,
       {
+        serverDailyInput: Object.hasOwn(daily, id) ? String(daily[id]) : '',
+        serverWeeklyInput: Object.hasOwn(weekly, id) ? String(weekly[id]) : '',
         dailyInput: Object.hasOwn(daily, id) ? String(daily[id]) : '',
         weeklyInput: Object.hasOwn(weekly, id) ? String(weekly[id]) : '',
         isDialogOpen: false,
@@ -140,6 +190,24 @@ function buildInitialRows(
       },
     ]),
   );
+}
+
+function buildBudgetBaseline(
+  id: string,
+  daily: Record<string, number>,
+  weekly: Record<string, number>,
+): BudgetRowState {
+  const serverDailyInput = Object.hasOwn(daily, id) ? String(daily[id]) : '';
+  const serverWeeklyInput = Object.hasOwn(weekly, id) ? String(weekly[id]) : '';
+  return {
+    serverDailyInput,
+    serverWeeklyInput,
+    dailyInput: serverDailyInput,
+    weeklyInput: serverWeeklyInput,
+    isDialogOpen: false,
+    isLoading: false,
+    error: null,
+  };
 }
 
 interface ApplyBudgetArgs {
@@ -200,18 +268,31 @@ function syncBudgetRows(
   prev: Record<string, BudgetRowState>,
 ): Record<string, BudgetRowState> {
   return Object.fromEntries(
-    modelIds.map((id) => [
-      id,
-      Object.hasOwn(prev, id)
-        ? prev[id]
-        : {
-            dailyInput: Object.hasOwn(daily, id) ? String(daily[id]) : '',
-            weeklyInput: Object.hasOwn(weekly, id) ? String(weekly[id]) : '',
-            isDialogOpen: false,
-            isLoading: false,
-            error: null,
-          },
-    ]),
+    modelIds.map((id) => {
+      const nextDailyInput = Object.hasOwn(daily, id) ? String(daily[id]) : '';
+      const nextWeeklyInput = Object.hasOwn(weekly, id) ? String(weekly[id]) : '';
+      if (!Object.hasOwn(prev, id)) return [id, buildBudgetBaseline(id, daily, weekly)];
+      const existing = prev[id];
+      const isDirty =
+        existing.dailyInput !== existing.serverDailyInput ||
+        existing.weeklyInput !== existing.serverWeeklyInput;
+      return [
+        id,
+        {
+          ...existing,
+          serverDailyInput: nextDailyInput,
+          serverWeeklyInput: nextWeeklyInput,
+          dailyInput:
+            !existing.isDialogOpen && !existing.isLoading && !isDirty
+              ? nextDailyInput
+              : existing.dailyInput,
+          weeklyInput:
+            !existing.isDialogOpen && !existing.isLoading && !isDirty
+              ? nextWeeklyInput
+              : existing.weeklyInput,
+        },
+      ];
+    }),
   );
 }
 
@@ -229,22 +310,20 @@ export function BudgetsSection({
   const [rows, setRows] = useState<Record<string, BudgetRowState>>(() =>
     buildInitialRows(modelIds, daily, weekly),
   );
-
   const modelIdsKey = modelIds.join(',');
-
-  // Derive rows for all current model IDs without a render-phase setState.
-  // `modelIdsKey` proxies `modelIds` as a stable string; `rows` tracks user
-  // interaction state. `daily`/`weekly` change reference every render but are
-  // only needed when the model-ID set changes — already covered by `modelIdsKey`.
   const effectiveRows = useMemo(
     () => syncBudgetRows(modelIds, daily, weekly, rows),
-    [modelIdsKey, rows],
+    [daily, modelIdsKey, rows, weekly],
   );
-
-  const updateRow = useCallback((id: string, patch: Partial<BudgetRowState>) => {
-    setRows((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
-  }, []);
-
+  const updateRow = useCallback(
+    (id: string, patch: Partial<BudgetRowState>) => {
+      setRows((prev) => {
+        const baseline = prev[id] ?? buildBudgetBaseline(id, daily, weekly);
+        return { ...prev, [id]: { ...baseline, ...patch } };
+      });
+    },
+    [daily, weekly],
+  );
   const handleConfirm = useCallback(
     (id: string) => {
       void applyBudget({
@@ -259,7 +338,6 @@ export function BudgetsSection({
     },
     [effectiveRows, client, revision, onSuccess, onBudgetMutated, updateRow],
   );
-
   if (modelIds.length === 0) {
     return (
       <section aria-label="Budget configuration">
@@ -267,37 +345,10 @@ export function BudgetsSection({
       </section>
     );
   }
-
   return (
     <section aria-labelledby="budgets-section-heading">
       <h3 id="budgets-section-heading">Token Budgets</h3>
-      {modelIds.map((id) => (
-        <BudgetRow
-          key={id}
-          id={id}
-          row={effectiveRows[id]}
-          currentDaily={daily[id]}
-          currentWeekly={weekly[id]}
-          onDailyChange={(v) => {
-            updateRow(id, { dailyInput: v });
-          }}
-          onWeeklyChange={(v) => {
-            updateRow(id, { weeklyInput: v });
-          }}
-          onOpenDialog={() => {
-            updateRow(id, { isDialogOpen: true });
-          }}
-          onCloseDialog={() => {
-            updateRow(id, { isDialogOpen: false });
-          }}
-          onConfirm={() => {
-            handleConfirm(id);
-          }}
-          onDismissError={() => {
-            updateRow(id, { error: null });
-          }}
-        />
-      ))}
+      {renderBudgetRows({ modelIds, effectiveRows, daily, weekly, updateRow, handleConfirm })}
     </section>
   );
 }

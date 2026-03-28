@@ -36,6 +36,21 @@ function makeConfig(modelIds: string[]): SafeConfigView {
   } as SafeConfigView;
 }
 
+function makeConfigWithBudgets(
+  budgets: Record<string, { daily: number; weekly: number }>,
+): SafeConfigView {
+  const daily: Record<string, number> = {};
+  const weekly: Record<string, number> = {};
+  for (const [id, values] of Object.entries(budgets)) {
+    daily[id] = values.daily;
+    weekly[id] = values.weekly;
+  }
+  return {
+    routing: { mode: 'economy' },
+    usage: { dailyTokenBudget: daily, weeklyTokenBudget: weekly },
+  } as SafeConfigView;
+}
+
 describe('BudgetsSection — row sync', () => {
   it('adds a row when a new model ID appears after re-render', async () => {
     const client = makeMockClient();
@@ -107,5 +122,68 @@ describe('BudgetsSection — row sync', () => {
       );
     });
     expect(screen.queryByLabelText(/Budget for claude-opus/i)).toBeNull();
+  });
+
+  it('re-syncs a clean existing row when server budget values change without key changes', async () => {
+    const client = makeMockClient();
+    const onSuccess = vi.fn();
+    const onBudgetMutated = vi.fn();
+    const config1 = makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } });
+    const config2 = makeConfigWithBudgets({ 'gpt-4': { daily: 2000, weekly: 8000 } });
+
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => {
+      ({ rerender } = render(
+        <BudgetsSection
+          config={config1}
+          revision="r1"
+          client={client}
+          onSuccess={onSuccess}
+          onBudgetMutated={onBudgetMutated}
+        />,
+      ));
+    });
+
+    const initialDaily = screen.getByLabelText('Daily limit', {
+      selector: '#daily-gpt-4',
+    });
+    const initialWeekly = screen.getByLabelText('Weekly limit', {
+      selector: '#weekly-gpt-4',
+    });
+    if (
+      !(initialDaily instanceof HTMLInputElement) ||
+      !(initialWeekly instanceof HTMLInputElement)
+    ) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+    expect(initialDaily.value).toBe('1000');
+    expect(initialWeekly.value).toBe('5000');
+
+    await act(async () => {
+      rerender(
+        <BudgetsSection
+          config={config2}
+          revision="r2"
+          client={client}
+          onSuccess={onSuccess}
+          onBudgetMutated={onBudgetMutated}
+        />,
+      );
+    });
+
+    const refreshedDaily = screen.getByLabelText('Daily limit', {
+      selector: '#daily-gpt-4',
+    });
+    const refreshedWeekly = screen.getByLabelText('Weekly limit', {
+      selector: '#weekly-gpt-4',
+    });
+    if (
+      !(refreshedDaily instanceof HTMLInputElement) ||
+      !(refreshedWeekly instanceof HTMLInputElement)
+    ) {
+      throw new TypeError('Expected refreshed gpt-4 budget controls to be input elements');
+    }
+    expect(refreshedDaily.value).toBe('2000');
+    expect(refreshedWeekly.value).toBe('8000');
   });
 });

@@ -13,6 +13,7 @@ import { ConfirmDialog } from './confirm-dialog.tsx';
 const MODEL_TIERS: ModelTier[] = ['default', 'fast', 'cheap'];
 
 interface RowState {
+  serverTier: ModelTier;
   selectedTier: ModelTier;
   isDialogOpen: boolean;
   isLoading: boolean;
@@ -46,6 +47,14 @@ interface ModelRowProps {
   onOpen: () => void;
   onClose: () => void;
   onConfirm: () => void;
+}
+
+interface RenderModelRowsArgs {
+  agents: string[];
+  models: NonNullable<SafeConfigView['models']>;
+  effectiveRows: Record<string, RowState>;
+  updateRow: (agent: string, patch: Partial<RowState>) => void;
+  handleConfirm: (agent: string) => Promise<void>;
 }
 
 function ModelRow({
@@ -98,23 +107,69 @@ function ModelRow({
   );
 }
 
+function renderModelRows({
+  agents,
+  models,
+  effectiveRows,
+  updateRow,
+  handleConfirm,
+}: RenderModelRowsArgs): JSX.Element[] {
+  return agents.map((agent) => (
+    <ModelRow
+      key={agent}
+      agent={agent}
+      currentTier={resolveCurrentTier(models[agent])}
+      row={effectiveRows[agent]}
+      onTierChange={(tier) => {
+        updateRow(agent, { selectedTier: tier });
+      }}
+      onOpen={() => {
+        updateRow(agent, { isDialogOpen: true });
+      }}
+      onClose={() => {
+        updateRow(agent, { isDialogOpen: false });
+      }}
+      onConfirm={() => {
+        void handleConfirm(agent);
+      }}
+    />
+  ));
+}
+
 function buildModelRows(
   agents: string[],
   models: NonNullable<SafeConfigView['models']>,
   prev: Record<string, RowState>,
 ): Record<string, RowState> {
   return Object.fromEntries(
-    agents.map((a) => [
-      a,
-      Object.hasOwn(prev, a)
-        ? prev[a]
-        : {
-            selectedTier: resolveCurrentTier(models[a]),
+    agents.map((a) => {
+      const nextTier = resolveCurrentTier(models[a]);
+      if (!Object.hasOwn(prev, a)) {
+        return [
+          a,
+          {
+            serverTier: nextTier,
+            selectedTier: nextTier,
             isDialogOpen: false,
             isLoading: false,
             toast: null,
           },
-    ]),
+        ];
+      }
+      const existing = prev[a];
+      const isDirty = existing.selectedTier !== existing.serverTier;
+      return [
+        a,
+        {
+          ...existing,
+          serverTier: nextTier,
+          selectedTier:
+            !existing.isDialogOpen && !existing.isLoading && !isDirty
+              ? nextTier
+              : existing.selectedTier,
+        },
+      ];
+    }),
   );
 }
 
@@ -133,16 +188,16 @@ export function ModelsSection({
 
   const agentsKey = agents.join(',');
 
-  // Derive rows for all current agents without a render-phase setState.
-  // `agentsKey` proxies `agents` as a stable string; `rows` tracks user
-  // interaction state. `models` changes reference every render but is only
-  // needed when the agent set changes — already covered by `agentsKey`.
-  const effectiveRows = useMemo(() => buildModelRows(agents, models, rows), [agentsKey, rows]);
+  const effectiveRows = useMemo(
+    () => buildModelRows(agents, models, rows),
+    [agentsKey, models, rows],
+  );
 
   const updateRow = useCallback(
     (agent: string, patch: Partial<RowState>) => {
       setRows((prev) => {
         const baseline: RowState = prev[agent] ?? {
+          serverTier: resolveCurrentTier(models[agent] ?? { active: 'default' }),
           selectedTier: resolveCurrentTier(models[agent] ?? { active: 'default' }),
           isDialogOpen: false,
           isLoading: false,
@@ -185,26 +240,7 @@ export function ModelsSection({
   return (
     <section aria-labelledby="models-section-heading">
       <h3 id="models-section-heading">Model Tiers</h3>
-      {agents.map((agent) => (
-        <ModelRow
-          key={agent}
-          agent={agent}
-          currentTier={resolveCurrentTier(models[agent])}
-          row={effectiveRows[agent]}
-          onTierChange={(tier) => {
-            updateRow(agent, { selectedTier: tier });
-          }}
-          onOpen={() => {
-            updateRow(agent, { isDialogOpen: true });
-          }}
-          onClose={() => {
-            updateRow(agent, { isDialogOpen: false });
-          }}
-          onConfirm={() => {
-            void handleConfirm(agent);
-          }}
-        />
-      ))}
+      {renderModelRows({ agents, models, effectiveRows, updateRow, handleConfirm })}
     </section>
   );
 }

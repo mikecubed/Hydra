@@ -31,6 +31,16 @@ function makeConfig(agents: string[]): SafeConfigView {
   return { routing: { mode: 'economy' }, models } as SafeConfigView;
 }
 
+function makeConfigWithActive(
+  agents: Record<string, 'default' | 'fast' | 'cheap'>,
+): SafeConfigView {
+  const models: Record<string, { default: string; active?: string }> = {};
+  for (const [agent, active] of Object.entries(agents)) {
+    models[agent] = { default: `${agent}-model`, active };
+  }
+  return { routing: { mode: 'economy' }, models } as SafeConfigView;
+}
+
 describe('ModelsSection — row sync', () => {
   it('adds a row when a new agent appears after re-render', async () => {
     const client = makeMockClient();
@@ -115,5 +125,41 @@ describe('ModelsSection — row sync', () => {
 
     // The select should now reflect the new value (not crash or show undefined)
     expect(geminiSelect.value).toBe('fast');
+  });
+
+  it('re-syncs a clean existing row when the server tier changes without key changes', async () => {
+    const client = makeMockClient();
+    const onSuccess = vi.fn();
+    const config1 = makeConfigWithActive({ claude: 'default' });
+    const config2 = makeConfigWithActive({ claude: 'fast' });
+
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => {
+      ({ rerender } = render(
+        <ModelsSection config={config1} revision="r1" client={client} onSuccess={onSuccess} />,
+      ));
+    });
+
+    const initialSelect = screen.getByLabelText('Tier', {
+      selector: '#tier-select-claude',
+    });
+    if (!(initialSelect instanceof HTMLSelectElement)) {
+      throw new TypeError('Expected claude tier control to be a select element');
+    }
+    expect(initialSelect.value).toBe('default');
+
+    await act(async () => {
+      rerender(
+        <ModelsSection config={config2} revision="r2" client={client} onSuccess={onSuccess} />,
+      );
+    });
+
+    const refreshedSelect = screen.getByLabelText('Tier', {
+      selector: '#tier-select-claude',
+    });
+    if (!(refreshedSelect instanceof HTMLSelectElement)) {
+      throw new TypeError('Expected claude tier control to be a select element');
+    }
+    expect(refreshedSelect.value).toBe('fast');
   });
 });

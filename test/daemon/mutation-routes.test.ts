@@ -13,9 +13,11 @@ import {
   handleMutationRoute,
   computeConfigRevision,
   _clearAuditStoreForTest,
+  _resetAuditStoreCacheForTest,
   _injectAuditRecordsForTest,
   _clearWorkflowLaunchesForTest,
   _injectWorkflowLaunchForTest,
+  _setWorkflowTaskStatusResolverForTest,
   _hasForbiddenKeyForTest,
 } from '../../lib/daemon/mutation-routes.ts';
 import type { MutationAuditRecord } from '@hydra/web-contracts';
@@ -146,9 +148,11 @@ describe('mutation-routes', () => {
     tmpDir = tmpConfigDir();
     _clearAuditStoreForTest();
     _clearWorkflowLaunchesForTest();
+    _setWorkflowTaskStatusResolverForTest(null);
   });
 
   afterEach(() => {
+    _setWorkflowTaskStatusResolverForTest(null);
     cleanupDir(tmpDir);
   });
 
@@ -269,6 +273,27 @@ describe('mutation-routes', () => {
       const { status, body } = getResult();
       assert.equal(status, 400);
       assert.equal((body as Record<string, unknown>)['error'], 'Invalid request body');
+    });
+
+    it('returns 503 and preserves the file when config JSON is malformed', async () => {
+      const cfgPath = setupTestConfig(tmpDir);
+      fs.writeFileSync(cfgPath, '{"routing":', 'utf8');
+      invalidateConfigCache();
+
+      const req = fakeReq('POST', '/config/routing/mode', {
+        mode: 'economy',
+        expectedRevision: 'any-revision',
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/config/routing/mode');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 503);
+      assert.equal((body as Record<string, unknown>)['error'], 'daemon-unavailable');
+      assert.equal(fs.readFileSync(cfgPath, 'utf8'), '{"routing":');
     });
 
     it('concurrency: two simultaneous requests yield exactly one 200 and one 409', async () => {
@@ -587,6 +612,39 @@ describe('mutation-routes', () => {
       assert.equal(typeof (body as Record<string, unknown>)['taskId'], 'string');
     });
 
+    it('allows re-launch when the tracked task is already done', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      _injectWorkflowLaunchForTest({
+        taskId: 'completed-task-001',
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        launchedAt: new Date().toISOString(),
+        status: 'pending',
+      });
+      _setWorkflowTaskStatusResolverForTest((taskId) =>
+        taskId === 'completed-task-001' ? 'done' : null,
+      );
+
+      const req = fakeReq('POST', '/workflows/launch', {
+        workflow: 'tasks',
+        idempotencyKey: crypto.randomUUID(),
+        expectedRevision: revision,
+      });
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 202);
+      assert.equal(typeof (body as Record<string, unknown>)['taskId'], 'string');
+    });
+
     it('returns 400 for unknown workflow name', async () => {
       setupTestConfig(tmpDir);
       invalidateConfigCache();
@@ -689,6 +747,39 @@ describe('mutation-routes', () => {
       assert.equal(resp['totalCount'], 5);
     });
 
+    it('reloads persisted audit records after the in-memory cache is reset', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const mutateReq = fakeReq('POST', '/config/routing/mode', {
+        mode: 'economy',
+        expectedRevision: revision,
+      });
+      const { res: mutateRes } = fakeRes();
+      await handleMutationRoute(
+        mutateReq,
+        mutateRes,
+        new URL('http://localhost:4173/config/routing/mode'),
+      );
+
+      _resetAuditStoreCacheForTest();
+
+      const req = fakeReq('GET', '/audit');
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/audit');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 200);
+      const records = (body as Record<string, unknown>)['records'] as MutationAuditRecord[];
+      assert.equal(records.length, 1);
+      assert.equal(records[0]?.eventType, 'config.routing.mode.changed');
+    });
+
     it('returns next page of records with no overlap', async () => {
       setupTestConfig(tmpDir);
 
@@ -768,6 +859,40 @@ describe('mutation-routes', () => {
 
       assert.equal(page3Records.length, 1);
       assert.equal(page3['nextCursor'], null);
+    });
+
+    it('does not skip records when a page boundary splits identical timestamps', async () => {
+      setupTestConfig(tmpDir);
+
+      const timestamp = '2026-03-28T06:00:00.000Z';
+      _injectAuditRecordsForTest([
+        makeAuditRecord({ id: 'audit-c', timestamp }),
+        makeAuditRecord({ id: 'audit-b', timestamp }),
+        makeAuditRecord({ id: 'audit-a', timestamp }),
+      ]);
+
+      const { res: res1, getResult: get1 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', '/audit?limit=2'),
+        res1,
+        new URL('http://localhost:4173/audit?limit=2'),
+      );
+      const page1 = get1().body as Record<string, unknown>;
+      const page1Ids = (page1['records'] as MutationAuditRecord[]).map((record) => record.id);
+      const cursor = page1['nextCursor'] as string;
+
+      const { res: res2, getResult: get2 } = fakeRes();
+      await handleMutationRoute(
+        fakeReq('GET', `/audit?limit=2&cursor=${cursor}`),
+        res2,
+        new URL(`http://localhost:4173/audit?limit=2&cursor=${cursor}`),
+      );
+      const page2 = get2().body as Record<string, unknown>;
+      const page2Ids = (page2['records'] as MutationAuditRecord[]).map((record) => record.id);
+
+      assert.deepEqual([...page1Ids, ...page2Ids].sort(), ['audit-a', 'audit-b', 'audit-c']);
+      assert.equal(page2Ids.length, 1);
+      assert.ok(!page1Ids.includes(page2Ids[0] ?? ''));
     });
   });
 

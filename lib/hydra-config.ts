@@ -657,8 +657,7 @@ export function activeConfigPath(): string {
   return _testConfigPath ?? CONFIG_PATH;
 }
 
-export function loadHydraConfig(): HydraConfig {
-  if (_configCache !== null) return _configCache;
+function prepareConfigPath(): string {
   const cfgPath = activeConfigPath();
   if (_testConfigPath === null) {
     ensureRuntimeRoot();
@@ -670,19 +669,30 @@ export function loadHydraConfig(): HydraConfig {
       );
     }
   }
+  return cfgPath;
+}
+
+export function loadHydraConfigStrict(): HydraConfig {
+  if (_configCache !== null) return _configCache;
+  const cfgPath = prepareConfigPath();
+  const raw = fs.readFileSync(cfgPath, 'utf8');
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  // Migrate v1 → v2 if needed
+  if (
+    parsed['version'] === undefined ||
+    parsed['version'] === null ||
+    (parsed['version'] as number) < 2
+  ) {
+    migrateConfig(parsed);
+  }
+  _configCache = mergeWithDefaults(parsed);
+  return _configCache;
+}
+
+export function loadHydraConfig(): HydraConfig {
+  if (_configCache !== null) return _configCache;
   try {
-    const raw = fs.readFileSync(cfgPath, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // Migrate v1 → v2 if needed
-    if (
-      parsed['version'] === undefined ||
-      parsed['version'] === null ||
-      (parsed['version'] as number) < 2
-    ) {
-      migrateConfig(parsed);
-    }
-    _configCache = mergeWithDefaults(parsed);
-    return _configCache;
+    return loadHydraConfigStrict();
   } catch {
     _configCache = mergeWithDefaults({});
     return _configCache;

@@ -11,13 +11,13 @@ import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
 import {
-  loadHydraConfig,
+  loadHydraConfigStrict,
   saveHydraConfig,
   invalidateConfigCache,
   activeConfigPath,
-  HYDRA_RUNTIME_ROOT,
 } from '../hydra-config.ts';
 import { configMutex } from './mutation-lock.ts';
+import { readState } from './state.ts';
 // Type-only imports from @hydra/web-contracts — erased at compile time so the
 // daemon tarball stays self-contained (no runtime dep on the private workspace pkg).
 import type {
@@ -101,14 +101,43 @@ export function computeConfigRevision(config: {
 
 // ── Audit store ───────────────────────────────────────────────────────────────
 
-const AUDIT_FILE = path.join(HYDRA_RUNTIME_ROOT, 'mutation-audit.jsonl');
-
 const auditRecords: MutationAuditRecord[] = [];
+let loadedAuditPath: string | null = null;
+
+function activeAuditPath(): string {
+  return path.join(path.dirname(activeConfigPath()), 'mutation-audit.jsonl');
+}
+
+function readAuditFile(filePath: string): MutationAuditRecord[] {
+  if (!fs.existsSync(filePath)) return [];
+  const records: MutationAuditRecord[] = [];
+  for (const line of fs.readFileSync(filePath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    try {
+      records.push(JSON.parse(trimmed) as MutationAuditRecord);
+    } catch (err: unknown) {
+      process.stderr.write(
+        `${JSON.stringify({ level: 'warn', msg: 'skipping malformed audit record', filePath, err: String(err) })}\n`,
+      );
+    }
+  }
+  return records;
+}
+
+function ensureAuditStoreLoaded(): void {
+  const filePath = activeAuditPath();
+  if (loadedAuditPath === filePath) return;
+  auditRecords.length = 0;
+  auditRecords.push(...readAuditFile(filePath));
+  loadedAuditPath = filePath;
+}
 
 function appendAuditRecord(record: MutationAuditRecord): void {
+  ensureAuditStoreLoaded();
   auditRecords.push(record);
   try {
-    fs.appendFileSync(AUDIT_FILE, `${JSON.stringify(record)}\n`, 'utf8');
+    fs.appendFileSync(activeAuditPath(), `${JSON.stringify(record)}\n`, 'utf8');
   } catch {
     /* audit failure must not suppress 200 — R-2 */
   }
@@ -121,10 +150,20 @@ export interface WorkflowEntry {
   workflow: string;
   idempotencyKey: string;
   launchedAt: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 }
 
 const workflowLaunches: WorkflowEntry[] = [];
+const WORKFLOW_LAUNCH_GRACE_MS = 15_000;
+const TERMINAL_TASK_STATUSES = new Set(['done', 'failed', 'cancelled']);
+let workflowTaskStatusResolver: (taskId: string) => string | null = (taskId: string) => {
+  try {
+    const task = readState().tasks.find((entry) => entry.id === taskId);
+    return task?.status ?? null;
+  } catch {
+    return null;
+  }
+};
 
 const DESTRUCTIVE_WORKFLOWS = new Set(['evolve', 'nightly']);
 
@@ -155,6 +194,68 @@ function buildAuditRecord(
   };
 }
 
+function compareAuditRecordsDesc(a: MutationAuditRecord, b: MutationAuditRecord): number {
+  const timeDelta = new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  return timeDelta === 0 ? b.id.localeCompare(a.id) : timeDelta;
+}
+
+function encodeAuditCursor(record: MutationAuditRecord): string {
+  return Buffer.from(JSON.stringify({ timestamp: record.timestamp, id: record.id })).toString(
+    'base64url',
+  );
+}
+
+function decodeAuditCursor(cursor: string): { timestamp: string; id: string | null } {
+  const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+  try {
+    const parsed = JSON.parse(decoded) as { timestamp?: unknown; id?: unknown };
+    if (typeof parsed.timestamp === 'string') {
+      return { timestamp: parsed.timestamp, id: typeof parsed.id === 'string' ? parsed.id : null };
+    }
+  } catch {
+    // Backward compatibility for legacy timestamp-only cursors.
+  }
+  return { timestamp: decoded, id: null };
+}
+
+function logConfigReadError(err: unknown): void {
+  process.stderr.write(
+    `${JSON.stringify({ level: 'error', msg: 'config read failed', err: String(err) })}\n`,
+  );
+}
+
+function loadConfigStrictOrSendUnavailable(
+  res: ServerResponse,
+): ReturnType<typeof loadHydraConfigStrict> | null {
+  try {
+    invalidateConfigCache();
+    return loadHydraConfigStrict();
+  } catch (err: unknown) {
+    logConfigReadError(err);
+    sendError(res, 503, 'daemon-unavailable');
+    return null;
+  }
+}
+
+function isWorkflowEntryActive(entry: WorkflowEntry): boolean {
+  const taskStatus = workflowTaskStatusResolver(entry.taskId);
+  if (taskStatus === 'in_progress') {
+    entry.status = 'running';
+    return true;
+  }
+  if (taskStatus !== null) {
+    if (TERMINAL_TASK_STATUSES.has(taskStatus)) {
+      entry.status = taskStatus as WorkflowEntry['status'];
+      return false;
+    }
+    return true;
+  }
+  return (
+    (entry.status === 'pending' || entry.status === 'running') &&
+    Date.now() - new Date(entry.launchedAt).getTime() < WORKFLOW_LAUNCH_GRACE_MS
+  );
+}
+
 // ── Audit pagination ──────────────────────────────────────────────────────────
 
 function getAuditPage(
@@ -163,27 +264,38 @@ function getAuditPage(
   cursor: string | null,
 ): { records: MutationAuditRecord[]; nextCursor: string | null; totalCount: number } {
   // Reverse-chronological: newest records first
-  const sorted = [...records].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  );
+  const sorted = [...records].sort(compareAuditRecordsDesc);
   const totalCount = sorted.length;
 
   let startIdx = 0;
   if (cursor !== null) {
-    const cursorTs = Buffer.from(cursor, 'base64url').toString('utf8');
-    const cursorTime = new Date(cursorTs).getTime();
-    // Find first record strictly older than the cursor timestamp
-    startIdx = sorted.findIndex((r) => new Date(r.timestamp).getTime() < cursorTime);
+    const decodedCursor = decodeAuditCursor(cursor);
+    const exactIndex = sorted.findIndex(
+      (record) =>
+        record.timestamp === decodedCursor.timestamp &&
+        (decodedCursor.id === null || record.id === decodedCursor.id),
+    );
+    if (exactIndex === -1) {
+      const cursorTime = new Date(decodedCursor.timestamp).getTime();
+      startIdx = sorted.findIndex((record) => {
+        const recordTime = new Date(record.timestamp).getTime();
+        if (recordTime < cursorTime) return true;
+        return (
+          decodedCursor.id !== null &&
+          recordTime === cursorTime &&
+          record.id.localeCompare(decodedCursor.id) < 0
+        );
+      });
+    } else {
+      startIdx = exactIndex + 1;
+    }
     if (startIdx === -1) return { records: [], nextCursor: null, totalCount };
   }
 
   const page = sorted.slice(startIdx, startIdx + limit);
   const hasMore = startIdx + limit < sorted.length;
   const lastRecord = page.at(-1);
-  const nextCursor =
-    hasMore && lastRecord !== undefined
-      ? Buffer.from(lastRecord.timestamp).toString('base64url')
-      : null;
+  const nextCursor = hasMore && lastRecord !== undefined ? encodeAuditCursor(lastRecord) : null;
 
   return { records: page, nextCursor, totalCount };
 }
@@ -192,15 +304,11 @@ function getAuditPage(
 
 function handleGetConfigSafe(_req: IncomingMessage, res: ServerResponse): void {
   try {
-    // Raw file read detects missing/corrupt config — loadHydraConfig returns defaults on error
-    const raw = fs.readFileSync(activeConfigPath(), 'utf8');
-    JSON.parse(raw); // throws if corrupt
-    const config = loadHydraConfig();
+    invalidateConfigCache();
+    const config = loadHydraConfigStrict();
     sendJson(res, 200, { config: buildSafeView(config), revision: computeConfigRevision(config) });
   } catch (err: unknown) {
-    process.stderr.write(
-      `${JSON.stringify({ level: 'error', msg: 'config read failed', err: String(err) })}\n`,
-    );
+    logConfigReadError(err);
     sendError(res, 503, 'daemon-unavailable');
   }
 }
@@ -215,8 +323,8 @@ async function handlePostRoutingMode(req: IncomingMessage, res: ServerResponse):
 
   const release = await configMutex.acquire();
   try {
-    invalidateConfigCache();
-    const config = loadHydraConfig();
+    const config = loadConfigStrictOrSendUnavailable(res);
+    if (config === null) return;
     const currentRevision = computeConfigRevision(config);
     if (parsed.data.expectedRevision !== currentRevision) {
       sendJson(res, 409, { error: 'stale-revision' });
@@ -265,8 +373,8 @@ async function handlePostModelActive(
 
   const release = await configMutex.acquire();
   try {
-    invalidateConfigCache();
-    const config = loadHydraConfig();
+    const config = loadConfigStrictOrSendUnavailable(res);
+    if (config === null) return;
     const modelsConfig = config.models as Record<string, Record<string, unknown>> | undefined;
     if (!modelsConfig || !Object.prototype.hasOwnProperty.call(modelsConfig, agent)) {
       sendError(res, 400, `Unknown or ineligible agent: ${agent}`);
@@ -348,8 +456,8 @@ async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse):
 
   const release = await configMutex.acquire();
   try {
-    invalidateConfigCache();
-    const config = loadHydraConfig();
+    const config = loadConfigStrictOrSendUnavailable(res);
+    if (config === null) return;
     const usage = config.usage as UsageBudgetShape;
     const { modelId, dailyLimit, weeklyLimit } = parsed.data;
 
@@ -426,18 +534,17 @@ async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerRespons
       return;
     }
 
-    invalidateConfigCache();
-    const config = loadHydraConfig();
+    const config = loadConfigStrictOrSendUnavailable(res);
+    if (config === null) return;
 
-    // Conflict: block concurrent same-workflow launches. Uses a 5-minute window so
-    // stale 'pending' entries (whose lifecycle wasn't explicitly completed) expire
-    // and allow re-launching without a daemon restart.
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+    // Conflict: consult real daemon task state when available. For launches that
+    // are not yet materialized as daemon tasks, retain only a short grace window
+    // to suppress accidental double-submits without blocking for minutes.
     const conflict = workflowLaunches.find(
       (e) =>
         e.workflow === workflow &&
         (e.status === 'running' || e.status === 'pending') &&
-        e.launchedAt >= fiveMinutesAgo,
+        isWorkflowEntryActive(e),
     );
     if (conflict) {
       sendJson(res, 409, { error: 'workflow-conflict', taskId: conflict.taskId });
@@ -478,6 +585,7 @@ async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerRespons
 }
 
 function handleGetAudit(res: ServerResponse, url: URL): void {
+  ensureAuditStoreLoaded();
   const limitParam = url.searchParams.get('limit');
   const cursor = url.searchParams.get('cursor');
   const parsed =
@@ -532,10 +640,18 @@ export async function handleMutationRoute(
 /** Clear the in-memory audit store. Test use only. */
 export function _clearAuditStoreForTest(): void {
   auditRecords.length = 0;
+  loadedAuditPath = null;
+}
+
+/** Reset the audit cache without deleting the persisted file. Test use only. */
+export function _resetAuditStoreCacheForTest(): void {
+  auditRecords.length = 0;
+  loadedAuditPath = null;
 }
 
 /** Inject records into the in-memory audit store. Test use only. */
 export function _injectAuditRecordsForTest(records: MutationAuditRecord[]): void {
+  loadedAuditPath = activeAuditPath();
   auditRecords.push(...records);
 }
 
@@ -547,6 +663,22 @@ export function _clearWorkflowLaunchesForTest(): void {
 /** Inject a workflow launch entry (e.g. to simulate a running workflow). Test use only. */
 export function _injectWorkflowLaunchForTest(entry: WorkflowEntry): void {
   workflowLaunches.push(entry);
+}
+
+/** Override workflow task status resolution for tests. */
+export function _setWorkflowTaskStatusResolverForTest(
+  resolver: ((taskId: string) => string | null) | null,
+): void {
+  workflowTaskStatusResolver =
+    resolver ??
+    ((taskId: string) => {
+      try {
+        const task = readState().tasks.find((entry) => entry.id === taskId);
+        return task?.status ?? null;
+      } catch {
+        return null;
+      }
+    });
 }
 
 /** Expose hasForbiddenKey for unit testing. Not part of the public API. */
