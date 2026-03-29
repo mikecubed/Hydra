@@ -6,7 +6,7 @@
 
 - [ ] T001 Create the Phase 5 readiness matrix in .sdd/web-hardening-packaging-v7n2k4q9/tasks.md
 - [ ] T002 Define the supported packaging target matrix in README.md and docs/WEB_INTERFACE.md
-- [ ] T003 Define explicit responsiveness and hardening budgets in docs/web-interface/05-security-and-quality.md
+- [x] T003 Define explicit responsiveness and hardening budgets in docs/web-interface/05-security-and-quality.md
 
 ## Phase 1 — User Story 1: Packaged Web Operator Experience (Priority: P1)
 
