@@ -157,9 +157,12 @@
     "typescript-eslint": "^8.57.0"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "cross-spawn": "^7.0.6",
+    "hono": "^4.12.8",
     "picocolors": "^1.1.1",
+    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "overrides": {

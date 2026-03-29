@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -221,14 +221,10 @@ describe('packaging', { timeout: 120_000 }, () => {
     assert.ok(content.length > 0, 'dist/web-runtime/server.js is empty');
   });
 
-  it('bundled gateway entry is ESM', () => {
+  it('bundled gateway entry remains an ESM artifact', () => {
     const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
     const content = fs.readFileSync(serverJs, 'utf8');
-    // ESM bundles produced by esbuild contain import statements for node builtins
-    assert.ok(
-      /\bimport\b/.test(content) || /\bexport\b/.test(content),
-      'dist/web-runtime/server.js should be ESM (expected import/export statements)',
-    );
+    assert.ok(/\bimport\b/.test(content) || /\bexport\b/.test(content));
   });
 
   it('bundled gateway sets default HYDRA_WEB_STATIC_DIR for packaged layout', () => {
@@ -252,6 +248,48 @@ describe('packaging', { timeout: 120_000 }, () => {
   it('tarball contains the packaged runtime marker', () => {
     const marker = path.join(hydraPkgDir, 'dist', 'web-runtime', '.packaged');
     assert.ok(fs.existsSync(marker), 'dist/web-runtime/.packaged missing from tarball');
+  });
+
+  it('bundled gateway entry is runnable', async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-state-'));
+    const port = String(45_000 + Math.floor(Math.random() * 1000));
+    const child = spawn(process.execPath, ['dist/web-runtime/server.js'], {
+      cwd: hydraPkgDir,
+      env: {
+        ...process.env,
+        HYDRA_WEB_GATEWAY_PORT: port,
+        HYDRA_WEB_STATE_DIR: stateDir,
+        HYDRA_DAEMON_URL: 'http://127.0.0.1:9',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`Timed out waiting for startup. Output: ${output}`));
+        }, 10_000);
+        child.stdout.on('data', (chunk) => {
+          output += chunk.toString();
+          if (output.includes('Hydra web gateway listening on')) {
+            clearTimeout(timer);
+            resolve(undefined);
+          }
+        });
+        child.stderr.on('data', (chunk) => {
+          output += chunk.toString();
+        });
+        child.once('exit', (code) => {
+          clearTimeout(timer);
+          reject(new Error(`Packaged server exited early with code ${String(code)}. Output: ${output}`));
+        });
+      });
+    } finally {
+      child.kill('SIGTERM');
+      await new Promise((resolve) => child.once('exit', () => resolve(undefined)));
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it('tarball includes dist/web-runtime/ in package.json files', () => {

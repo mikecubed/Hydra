@@ -29,8 +29,9 @@ const PKG_PATH = path.join(ROOT, 'package.json');
 const PKG_BACKUP = path.join(ROOT, '.package.json.bak');
 const WEB_RUNTIME_DIR = path.join(ROOT, 'dist', 'web-runtime');
 const GATEWAY_ENTRY = path.join(ROOT, 'apps', 'web-gateway', 'src', 'server.ts');
-const WEB_DIST = path.join(ROOT, 'apps', 'web', 'dist');
+const WEB_RUNTIME_WEB_DIR = path.join(WEB_RUNTIME_DIR, 'web');
 const PACKAGED_MARKER = '.packaged';
+const WEB_RUNTIME_EXTERNALS = ['@hono/node-server', 'hono', 'ws'];
 
 const emitted: string[] = [];
 
@@ -76,8 +77,6 @@ function fail(message: string): never {
 }
 
 try {
-  // ── Step 1: Compile ────────────────────────────────────────────────────────
-
   console.log('[prepack] Compiling TypeScript for packaging…');
 
   const tsc = spawnSync(
@@ -90,17 +89,11 @@ try {
     fail('tsc compilation failed.');
   }
 
-  // ── Step 2: Collect emitted files ──────────────────────────────────────────
-
   collectJsFiles(path.join(ROOT, 'lib'));
   collectJsFiles(path.join(ROOT, 'bin'));
-
   console.log(`[prepack] Emitted ${String(emitted.length)} .js files.`);
 
-  // ── Step 3: Post-process string-literal .ts references ─────────────────────
-
   const TS_EXT_IN_STRING = /\.ts(?=['"`])/g;
-
   let patchCount = 0;
   for (const rel of emitted) {
     const abs = path.join(ROOT, rel);
@@ -111,28 +104,21 @@ try {
       patchCount += 1;
     }
   }
-
   console.log(`[prepack] Patched string literals in ${String(patchCount)} files.`);
-
-  // ── Step 4: Write cleanup manifest ─────────────────────────────────────────
 
   fs.writeFileSync(MANIFEST_PATH, `${emitted.join('\n')}\n`);
   console.log(`[prepack] Manifest written to .packfiles (${String(emitted.length)} entries).`);
 
-  // ── Step 5: Bundle web runtime ─────────────────────────────────────────────
-
   if (fs.existsSync(GATEWAY_ENTRY)) {
-    console.log('[prepack] Building web runtime…');
-
-    const serverOut = path.join(WEB_RUNTIME_DIR, 'server.js');
+    console.log('[prepack] Building packaged web runtime…');
     fs.mkdirSync(WEB_RUNTIME_DIR, { recursive: true });
 
+    const serverOut = path.join(WEB_RUNTIME_DIR, 'server.js');
     const esbuildBanner = [
       'import { dirname as __pkgDir } from "node:path";',
       'import { fileURLToPath as __pkgUrl } from "node:url";',
       'process.env.HYDRA_WEB_STATIC_DIR ??= __pkgDir(__pkgUrl(import.meta.url)) + "/web";',
     ].join('\n');
-
     const { build } = await import('esbuild');
     await build({
       entryPoints: [GATEWAY_ENTRY],
@@ -144,39 +130,35 @@ try {
       legalComments: 'none',
       sourcemap: false,
       banner: { js: esbuildBanner },
+      external: WEB_RUNTIME_EXTERNALS,
     });
-
     console.log('[prepack] Bundled gateway entry → dist/web-runtime/server.js');
 
-    if (!fs.existsSync(WEB_DIST)) {
-      console.log('[prepack] apps/web/dist/ not found — building web workspace…');
-      const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
-      if (!fs.existsSync(viteBin)) {
-        fail('vite not found — cannot build apps/web/. Run `npm install` first.');
-      }
-      const webBuild = spawnSync(process.execPath, [viteBin, 'build'], {
+    const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+    if (!fs.existsSync(viteBin)) {
+      fail('vite not found — cannot build apps/web/. Run `npm install` first.');
+    }
+    const webBuild = spawnSync(
+      process.execPath,
+      [viteBin, 'build', '--outDir', WEB_RUNTIME_WEB_DIR],
+      {
         cwd: path.join(ROOT, 'apps', 'web'),
         stdio: 'inherit',
-      });
-      if (webBuild.status !== 0) {
-        fail('Web workspace build failed (vite build exited non-zero).');
-      }
-      if (!fs.existsSync(WEB_DIST)) {
-        fail('apps/web/dist/ is still missing after the web build completed.');
-      }
+      },
+    );
+    if (webBuild.status !== 0) {
+      fail('Web workspace build failed (vite build exited non-zero).');
+    }
+    if (!fs.existsSync(path.join(WEB_RUNTIME_WEB_DIR, 'index.html'))) {
+      fail('dist/web-runtime/web/index.html is missing after the packaging web build.');
     }
 
-    const webAssetsDest = path.join(WEB_RUNTIME_DIR, 'web');
-    fs.cpSync(WEB_DIST, webAssetsDest, { recursive: true });
     fs.writeFileSync(path.join(WEB_RUNTIME_DIR, PACKAGED_MARKER), 'packaged\n');
-    console.log('[prepack] Copied browser assets → dist/web-runtime/web/');
+    console.log('[prepack] Built browser assets → dist/web-runtime/web/');
     console.log('[prepack] Wrote packaged runtime marker.');
-    console.log('[prepack] Web runtime ready.');
   } else {
     console.log('[prepack] apps/web-gateway not found — skipping web runtime build.');
   }
-
-  // ── Step 6: Patch package.json for published artifact ──────────────────────
 
   console.log('[prepack] Patching package.json for published artifact…');
   fs.copyFileSync(PKG_PATH, PKG_BACKUP);
