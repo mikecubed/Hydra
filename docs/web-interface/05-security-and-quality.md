@@ -140,7 +140,7 @@ regressions from going unnoticed between phases.
 | Unnecessary rerenders per update  | ≤ 3 render cycles per single state change     | Browser spec profiling assertions (🔮 T021–T025) |
 | Visible DOM node count            | ≤ 2 000 nodes on any primary surface          | Browser spec DOM measurement (🔮 T021–T025)      |
 | Pending request queue             | ≤ 10 concurrent in-flight daemon requests     | Gateway integration test assertions (✅)         |
-| Error retry storms                | Max 3 automatic retries, then surface failure | Gateway and browser spec assertions (✅)         |
+| Error retry storms                | Capped per subsystem: stream reconnect ≤ 10 attempts (1–30 s backoff), approval hydration ≤ 3 retries; all surface failure on exhaustion | Gateway and browser spec assertions (✅) |
 
 ### Failure-mode guardrails
 
@@ -149,7 +149,7 @@ regressions from going unnoticed between phases.
 | Daemon unreachable             | Visible degraded banner within 5 s; no silent retry loop   |
 | Session expired                | Redirect to login within 2 s; no stale-state flash         |
 | Mutation rejected              | Error shown in-place; no false success indication          |
-| WebSocket dropped              | Reconnect attempt within 3 s; exponential backoff capped at 30 s |
+| WebSocket dropped              | ≤ 10 reconnect attempts; exponential backoff 1–30 s, then surface disconnected state |
 | Gateway startup without assets | Clear unsupported-state message; no blank page              |
 
 ### Evidence expectations
