@@ -35,11 +35,18 @@ export function selectActiveDraft(state: WorkspaceState): ComposerDraftState | u
   return getActiveDraft(state);
 }
 
+/** Last-call cache for {@link selectActiveEntries}. */
+let _entriesLastRaw: readonly TranscriptEntryState[] | null = null;
+let _entriesLastResult: readonly TranscriptEntryState[] = EMPTY_ENTRIES;
+
 /** Transcript entries for the active conversation, deduplicated as a safety net. */
 export function selectActiveEntries(state: WorkspaceState): readonly TranscriptEntryState[] {
   const conversation = selectActiveConversation(state);
   const raw = conversation?.entries ?? EMPTY_ENTRIES;
   if (raw.length <= 1) return raw;
+
+  // Skip the scan entirely when the input array reference is unchanged.
+  if (raw === _entriesLastRaw) return _entriesLastResult;
 
   // Fast path: scan for duplicate turnIds or entryIds before allocating
   const seenTurnIds = new Set<string>();
@@ -60,7 +67,9 @@ export function selectActiveEntries(state: WorkspaceState): readonly TranscriptE
     seenEntryIds.add(entry.entryId);
   }
 
-  return hasDuplicates ? deduplicateEntries(raw) : raw;
+  _entriesLastRaw = raw;
+  _entriesLastResult = hasDuplicates ? deduplicateEntries(raw) : raw;
+  return _entriesLastResult;
 }
 
 /** Load state of the active conversation, or `null` when nothing is active. */
@@ -106,13 +115,31 @@ export function selectCreateModeCanSubmit(
   return createDraftText.trim().length > 0 && !createSubmitting && createError == null;
 }
 
+/** Last-call cache for {@link selectPendingPrompts}. */
+let _pendingLastEntries: readonly TranscriptEntryState[] | null = null;
+let _pendingLastResult: readonly PromptViewState[] = [];
+
 /** Pending prompts from the active conversation's entries. */
 export function selectPendingPrompts(state: WorkspaceState): readonly PromptViewState[] {
-  return filterPendingPrompts(selectActiveEntries(state));
+  const entries = selectActiveEntries(state);
+  if (entries === _pendingLastEntries) return _pendingLastResult;
+
+  _pendingLastEntries = entries;
+  _pendingLastResult = filterPendingPrompts(entries);
+  return _pendingLastResult;
 }
+
+/** Last-call cache for {@link selectConversationList}. */
+let _convListLastOrder: readonly string[] | null = null;
+let _convListLastMap: ReadonlyMap<string, ConversationViewState> | null = null;
+let _convListLastResult: readonly ConversationViewState[] = [];
 
 /** Ordered list of conversation view states matching `conversationOrder`. */
 export function selectConversationList(state: WorkspaceState): readonly ConversationViewState[] {
+  if (state.conversationOrder === _convListLastOrder && state.conversations === _convListLastMap) {
+    return _convListLastResult;
+  }
+
   const result: ConversationViewState[] = [];
   for (const id of state.conversationOrder) {
     const conv = state.conversations.get(id);
@@ -120,6 +147,10 @@ export function selectConversationList(state: WorkspaceState): readonly Conversa
       result.push(conv);
     }
   }
+
+  _convListLastOrder = state.conversationOrder;
+  _convListLastMap = state.conversations;
+  _convListLastResult = result;
   return result;
 }
 
@@ -320,6 +351,11 @@ export function selectEntryActionFlags(state: WorkspaceState, turnId: string): E
 
 // ─── Whole-transcript precompute ────────────────────────────────────────────
 
+/** Last-call cache for {@link precomputeTranscriptActions}. */
+let _precomputeLastEntries: readonly TranscriptEntryState[] | null = null;
+let _precomputeLastStale: boolean | null = null;
+let _precomputeLastResult: ReadonlyMap<string, EntryActionFlags> = new Map();
+
 /**
  * Precompute action flags for every turn in the active transcript in a single
  * O(N) pass. Returns a Map keyed by turnId.
@@ -336,6 +372,10 @@ export function precomputeTranscriptActions(
   if (resolved.length === 0) return new Map();
 
   const stale = isConversationStale(state);
+
+  if (resolved === _precomputeLastEntries && stale === _precomputeLastStale) {
+    return _precomputeLastResult;
+  }
 
   // Single pass to find the last completed turn (needed for canFollowUp).
   let lastCompletedTurnId: string | null = null;
@@ -354,6 +394,9 @@ export function precomputeTranscriptActions(
     result.set(entry.turnId, computeEntryActionFlags(entry, stale, lastCompletedTurnId));
   }
 
+  _precomputeLastEntries = resolved;
+  _precomputeLastStale = stale;
+  _precomputeLastResult = result;
   return result;
 }
 
@@ -381,6 +424,11 @@ export interface TranscriptSummary {
   readonly oldestVisibleTimestamp: string | null;
 }
 
+/** Last-call cache for {@link selectRecentEntries}. */
+let _recentLastEntries: readonly TranscriptEntryState[] | null = null;
+let _recentLastMax: number = -1;
+let _recentLastResult: readonly TranscriptEntryState[] = EMPTY_ENTRIES;
+
 /**
  * Return only the most-recent `maxVisible` entries from the active transcript.
  *
@@ -394,8 +442,22 @@ export function selectRecentEntries(
 ): readonly TranscriptEntryState[] {
   const entries = selectActiveEntries(state);
   if (entries.length <= maxVisible) return entries;
-  return entries.slice(entries.length - maxVisible);
+
+  if (entries === _recentLastEntries && maxVisible === _recentLastMax) {
+    return _recentLastResult;
+  }
+
+  _recentLastEntries = entries;
+  _recentLastMax = maxVisible;
+  _recentLastResult = entries.slice(entries.length - maxVisible);
+  return _recentLastResult;
 }
+
+/** Last-call cache for {@link selectTranscriptSummary}. */
+let _summaryLastEntries: readonly TranscriptEntryState[] | null = null;
+let _summaryLastHasMore: boolean | null = null;
+let _summaryLastMax: number = -1;
+let _summaryLastResult: TranscriptSummary | null = null;
 
 /**
  * Derive a {@link TranscriptSummary} for the active conversation.
@@ -412,6 +474,15 @@ export function selectTranscriptSummary(
   const conversation = selectActiveConversation(state);
   const hasMoreHistory = conversation?.hasMoreHistory ?? false;
 
+  if (
+    allEntries === _summaryLastEntries &&
+    hasMoreHistory === _summaryLastHasMore &&
+    maxVisible === _summaryLastMax &&
+    _summaryLastResult !== null
+  ) {
+    return _summaryLastResult;
+  }
+
   const totalLoaded = allEntries.length;
   const visibleCount = Math.min(totalLoaded, maxVisible);
   const hiddenCount = totalLoaded - visibleCount;
@@ -420,11 +491,17 @@ export function selectTranscriptSummary(
     totalLoaded <= maxVisible ? allEntries : allEntries.slice(totalLoaded - maxVisible);
   const oldestVisibleTimestamp = visible.length > 0 ? (visible[0].timestamp ?? null) : null;
 
-  return {
+  const result: TranscriptSummary = {
     visibleCount,
     totalLoaded,
     hiddenCount,
     hasMoreHistory,
     oldestVisibleTimestamp,
   };
+
+  _summaryLastEntries = allEntries;
+  _summaryLastHasMore = hasMoreHistory;
+  _summaryLastMax = maxVisible;
+  _summaryLastResult = result;
+  return result;
 }

@@ -18,6 +18,7 @@ import {
   selectVisibleArtifact,
   selectCanSubmit,
   selectCreateModeCanSubmit,
+  selectPendingPrompts,
   selectConversationList,
   selectIsHistoryLoaded,
   selectConversationLineage,
@@ -1638,5 +1639,151 @@ describe('NO_ACTION_FLAGS', () => {
       canBranch: false,
       canFollowUp: false,
     });
+  });
+});
+
+// ─── Reference stability ────────────────────────────────────────────────────
+//
+// Selectors that return derived arrays or objects must return the same
+// reference when the underlying state has not changed, so that React's
+// shallow-equality bailouts work and components avoid unnecessary rerenders.
+
+describe('reference stability — selectActiveEntries', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e-1', turnId: 't-1' }),
+        createEntry({ entryId: 'e-2', turnId: 't-2' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const first = selectActiveEntries(state);
+    const second = selectActiveEntries(state);
+    assert.equal(first, second, 'expected same array reference on second call');
+  });
+
+  it('returns a new reference when entries change', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e-1', turnId: 't-1' })],
+      hasMoreHistory: false,
+    });
+
+    const first = selectActiveEntries(state);
+
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e-1', turnId: 't-1' }),
+        createEntry({ entryId: 'e-2', turnId: 't-2' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const second = selectActiveEntries(state);
+    assert.notEqual(first, second, 'expected different reference after state change');
+  });
+});
+
+describe('reference stability — selectConversationList', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-2',
+    });
+
+    const first = selectConversationList(state);
+    const second = selectConversationList(state);
+    assert.equal(first, second, 'expected same array reference on second call');
+  });
+
+  it('returns a new reference when conversation order changes', () => {
+    const state1 = stateWithConversation('conv-1');
+    const first = selectConversationList(state1);
+
+    const state2 = reduceWorkspaceState(state1, {
+      type: 'conversation/select',
+      conversationId: 'conv-2',
+    });
+    const second = selectConversationList(state2);
+    assert.notEqual(first, second, 'expected different reference after order change');
+  });
+});
+
+describe('reference stability — selectPendingPrompts', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e-1', turnId: 't-1', status: 'completed' })],
+      hasMoreHistory: false,
+    });
+
+    const first = selectPendingPrompts(state);
+    const second = selectPendingPrompts(state);
+    assert.equal(first, second, 'expected same array reference on second call');
+  });
+});
+
+describe('reference stability — precomputeTranscriptActions', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [
+        createEntry({ entryId: 'e-1', turnId: 't-1', status: 'completed' }),
+        createEntry({ entryId: 'e-2', turnId: 't-2', status: 'streaming' }),
+      ],
+      hasMoreHistory: false,
+    });
+
+    const first = precomputeTranscriptActions(state);
+    const second = precomputeTranscriptActions(state);
+    assert.equal(first, second, 'expected same Map reference on second call');
+  });
+});
+
+describe('reference stability — selectRecentEntries', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    let state = stateWithConversation('conv-1');
+    const entries = Array.from({ length: 80 }, (_, i) =>
+      createEntry({ entryId: `e-${i}`, turnId: `t-${i}` }),
+    );
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries,
+      hasMoreHistory: false,
+    });
+
+    const first = selectRecentEntries(state, 10);
+    const second = selectRecentEntries(state, 10);
+    assert.equal(first, second, 'expected same array reference on second call');
+  });
+});
+
+describe('reference stability — selectTranscriptSummary', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    let state = stateWithConversation('conv-1');
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/replace-entries',
+      conversationId: 'conv-1',
+      entries: [createEntry({ entryId: 'e-1', turnId: 't-1' })],
+      hasMoreHistory: false,
+    });
+
+    const first = selectTranscriptSummary(state);
+    const second = selectTranscriptSummary(state);
+    assert.equal(first, second, 'expected same object reference on second call');
   });
 });

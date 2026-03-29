@@ -153,6 +153,14 @@ export function WorkspaceOperationsPanel({
   const hasPendingControl =
     selectedWorkItemId !== null && selectHasPendingControl(state, selectedWorkItemId);
 
+  // Stable callback: identity changes only when the pendingByWorkItem Map changes,
+  // not on every render.
+  const pendingByWorkItem = state.controls.pendingByWorkItem;
+  const hasPendingControlForItem = useCallback(
+    (workItemId: string) => pendingByWorkItem.has(workItemId),
+    [pendingByWorkItem],
+  );
+
   const controlStripSlot =
     selectedWorkItemId === null || controls.length === 0 ? undefined : (
       <ControlStrip
@@ -209,7 +217,7 @@ export function WorkspaceOperationsPanel({
         availability={selectAvailability(state)}
         selectedWorkItemId={selectedWorkItemId}
         onSelectItem={handleSelectItem}
-        hasPendingControl={(workItemId) => selectHasPendingControl(state, workItemId)}
+        hasPendingControl={hasPendingControlForItem}
       />
     </OperationsPanelShell>
   );
