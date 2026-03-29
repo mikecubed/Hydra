@@ -62,7 +62,7 @@ sentinel marker. The browser assets are built from `apps/web` during `prepack`.
    ```bash
    HYDRA_WEB_OPERATOR_ID=admin \
    HYDRA_WEB_OPERATOR_SECRET=password123 \
-   node dist/web-runtime/server.js
+   node node_modules/hydra/dist/web-runtime/server.js
    ```
 
 3. Open `http://127.0.0.1:4174/login` in your browser, enter your credentials, and the workspace
@@ -113,7 +113,7 @@ HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
 HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
 HYDRA_WEB_OPERATOR_ID=admin \
 HYDRA_WEB_OPERATOR_SECRET=password123 \
-node dist/web-runtime/server.js
+node node_modules/hydra/dist/web-runtime/server.js
 ```
 
 After the gateway starts, log in from any browser on the network:
@@ -304,6 +304,88 @@ transport modules.
 | Pending inbound WS messages per connection        | `64`                | `transport/ws-server.ts`          | Internal queue-depth guard.                                                                             |
 | Pending replay events per connection/conversation | `1000`              | `transport/event-forwarder.ts`    | Internal replay-backlog guard.                                                                          |
 | Daemon replay concurrency                         | `8`                 | `transport/ws-message-handler.ts` | Internal upper bound for concurrent per-turn replay fetches.                                            |
+
+## Verification Checklist
+
+Use this checklist to confirm the gateway is working end-to-end before a release or after
+significant changes. Every item uses commands that exist today. This section is the reference for
+T030 final verification.
+
+### Gateway tests
+
+- [ ] Gateway test suite passes:
+  ```bash
+  npm --workspace @hydra/web-gateway run test
+  ```
+
+### Source-checkout startup
+
+- [ ] Start the daemon (`npm start`), then the gateway with web build:
+  ```bash
+  HYDRA_WEB_OPERATOR_ID=admin \
+  HYDRA_WEB_OPERATOR_SECRET=password123 \
+  npm --workspace @hydra/web-gateway run start:with-web
+  ```
+- [ ] Gateway starts on `http://127.0.0.1:4174` without errors.
+- [ ] `GET /session/info` returns 401 before login (no session cookie).
+- [ ] `POST /auth/login` with seeded credentials sets `__session` and `__csrf` cookies.
+- [ ] `GET /session/info` returns a valid `SessionInfo` after login.
+- [ ] WebSocket connection at `/ws` upgrades successfully with a valid session.
+- [ ] Static assets at `/` serve the built browser bundle from `apps/web/dist`.
+
+### Packaged npm runtime
+
+- [ ] Package evidence passes (dry-run pack + tarball checks):
+  ```bash
+  npm run package:evidence
+  ```
+- [ ] Generate an installable tarball for the manual smoke test (the source checkout is cleaned
+      after `npm pack`):
+  ```bash
+  npm pack
+  ```
+- [ ] Manual packaged-runtime smoke tests run from an installed package (for example a temporary
+      `npm install ./hydra-*.tgz` in a scratch directory).
+- [ ] `node_modules/hydra/dist/web-runtime/server.js` starts and automatically resolves static
+      assets from `node_modules/hydra/dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override
+      needed.
+  ```bash
+  node node_modules/hydra/dist/web-runtime/server.js
+  ```
+- [ ] Login and session lifecycle behave identically to the source-checkout path.
+
+### Standalone executable (CLI-only)
+
+- [ ] Confirm that standalone exe builds (`npm run build:exe`) do **not** include web runtime
+      assets. The exe is CLI-only; `hydra --full` is not supported for exe builds.
+
+### Security and rate limiting
+
+- [ ] Origin validation rejects requests with a mismatched `Origin` header.
+- [ ] Auth rate limiter blocks after 5 failed login attempts within 60 seconds (300 s lockout).
+- [ ] Mutating rate limiter caps non-safe HTTP methods at 30 requests per 60 seconds per source.
+- [ ] CSRF double-submit check rejects `POST /auth/logout` and `POST /auth/reauth` without a
+      valid `x-csrf-token` header.
+
+### Session lifecycle
+
+- [ ] Session expiry warning fires at the configured threshold (default: 15 min before expiry).
+- [ ] `POST /auth/reauth` extends session and broadcasts a `state-change` WebSocket event.
+- [ ] Session extension respects `maxExtensions` limit (default: 3).
+- [ ] `POST /auth/logout` invalidates `__session` and `__csrf` cookies.
+- [ ] Gateway emits `daemon-unreachable` state when the daemon is stopped, and `daemon-restored`
+      when it returns.
+
+### Remote host
+
+- [ ] Setting `HYDRA_WEB_GATEWAY_HOST=0.0.0.0` binds to all interfaces.
+- [ ] Setting `HYDRA_WEB_GATEWAY_ORIGIN` to the public URL passes origin validation for remote
+      browsers.
+
+### Daemon connectivity
+
+- [ ] Heartbeat probe detects daemon unavailability within `intervalMs` (default: 10 s).
+- [ ] Conversation HTTP client returns `DAEMON_UNREACHABLE` (503) when the daemon is down.
 
 ## Session-Termination Timing
 

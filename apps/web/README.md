@@ -126,7 +126,7 @@ To launch the packaged web runtime from an installed package:
    ```bash
    HYDRA_WEB_OPERATOR_ID=admin \
    HYDRA_WEB_OPERATOR_SECRET=password123 \
-   node dist/web-runtime/server.js
+   node node_modules/hydra/dist/web-runtime/server.js
    ```
 
 3. Open `http://127.0.0.1:4174/login` in your browser, enter your credentials, and the workspace
@@ -166,7 +166,7 @@ HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
 HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
 HYDRA_WEB_OPERATOR_ID=admin \
 HYDRA_WEB_OPERATOR_SECRET=password123 \
-node dist/web-runtime/server.js
+node node_modules/hydra/dist/web-runtime/server.js
 ```
 
 Key differences from a local command:
@@ -342,6 +342,93 @@ invalidates the session cookie server-side) and navigates to `/login`.
 | Schema / DTOs | Zod (via `@hydra/web-contracts`)                              |
 | Testing       | Vitest 4, Testing Library (React + user-event)                |
 | Test env      | jsdom                                                         |
+
+## Verification Checklist
+
+Use this checklist to confirm the browser surface is working end-to-end before a release or after
+significant changes. Every item uses commands that exist today. This section is the reference for
+T030 final verification.
+
+### Build and bundle
+
+- [ ] Production build exits cleanly:
+  ```bash
+  npm --workspace @hydra/web run build
+  ```
+- [ ] Vite output shows JS bundle ≤ 250 KB gzipped and CSS bundle ≤ 50 KB gzipped (check the
+      gzip column in the build summary).
+- [ ] TypeScript workspace check passes:
+  ```bash
+  npm --workspace @hydra/web run typecheck:workspace
+  ```
+
+### Source-checkout startup
+
+- [ ] Start the daemon (`npm start`), then the gateway with web build:
+  ```bash
+  HYDRA_WEB_OPERATOR_ID=admin \
+  HYDRA_WEB_OPERATOR_SECRET=password123 \
+  npm --workspace @hydra/web-gateway run start:with-web
+  ```
+- [ ] `http://127.0.0.1:4174/login` loads without errors, login completes, and the workspace
+      opens.
+- [ ] Conversation list, transcript, and composer are visible and functional at ≥ 1024 px viewport
+      width.
+- [ ] Operations sidebar renders loading/empty/live states without layout blowout.
+
+### Packaged npm runtime
+
+- [ ] Package evidence passes (dry-run pack + tarball checks):
+  ```bash
+  npm run package:evidence
+  ```
+- [ ] Generate an installable tarball for the manual smoke test (the source checkout is cleaned
+      after `npm pack`):
+  ```bash
+  npm pack
+  ```
+- [ ] Manual packaged-runtime smoke tests run from an installed package (for example a temporary
+      `npm install ./hydra-*.tgz` in a scratch directory).
+- [ ] Installed package contains `dist/web-runtime/server.js`, the `web/` directory, and the
+      `.packaged` sentinel.
+- [ ] Packaged gateway starts and serves the workspace from the installed package contents:
+  ```bash
+  HYDRA_WEB_OPERATOR_ID=admin \
+  HYDRA_WEB_OPERATOR_SECRET=password123 \
+  node node_modules/hydra/dist/web-runtime/server.js
+  ```
+- [ ] Login and workspace behave identically to the source-checkout path.
+
+### Standalone executable (CLI-only)
+
+- [ ] Confirm that `npm run build:exe` does **not** bundle web runtime assets — the standalone exe
+      is CLI-only. `hydra --full` is not supported for exe builds.
+
+### Session lifecycle
+
+- [ ] Login sets `__session` (HttpOnly) and `__csrf` (JS-readable) cookies.
+- [ ] Session polling resumes on tab visibility and pauses when hidden.
+- [ ] Expiry warning banner appears when session enters `expiring-soon` state; **Extend Session**
+      resets the clock.
+- [ ] Logout clears cookies and redirects to `/login`.
+- [ ] Daemon-unreachable screen appears (not a login redirect) when the daemon is stopped; **Check
+      again** recovers when the daemon restarts.
+
+### Accessibility smoke checks
+
+- [ ] Login form, composer, and mutation confirmation dialogs are completable with keyboard-only
+      interaction.
+- [ ] Dialogs trap focus, place initial focus on the first safe action, and close on `Escape`.
+- [ ] Degraded-state banners (session expiry, daemon unreachable) use `role="alert"` or
+      `role="status"` semantics.
+- [ ] Inputs with validation or policy guidance expose context via `aria-describedby`.
+
+### Browser specs
+
+- [ ] Browser test suite passes:
+  ```bash
+  npm --workspace @hydra/web run test:browser
+  ```
 
 ## Workspace Boundaries
 
