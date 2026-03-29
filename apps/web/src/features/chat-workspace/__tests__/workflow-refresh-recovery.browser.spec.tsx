@@ -1303,6 +1303,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           hasMore: false,
         });
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -1359,6 +1362,9 @@ describe('operations polling survives workspace refresh', () => {
       }
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       // Operations snapshot endpoint — succeeds on every mount
       if (url === '/operations/snapshot') {
