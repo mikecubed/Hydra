@@ -260,6 +260,8 @@ async function applyBudget({
     onBudgetMutated();
   } catch (err: unknown) {
     updateRow(id, {
+      dailyInput: row.serverDailyInput,
+      weeklyInput: row.serverWeeklyInput,
       isLoading: false,
       isDialogOpen: false,
       error: err instanceof MutationsRequestError ? err.gatewayError.message : 'Unexpected error',

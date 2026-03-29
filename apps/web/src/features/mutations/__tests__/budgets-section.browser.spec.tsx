@@ -218,4 +218,69 @@ describe('BudgetsSection — row sync', () => {
 
     expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent('try again in 4 seconds');
   });
+
+  it('rolls back rejected edits to authoritative values and adopts newer server budgets after refetch', async () => {
+    const client = makeMockClient();
+    client.postBudget = vi.fn().mockRejectedValue(
+      new MutationsRequestError(409, {
+        ok: false,
+        code: 'STALE_REVISION',
+        category: 'stale-revision',
+        message: 'Config changed. Refresh and try again.',
+        httpStatus: 409,
+      }),
+    );
+
+    const initialConfig = makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } });
+    const refreshedConfig = makeConfigWithBudgets({ 'gpt-4': { daily: 2000, weekly: 8000 } });
+
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => {
+      ({ rerender } = render(
+        <BudgetsSection
+          config={initialConfig}
+          revision="r1"
+          client={client}
+          onSuccess={vi.fn()}
+          onBudgetMutated={vi.fn()}
+        />,
+      ));
+    });
+
+    const dailyInput = screen.getByLabelText('Daily limit', {
+      selector: '#daily-gpt-4',
+    });
+    const weeklyInput = screen.getByLabelText('Weekly limit', {
+      selector: '#weekly-gpt-4',
+    });
+    if (!(dailyInput instanceof HTMLInputElement) || !(weeklyInput instanceof HTMLInputElement)) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+
+    fireEvent.change(dailyInput, { target: { value: '1500' } });
+    fireEvent.change(weeklyInput, { target: { value: '7000' } });
+    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByText('Confirm'));
+
+    await act(async () => {});
+
+    expect(dailyInput.value).toBe('1000');
+    expect(weeklyInput.value).toBe('5000');
+    expect(screen.getByRole('alert')).toHaveTextContent('Config changed. Refresh and try again.');
+
+    await act(async () => {
+      rerender(
+        <BudgetsSection
+          config={refreshedConfig}
+          revision="r2"
+          client={client}
+          onSuccess={vi.fn()}
+          onBudgetMutated={vi.fn()}
+        />,
+      );
+    });
+
+    expect(dailyInput.value).toBe('2000');
+    expect(weeklyInput.value).toBe('8000');
+  });
 });
