@@ -382,8 +382,13 @@ T030 final verification.
   ```bash
   npm run package:evidence
   ```
+- [ ] Generate an installable tarball for the manual smoke test (the source checkout is cleaned
+      after `npm pack`):
+  ```bash
+  npm pack
+  ```
 - [ ] Manual packaged-runtime smoke tests run from an installed package (for example a temporary
-      `npm install` of the generated tarball; the source checkout is cleaned after `npm pack`).
+      `npm install ./hydra-*.tgz` in a scratch directory).
 - [ ] Installed package contains `dist/web-runtime/server.js`, the `web/` directory, and the
       `.packaged` sentinel.
 - [ ] Packaged gateway starts and serves the workspace from the installed package contents:
