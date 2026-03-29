@@ -4,13 +4,13 @@
 
 ## Phase 0 — Baseline and Scope Matrix
 
-- [ ] T001 Create the Phase 5 readiness matrix in .sdd/web-hardening-packaging-v7n2k4q9/tasks.md
+- [x] T001 Create the Phase 5 readiness matrix in .sdd/web-hardening-packaging-v7n2k4q9/tasks.md
 - [ ] T002 Define the supported packaging target matrix in README.md and docs/WEB_INTERFACE.md
 - [ ] T003 Define explicit responsiveness and hardening budgets in docs/web-interface/05-security-and-quality.md
 
 ## Phase 1 — User Story 1: Packaged Web Operator Experience (Priority: P1)
 
-- [ ] T004 [US1] Audit the current packaged web launch path in scripts/build-pack.ts and scripts/build-exe.ts
+- [x] T004 [US1] Audit the current packaged web launch path in scripts/build-pack.ts and scripts/build-exe.ts
 - [ ] T005 [US1] Implement packaged web asset/runtime inclusion in package.json and scripts/build-pack.ts
 - [ ] T006 [P] [US1] Align post-pack cleanup for packaged web artifacts in scripts/clean-pack.ts
 - [ ] T007 [US1] Harden packaged static asset resolution and unsupported-state messaging in apps/web-gateway/src/server-runtime.ts
