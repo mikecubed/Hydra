@@ -336,6 +336,32 @@ jobs:
       - name: Check new files have tests
         run: npm run test:new-file-policy -- origin/${{ github.base_ref }}
 
+  # ── Web Contracts Integrity ──────────────────────────────────────────────
+  # Validates the shared @hydra/web-contracts schema package independently.
+  # These schemas are the vocabulary shared between browser and gateway; a
+  # regression here can silently break both surfaces.
+  web-contracts-integrity:
+    name: Web Contracts Integrity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          HUSKY: '0'
+
+      - name: Validate web-contracts schemas
+        run: npm --workspace @hydra/web-contracts run test
+
+  # ── Web Responsiveness ─────────────────────────────────────────────────
   web-responsiveness:
     name: Web Responsiveness Budgets
     runs-on: ubuntu-latest
@@ -411,3 +437,41 @@ jobs:
             failed=1
           fi
           exit $failed
+
+  # ── Quality Gate ───────────────────────────────────────────────────────
+  # Single status check that aggregates the core quality jobs.  Branch
+  # protection can reference this one check for quality enforcement.
+  # Warn-only jobs (audit) and PR-only jobs (lint-pr-title, new-file-policy)
+  # are intentionally excluded — they provide signal but are not hard gates.
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs:
+      - lint
+      - typecheck
+      - check-cycles
+      - check-coverage
+      - web-contracts-integrity
+      - web-responsiveness
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Evaluate quality gates
+        run: |
+          echo "=== Quality Gate Summary ==="
+          echo "Lint & Format:           ${{ needs.lint.result }}"
+          echo "Type Check:              ${{ needs.typecheck.result }}"
+          echo "Circular Import Check:   ${{ needs.check-cycles.result }}"
+          echo "Coverage Gate:           ${{ needs.check-coverage.result }}"
+          echo "Web Contracts Integrity: ${{ needs.web-contracts-integrity.result }}"
+          echo "Web Responsiveness:      ${{ needs.web-responsiveness.result }}"
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.typecheck.result }}" != "success" ]] || \
+             [[ "${{ needs.check-cycles.result }}" != "success" ]] || \
+             [[ "${{ needs.check-coverage.result }}" != "success" ]] || \
+             [[ "${{ needs.web-contracts-integrity.result }}" != "success" ]] || \
+             [[ "${{ needs.web-responsiveness.result }}" != "success" ]]; then
+            echo "::error::One or more quality gates failed"
+            exit 1
+          fi
+          echo "All quality gates passed"

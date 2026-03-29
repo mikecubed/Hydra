@@ -96,3 +96,29 @@ jobs:
         run: npm run build:exe:ci
         env:
           HUSKY: '0'
+
+  # Single merge-gate: requires all CI jobs to pass before a PR can land.
+  # Branch protection can point to this one status check instead of listing
+  # every job individually.
+  release-gate:
+    name: Release readiness gate
+    if: always()
+    needs: [syntax, test, package-evidence, exe-build-evidence]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Evaluate release-readiness gates
+        run: |
+          echo "=== Release Readiness Summary ==="
+          echo "Syntax check:      ${{ needs.syntax.result }}"
+          echo "Test matrix:        ${{ needs.test.result }}"
+          echo "Package evidence:   ${{ needs.package-evidence.result }}"
+          echo "EXE build evidence: ${{ needs.exe-build-evidence.result }}"
+          if [[ "${{ needs.syntax.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
+             [[ "${{ needs.package-evidence.result }}" != "success" ]] || \
+             [[ "${{ needs.exe-build-evidence.result }}" != "success" ]]; then
+            echo "::error::One or more release-readiness gates failed"
+            exit 1
+          fi
+          echo "All release-readiness gates passed"
