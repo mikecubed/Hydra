@@ -127,6 +127,9 @@ it('shows loading state on first paint before snapshot resolves', async () => {
   await waitFor(() => {
     expect(screen.getByText('Refreshing…')).toBeInTheDocument();
   });
+  expect(screen.getByRole('status', { name: 'Operations refresh status' })).toHaveTextContent(
+    'Refreshing…',
+  );
   expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/loading/i);
 
   resolveSnapshot(
@@ -141,6 +144,9 @@ it('shows loading state on first paint before snapshot resolves', async () => {
   );
 
   expect(await screen.findByText('live')).toBeInTheDocument();
+  expect(screen.getByRole('status', { name: 'Operations refresh status' })).toHaveTextContent(
+    'live',
+  );
 });
 
 it('loads the operations snapshot and renders queue items from the gateway', async () => {
