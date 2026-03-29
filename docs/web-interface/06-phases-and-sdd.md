@@ -51,15 +51,15 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 - approved workflow-launch surfaces;
 - audit trails and destructive-action safeguards.
 
-### Phase 5 — Hardening, Packaging, and Polishing 🔧 In Progress
+### Phase 5 — Hardening, Packaging, and Polishing ✅ Complete
 
 - packaging integration: ✅ delivered (npm tarball includes `dist/web-runtime/` with bundled
   gateway entry + browser assets; `prepack`/`postpack` lifecycle scripts; packaging integration
   tests via `npm run package:evidence`)
 - responsiveness and layout hardening: ✅ delivered (Phase 4 operations panel work)
-- contributor verification and troubleshooting documentation: 🔧 in progress
-- accessibility and performance hardening: ⬜ pending
-- security review and failure-mode drills: ⬜ pending
+- contributor verification and troubleshooting documentation: ✅ delivered
+- accessibility and performance hardening: ✅ delivered
+- security review and failure-mode drills: ✅ delivered
 
 ## Recommended SDD Spec Breakdown
 
@@ -72,7 +72,7 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 | 5   | **`web-chat-workspace`**                 | ✅ Delivered (phases 1–8, PRs #173–#185)                                                                          |
 | 6   | **`web-hydra-operations-panels`**        | ✅ Delivered — Hydra-native operations visibility and daemon-authorized controls (US1–US6, PRs #201–#209)         |
 | 7   | **`web-controlled-mutations`**           | ✅ Delivered (PR #221)                                                                                            |
-| 8   | **`web-hardening-and-packaging`**        | 🔧 In progress — packaging delivered; contributor release-readiness underway                                      |
+| 8   | **`web-hardening-and-packaging`**        | ✅ Delivered (PR #222)                                                                                            |
 
 ## Recommended Workflow
 
