@@ -2611,3 +2611,186 @@ describe('multi-session convergence: stale-control invalidation', () => {
     assert.equal(state.conversations.get('conv-1')?.controlState.staleReason, null);
   });
 });
+
+// ─── T023A: Reference stability regression tests ────────────────────────────
+
+describe('reducer reference stability', () => {
+  it('conversation/set-load-state returns same reference when loadState is unchanged', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/set-load-state',
+      conversationId: 'conv-1',
+      loadState: 'loading',
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'conversation/set-load-state',
+      conversationId: 'conv-1',
+      loadState: 'loading',
+    });
+    assert.equal(after, before, 'state reference should be identical for no-op load-state');
+  });
+
+  it('draft/set-submit-state returns same reference when values are unchanged', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'submitting',
+      validationMessage: null,
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'submitting',
+      validationMessage: null,
+    });
+    assert.equal(after, before, 'state reference should be identical for no-op submit-state');
+  });
+
+  it('conversation/select returns same reference when already selected with existing draft', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    assert.equal(after, before, 'state reference should be identical for re-selecting same conv');
+  });
+
+  it('draft/set-text returns same reference when text is unchanged', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'hello',
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'hello',
+    });
+    assert.equal(after, before, 'state reference should be identical for no-op text change');
+  });
+
+  it('conversation/upsert preserves conversations Map reference on identical re-upsert', () => {
+    let state = createInitialWorkspaceState();
+    const conversation = createConversation({ id: 'conv-1', title: 'Test', status: 'active' });
+    state = reduceWorkspaceState(state, { type: 'conversation/upsert', conversation });
+    const before = state;
+    const after = reduceWorkspaceState(before, { type: 'conversation/upsert', conversation });
+    assert.equal(
+      after.conversations,
+      before.conversations,
+      'conversations Map should be same reference for identical upsert',
+    );
+  });
+});
+
+// ─── T023A: Submit-flow dispatch count regression tests ─────────────────────
+
+describe('submit-flow dispatch batching', () => {
+  it('submitComposerDraft success path fires at most 2 listener notifications', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    let dispatchCount = 0;
+
+    // Count only dispatches that happen after the submit starts.
+    // The store already had setup dispatches, so subscribe now.
+    store.subscribe(() => {
+      dispatchCount++;
+    });
+
+    const client = createMockClient({
+      submitInstruction: async (_convId, body) => ({
+        turn: {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-1',
+      }),
+    });
+
+    await submitComposerDraft({ store, client });
+
+    // Pre-submit 'submitting' dispatch + batched post-success = at most 2 notifications
+    assert.ok(
+      dispatchCount <= 2,
+      `expected ≤2 dispatch notifications on success path, got ${dispatchCount}`,
+    );
+
+    // Behavior is still correct
+    assert.equal(store.getState().drafts.get('conv-1')?.draftText, '');
+    assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'idle');
+  });
+
+  it('createAndSubmitDraft success path fires at most 4 listener notifications', async () => {
+    const store = createWorkspaceStore();
+    let dispatchCount = 0;
+    store.subscribe(() => {
+      dispatchCount++;
+    });
+
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: 'New conversation',
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async (_convId, body) => ({
+        turn: {
+          id: 'turn-1',
+          conversationId: 'new-conv',
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-1',
+      }),
+    });
+
+    await createAndSubmitDraft({ store, client }, 'start a new thread');
+
+    // create-init batch + submitting + batched post-success = at most 4
+    assert.ok(
+      dispatchCount <= 4,
+      `expected ≤4 dispatch notifications for create+submit, got ${dispatchCount}`,
+    );
+
+    // Behavior is still correct
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, '');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'idle');
+  });
+});

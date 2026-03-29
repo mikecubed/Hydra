@@ -106,26 +106,11 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<Submit
   try {
     const response = await client.submitInstruction(conversationId, { instruction });
 
-    // Append the authoritative operator turn from the response so the
-    // transcript shows the submitted instruction immediately — even when
-    // historyLoaded is already true and the transcript loader won't re-fetch.
+    // Single batched dispatch: append turn + clear draft + set idle + reset loadState
     store.dispatch({
-      type: 'conversation/append-submit-turn',
+      type: 'submit/continue-success',
       conversationId,
       entry: turnToTranscriptEntry(response.turn),
-    });
-
-    store.dispatch({ type: 'draft/set-text', conversationId, draftText: '' });
-    store.dispatch({
-      type: 'draft/set-submit-state',
-      conversationId,
-      submitState: 'idle',
-      validationMessage: null,
-    });
-    store.dispatch({
-      type: 'conversation/set-load-state',
-      conversationId,
-      loadState: 'idle',
     });
     return { ok: true };
   } catch (err: unknown) {
@@ -158,8 +143,9 @@ export async function createAndSubmitDraft(
 
   const created = await client.createConversation({});
 
+  // Single batched dispatch: upsert + select + set draft text
   store.dispatch({
-    type: 'conversation/upsert',
+    type: 'submit/create-init',
     conversation: {
       id: created.id,
       title: created.title,
@@ -169,9 +155,8 @@ export async function createAndSubmitDraft(
       turnCount: created.turnCount,
       pendingInstructionCount: created.pendingInstructionCount,
     },
+    draftText: instruction,
   });
-  store.dispatch({ type: 'conversation/select', conversationId: created.id });
-  store.dispatch({ type: 'draft/set-text', conversationId: created.id, draftText: instruction });
 
   return submitComposerDraft(deps);
 }
