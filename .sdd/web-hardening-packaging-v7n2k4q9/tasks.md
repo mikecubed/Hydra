@@ -2,6 +2,14 @@
 
 **Input**: `.sdd/web-hardening-packaging-v7n2k4q9/spec.md`, `.sdd/web-hardening-packaging-v7n2k4q9/plan.md`, `.sdd/web-hardening-packaging-v7n2k4q9/research.md`
 
+## Current Status
+
+- Phase 0 complete (`T001-T003`)
+- Phase 1 complete (`T004-T010`)
+- Phase 2 complete (`T011-T016`)
+- Phase 3 underway — `T017` complete; `T018` in progress with login + confirmation dialog accessibility fixes landed
+- Next active phase: Phase 3 — User Story 3: Accessible Core Workflows (`T017-T020`)
+
 ## Phase 0 — Baseline and Scope Matrix
 
 - [x] T001 Create the Phase 5 readiness matrix in .sdd/web-hardening-packaging-v7n2k4q9/tasks.md
@@ -29,7 +37,7 @@
 
 ## Phase 3 — User Story 3: Accessible Core Workflows (Priority: P2)
 
-- [ ] T017 [US3] Audit focus order, labels, and error semantics in apps/web/src/features/auth/, apps/web/src/features/chat-workspace/, apps/web/src/features/operations-panels/, and apps/web/src/features/mutations/
+- [x] T017 [US3] Audit focus order, labels, and error semantics in apps/web/src/features/auth/, apps/web/src/features/chat-workspace/, apps/web/src/features/operations-panels/, and apps/web/src/features/mutations/
 - [ ] T018 [US3] Implement keyboard and focus-management fixes across affected apps/web/src/features/\*_/_.tsx surfaces
 - [ ] T019 [P] [US3] Add accessibility-focused browser specs for login, workspace, operations panels, and mutation dialogs in apps/web/src/features/\*_/_.browser.spec.tsx
 - [ ] T020 [US3] Document accessibility expectations and supported viewport range in docs/web-interface/05-security-and-quality.md and apps/web/README.md

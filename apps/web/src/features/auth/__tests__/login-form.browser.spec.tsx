@@ -33,6 +33,11 @@ describe('LoginForm', () => {
     expect(secretInput).toBeRequired();
   });
 
+  it('moves initial focus to the identity input on render', () => {
+    render(<LoginForm onSuccess={() => {}} />);
+    expect(screen.getByTestId('login-identity')).toHaveFocus();
+  });
+
   it('submit button is disabled while loading', async () => {
     const user = userEvent.setup();
     mockLogin.mockReturnValue(new Promise(() => {}));
@@ -88,6 +93,19 @@ describe('LoginForm', () => {
     await waitFor(() => {
       expect(screen.getByTestId('login-error')).toHaveTextContent('Invalid identity or password.');
     });
+
+    const error = screen.getByTestId('login-error');
+    expect(error).toHaveAttribute('role', 'alert');
+    expect(screen.getByTestId('login-identity')).toHaveAttribute(
+      'aria-describedby',
+      error.getAttribute('id'),
+    );
+    expect(screen.getByTestId('login-secret')).toHaveAttribute(
+      'aria-describedby',
+      error.getAttribute('id'),
+    );
+    expect(screen.getByTestId('login-identity')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('login-secret')).toHaveAttribute('aria-invalid', 'true');
   });
 
   it('displays "Too many attempts — please wait before trying again." on RATE_LIMITED', async () => {

@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 
 import { ConfirmDialog } from '../components/confirm-dialog.tsx';
 
@@ -117,5 +118,62 @@ describe('ConfirmDialog (confirm-dialog.browser.spec)', () => {
 
     // IDs must be distinct across instances
     expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it('moves initial focus to the cancel button when opened', () => {
+    render(
+      <ConfirmDialog
+        isOpen={true}
+        title="Focus Dialog"
+        from="old"
+        to="new"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        isLoading={false}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  });
+
+  it('closes on Escape key', () => {
+    const onCancel = vi.fn();
+    render(
+      <ConfirmDialog
+        isOpen={true}
+        title="Escape Dialog"
+        from="old"
+        to="new"
+        onConfirm={vi.fn()}
+        onCancel={onCancel}
+        isLoading={false}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('traps tab focus within the dialog actions', async () => {
+    const user = userEvent.setup();
+    render(
+      <ConfirmDialog
+        isOpen={true}
+        title="Tab Dialog"
+        from="old"
+        to="new"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        isLoading={false}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Confirm' })).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
   });
 });

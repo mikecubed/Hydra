@@ -1,4 +1,4 @@
-import { type CSSProperties, type JSX, useState } from 'react';
+import { type CSSProperties, type JSX, useEffect, useId, useRef, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { login } from '../api/auth-client.ts';
 
@@ -75,6 +75,12 @@ export function LoginForm({ onSuccess }: LoginFormProps): JSX.Element {
   const [secret, setSecret] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
+  const identityInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    identityInputRef.current?.focus();
+  }, []);
 
   async function handleSubmit(e: SyntheticEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
@@ -97,10 +103,13 @@ export function LoginForm({ onSuccess }: LoginFormProps): JSX.Element {
   return (
     <form data-testid="login-form" onSubmit={handleSubmit} style={styles.form}>
       <input
+        ref={identityInputRef}
         data-testid="login-identity"
         type="text"
         placeholder="Identity"
         aria-label="Identity"
+        aria-describedby={error === null ? undefined : errorId}
+        aria-invalid={error !== null}
         required
         value={identity}
         onChange={(e) => {
@@ -114,6 +123,8 @@ export function LoginForm({ onSuccess }: LoginFormProps): JSX.Element {
         type="password"
         placeholder="Secret"
         aria-label="Secret"
+        aria-describedby={error === null ? undefined : errorId}
+        aria-invalid={error !== null}
         required
         value={secret}
         onChange={(e) => {
@@ -131,7 +142,7 @@ export function LoginForm({ onSuccess }: LoginFormProps): JSX.Element {
         {loading ? 'Signing in…' : 'Sign in'}
       </button>
       {error !== null && (
-        <div data-testid="login-error" style={styles.error}>
+        <div id={errorId} data-testid="login-error" role="alert" style={styles.error}>
           {error}
         </div>
       )}

@@ -72,6 +72,29 @@ describe('DestructiveConfirmDialog', () => {
     expect(screen.getByText('Submit')).not.toHaveAttribute('disabled');
   });
 
+  it('focuses the confirmation phrase input when step 2 opens', () => {
+    renderAtStep2();
+    expect(screen.getByLabelText('Confirmation phrase')).toHaveFocus();
+  });
+
+  it('marks the confirmation phrase input invalid while the phrase is incorrect', () => {
+    renderAtStep2();
+    fireEvent.change(screen.getByLabelText('Confirmation phrase'), {
+      target: { value: 'almost' },
+    });
+
+    expect(screen.getByLabelText('Confirmation phrase')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('clears aria-invalid when the exact confirmation phrase is entered', () => {
+    renderAtStep2();
+    fireEvent.change(screen.getByLabelText('Confirmation phrase'), {
+      target: { value: 'CONFIRM' },
+    });
+
+    expect(screen.getByLabelText('Confirmation phrase')).toHaveAttribute('aria-invalid', 'false');
+  });
+
   it('cancel at Step 2: onConfirm is never called', () => {
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
@@ -90,6 +113,27 @@ describe('DestructiveConfirmDialog', () => {
     fireEvent.click(screen.getByText('Confirm')); // advance to step 2
     fireEvent.click(screen.getByText('Cancel'));
     expect(onConfirm).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('Escape closes the dialog at step 2', () => {
+    const onCancel = vi.fn();
+    render(
+      <DestructiveConfirmDialog
+        isOpen={true}
+        title="Launch evolve"
+        from="idle"
+        to="running"
+        requiredPhrase="CONFIRM"
+        onConfirm={vi.fn()}
+        onCancel={onCancel}
+        isLoading={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Confirm'));
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
