@@ -2,9 +2,9 @@ name: Code Quality
 
 on:
   push:
-    branches: [main, dev, 'fix/**', 'feat/**', 'feature/**']
+    branches: [main, dev, 'fix/**', 'feat/**', 'feature/**', 'track/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'fix/**', 'feat/**', 'feature/**']
     types: [opened, synchronize, reopened]
 
 concurrency:

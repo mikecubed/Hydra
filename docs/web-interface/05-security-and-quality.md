@@ -137,10 +137,11 @@ gateway running locally.
 
 The `web-responsiveness` job in `.github/workflows/quality.yml` enforces the first four rows on the
 workflow's currently configured trigger set: pushes to `main` / `dev` / `fix/**` / `feat/**` /
-`feature/**`, plus pull requests targeting `main`. The job builds the web workspace, parses Vite's
-output for gzipped asset sizes, and fails the run if any threshold is exceeded. Build time is
-measured via wall-clock timing of the build step. Root CLI package dry-run is not included because
-it validates packaging scope (T025), not responsiveness.
+`feature/**` / `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` /
+`feature/**`. The job builds the web workspace, parses Vite's output for gzipped asset sizes, and
+fails the run if any threshold is exceeded. Build time is measured via wall-clock timing of the
+build step. Root CLI package dry-run is not included because it validates packaging scope (T025),
+not responsiveness.
 
 ### Runtime responsiveness targets
 
@@ -171,8 +172,9 @@ Evidence for responsiveness budgets is collected at three layers, ordered from c
 most expensive (manual profiling):
 
 1. **CI — `web-responsiveness` job** (`.github/workflows/quality.yml`). Runs on the workflow's
-   configured trigger set (pushes to `main` / `dev` / `fix/**` / `feat/**` / `feature/**`, plus
-   pull requests targeting `main`). Collects the currently blocking build-side evidence:
+   configured trigger set (pushes to `main` / `dev` / `fix/**` / `feat/**` / `feature/**` /
+   `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` / `feature/**`).
+   Collects the currently blocking build-side evidence:
    - Build success / failure (exit code).
    - JS and CSS gzipped sizes parsed from Vite build output.
    - Build wall-clock time.
