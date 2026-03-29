@@ -25,24 +25,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const MANIFEST_PATH = path.join(ROOT, '.packfiles');
+const PKG_PATH = path.join(ROOT, 'package.json');
+const PKG_BACKUP = path.join(ROOT, '.package.json.bak');
 const WEB_RUNTIME_DIR = path.join(ROOT, 'dist', 'web-runtime');
-
-// ── Step 1: Compile ──────────────────────────────────────────────────────────
-
-console.log('[prepack] Compiling TypeScript for packaging…');
-
-const tsc = spawnSync(
-  process.execPath,
-  [path.join(ROOT, 'node_modules', 'typescript', 'lib', 'tsc.js'), '-p', 'tsconfig.build.json'],
-  { cwd: ROOT, stdio: 'inherit' },
-);
-
-if (tsc.status !== 0) {
-  console.error('[prepack] tsc compilation failed.');
-  exit(1);
-}
-
-// ── Step 2: Collect emitted files ────────────────────────────────────────────
+const GATEWAY_ENTRY = path.join(ROOT, 'apps', 'web-gateway', 'src', 'server.ts');
+const WEB_DIST = path.join(ROOT, 'apps', 'web', 'dist');
+const PACKAGED_MARKER = '.packaged';
 
 const emitted: string[] = [];
 
@@ -60,150 +48,178 @@ function collectJsFiles(dir: string) {
   }
 }
 
-collectJsFiles(path.join(ROOT, 'lib'));
-collectJsFiles(path.join(ROOT, 'bin'));
+function cleanupFailedPrepack(): void {
+  for (const rel of emitted) {
+    try {
+      fs.unlinkSync(path.join(ROOT, rel));
+    } catch {
+      // ignore cleanup misses
+    }
+  }
 
-console.log(`[prepack] Emitted ${String(emitted.length)} .js files.`);
+  if (fs.existsSync(MANIFEST_PATH)) {
+    fs.unlinkSync(MANIFEST_PATH);
+  }
 
-// ── Step 3: Post-process string-literal .ts references ───────────────────────
+  if (fs.existsSync(PKG_BACKUP)) {
+    fs.copyFileSync(PKG_BACKUP, PKG_PATH);
+    fs.unlinkSync(PKG_BACKUP);
+  }
 
-// tsc's rewriteRelativeImportExtensions rewrites import specifiers but NOT
-// string literals used in path.join(), readFileSync(), endsWith(), etc.
-// We do a safe global replacement: .ts followed by a closing quote character.
-const TS_EXT_IN_STRING = /\.ts(?=['"`])/g;
-
-let patchCount = 0;
-for (const rel of emitted) {
-  const abs = path.join(ROOT, rel);
-  const src = fs.readFileSync(abs, 'utf8');
-  const patched = src.replace(TS_EXT_IN_STRING, '.js');
-  if (patched !== src) {
-    fs.writeFileSync(abs, patched);
-    patchCount += 1;
+  if (fs.existsSync(WEB_RUNTIME_DIR)) {
+    fs.rmSync(WEB_RUNTIME_DIR, { recursive: true, force: true });
   }
 }
 
-console.log(`[prepack] Patched string literals in ${String(patchCount)} files.`);
+function fail(message: string): never {
+  throw new Error(message);
+}
 
-// ── Step 4: Write cleanup manifest ───────────────────────────────────────────
+try {
+  // ── Step 1: Compile ────────────────────────────────────────────────────────
 
-fs.writeFileSync(MANIFEST_PATH, `${emitted.join('\n')}\n`);
-console.log(`[prepack] Manifest written to .packfiles (${String(emitted.length)} entries).`);
+  console.log('[prepack] Compiling TypeScript for packaging…');
 
-// ── Step 4: Bundle web runtime ───────────────────────────────────────────
-// Creates dist/web-runtime/ with a bundled gateway server and browser assets.
-// Skipped gracefully when workspace sources are unavailable (e.g. minimal clone).
+  const tsc = spawnSync(
+    process.execPath,
+    [path.join(ROOT, 'node_modules', 'typescript', 'lib', 'tsc.js'), '-p', 'tsconfig.build.json'],
+    { cwd: ROOT, stdio: 'inherit' },
+  );
 
-const GATEWAY_ENTRY = path.join(ROOT, 'apps', 'web-gateway', 'src', 'server.ts');
-const WEB_DIST = path.join(ROOT, 'apps', 'web', 'dist');
+  if (tsc.status !== 0) {
+    fail('tsc compilation failed.');
+  }
 
-if (fs.existsSync(GATEWAY_ENTRY)) {
-  console.log('[prepack] Building web runtime…');
+  // ── Step 2: Collect emitted files ──────────────────────────────────────────
 
-  const serverOut = path.join(WEB_RUNTIME_DIR, 'server.js');
-  fs.mkdirSync(WEB_RUNTIME_DIR, { recursive: true });
+  collectJsFiles(path.join(ROOT, 'lib'));
+  collectJsFiles(path.join(ROOT, 'bin'));
 
-  // 4a. Bundle the gateway server entry with esbuild (self-contained ESM).
-  // The banner sets the default static dir to ./web relative to the bundle
-  // so the packaged layout resolves correctly without env var overrides.
-  const esbuildBanner = [
-    'import { dirname as __pkgDir } from "node:path";',
-    'import { fileURLToPath as __pkgUrl } from "node:url";',
-    'process.env.HYDRA_WEB_STATIC_DIR ??= __pkgDir(__pkgUrl(import.meta.url)) + "/web";',
-  ].join('\n');
+  console.log(`[prepack] Emitted ${String(emitted.length)} .js files.`);
 
-  const { build } = await import('esbuild');
-  await build({
-    entryPoints: [GATEWAY_ENTRY],
-    outfile: serverOut,
-    bundle: true,
-    platform: 'node',
-    format: 'esm',
-    target: ['node20'],
-    legalComments: 'none',
-    sourcemap: false,
-    banner: { js: esbuildBanner },
-  });
+  // ── Step 3: Post-process string-literal .ts references ─────────────────────
 
-  console.log('[prepack] Bundled gateway entry → dist/web-runtime/server.js');
+  const TS_EXT_IN_STRING = /\.ts(?=['"`])/g;
 
-  // 4b. Copy pre-built web frontend assets into dist/web-runtime/web/.
-  // If apps/web/dist/ is missing, attempt to build the web workspace first.
-  // Packaging must not succeed without browser assets when a gateway is bundled.
-  if (!fs.existsSync(WEB_DIST)) {
-    console.log('[prepack] apps/web/dist/ not found — building web workspace…');
-    const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
-    if (!fs.existsSync(viteBin)) {
-      console.error('[prepack] ✗ vite not found — cannot build apps/web/.');
-      console.error('[prepack]   Run `npm install` then `npm --workspace @hydra/web run build`.');
-      exit(1);
+  let patchCount = 0;
+  for (const rel of emitted) {
+    const abs = path.join(ROOT, rel);
+    const src = fs.readFileSync(abs, 'utf8');
+    const patched = src.replace(TS_EXT_IN_STRING, '.js');
+    if (patched !== src) {
+      fs.writeFileSync(abs, patched);
+      patchCount += 1;
     }
-    const webBuild = spawnSync(process.execPath, [viteBin, 'build'], {
-      cwd: path.join(ROOT, 'apps', 'web'),
-      stdio: 'inherit',
+  }
+
+  console.log(`[prepack] Patched string literals in ${String(patchCount)} files.`);
+
+  // ── Step 4: Write cleanup manifest ─────────────────────────────────────────
+
+  fs.writeFileSync(MANIFEST_PATH, `${emitted.join('\n')}\n`);
+  console.log(`[prepack] Manifest written to .packfiles (${String(emitted.length)} entries).`);
+
+  // ── Step 5: Bundle web runtime ─────────────────────────────────────────────
+
+  if (fs.existsSync(GATEWAY_ENTRY)) {
+    console.log('[prepack] Building web runtime…');
+
+    const serverOut = path.join(WEB_RUNTIME_DIR, 'server.js');
+    fs.mkdirSync(WEB_RUNTIME_DIR, { recursive: true });
+
+    const esbuildBanner = [
+      'import { dirname as __pkgDir } from "node:path";',
+      'import { fileURLToPath as __pkgUrl } from "node:url";',
+      'process.env.HYDRA_WEB_STATIC_DIR ??= __pkgDir(__pkgUrl(import.meta.url)) + "/web";',
+    ].join('\n');
+
+    const { build } = await import('esbuild');
+    await build({
+      entryPoints: [GATEWAY_ENTRY],
+      outfile: serverOut,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: ['node20'],
+      legalComments: 'none',
+      sourcemap: false,
+      banner: { js: esbuildBanner },
     });
-    if (webBuild.status !== 0) {
-      console.error('[prepack] ✗ Web workspace build failed (vite build exited non-zero).');
-      exit(1);
-    }
+
+    console.log('[prepack] Bundled gateway entry → dist/web-runtime/server.js');
+
     if (!fs.existsSync(WEB_DIST)) {
-      console.error('[prepack] ✗ apps/web/dist/ still missing after build.');
-      exit(1);
+      console.log('[prepack] apps/web/dist/ not found — building web workspace…');
+      const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+      if (!fs.existsSync(viteBin)) {
+        fail('vite not found — cannot build apps/web/. Run `npm install` first.');
+      }
+      const webBuild = spawnSync(process.execPath, [viteBin, 'build'], {
+        cwd: path.join(ROOT, 'apps', 'web'),
+        stdio: 'inherit',
+      });
+      if (webBuild.status !== 0) {
+        fail('Web workspace build failed (vite build exited non-zero).');
+      }
+      if (!fs.existsSync(WEB_DIST)) {
+        fail('apps/web/dist/ is still missing after the web build completed.');
+      }
     }
+
+    const webAssetsDest = path.join(WEB_RUNTIME_DIR, 'web');
+    fs.cpSync(WEB_DIST, webAssetsDest, { recursive: true });
+    fs.writeFileSync(path.join(WEB_RUNTIME_DIR, PACKAGED_MARKER), 'packaged\n');
+    console.log('[prepack] Copied browser assets → dist/web-runtime/web/');
+    console.log('[prepack] Wrote packaged runtime marker.');
+    console.log('[prepack] Web runtime ready.');
+  } else {
+    console.log('[prepack] apps/web-gateway not found — skipping web runtime build.');
   }
 
-  const webAssetsDest = path.join(WEB_RUNTIME_DIR, 'web');
-  fs.cpSync(WEB_DIST, webAssetsDest, { recursive: true });
-  console.log('[prepack] Copied browser assets → dist/web-runtime/web/');
+  // ── Step 6: Patch package.json for published artifact ──────────────────────
 
-  console.log('[prepack] Web runtime ready.');
-} else {
-  console.log('[prepack] apps/web-gateway not found — skipping web runtime build.');
-}
+  console.log('[prepack] Patching package.json for published artifact…');
+  fs.copyFileSync(PKG_PATH, PKG_BACKUP);
 
-// ── Step 5: Patch package.json for published artifact ────────────────────────
-// Rewrite scripts that reference .ts entrypoints under lib/ or bin/ so that
-// `npm run <script>` works from the installed package (which has only .js).
+  const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf8')) as {
+    bin?: Record<string, string>;
+    scripts?: Record<string, string>;
+  };
 
-const PKG_PATH = path.join(ROOT, 'package.json');
-const PKG_BACKUP = path.join(ROOT, '.package.json.bak');
-
-console.log('[prepack] Patching package.json for published artifact…');
-fs.copyFileSync(PKG_PATH, PKG_BACKUP);
-
-const pkg = JSON.parse(fs.readFileSync(PKG_PATH, 'utf8')) as {
-  bin?: Record<string, string>;
-  scripts?: Record<string, string>;
-};
-
-// Rewrite bin entries (.ts → .js) so the published package points to compiled JS.
-if (pkg.bin) {
-  let binPatchCount = 0;
-  for (const [key, value] of Object.entries(pkg.bin)) {
-    if (typeof value !== 'string') continue;
-    const rewritten = value.replace(/\.ts$/, '.js');
-    if (rewritten !== value) {
-      pkg.bin[key] = rewritten;
-      binPatchCount += 1;
+  if (pkg.bin) {
+    let binPatchCount = 0;
+    for (const [key, value] of Object.entries(pkg.bin)) {
+      if (typeof value !== 'string') continue;
+      const rewritten = value.replace(/\.ts$/, '.js');
+      if (rewritten !== value) {
+        pkg.bin[key] = rewritten;
+        binPatchCount += 1;
+      }
     }
+    console.log(`[prepack] Rewrote ${String(binPatchCount)} bin entries (.ts → .js).`);
   }
-  console.log(`[prepack] Rewrote ${String(binPatchCount)} bin entries (.ts → .js).`);
-}
 
-if (pkg.scripts) {
-  let scriptPatchCount = 0;
-  for (const [key, value] of Object.entries(pkg.scripts)) {
-    if (typeof value !== 'string') continue;
-    // Only rewrite .ts references that live under lib/ or bin/ (shipped dirs).
-    // Leave scripts/ references alone — those are dev-only and not in the tarball.
-    const rewritten = value.replace(/\b((?:lib|bin)\/[\w./-]*?)\.ts\b/g, '$1.js');
-    if (rewritten !== value) {
-      pkg.scripts[key] = rewritten;
-      scriptPatchCount += 1;
+  if (pkg.scripts) {
+    let scriptPatchCount = 0;
+    for (const [key, value] of Object.entries(pkg.scripts)) {
+      if (typeof value !== 'string') continue;
+      const rewritten = value.replace(/\b((?:lib|bin)\/[\w./-]*?)\.ts\b/g, '$1.js');
+      if (rewritten !== value) {
+        pkg.scripts[key] = rewritten;
+        scriptPatchCount += 1;
+      }
     }
+    console.log(`[prepack] Rewrote ${String(scriptPatchCount)} script entries (.ts → .js).`);
   }
-  console.log(`[prepack] Rewrote ${String(scriptPatchCount)} script entries (.ts → .js).`);
-}
 
-fs.writeFileSync(PKG_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
-console.log('[prepack] Done.');
+  fs.writeFileSync(PKG_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
+  console.log('[prepack] Done.');
+} catch (error) {
+  cleanupFailedPrepack();
+  if (error instanceof Error) {
+    console.error(`[prepack] ${error.message}`);
+  } else {
+    console.error('[prepack] Packaging failed.', error);
+  }
+  exit(1);
+}

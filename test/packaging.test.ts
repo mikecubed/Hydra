@@ -249,6 +249,11 @@ describe('packaging', { timeout: 120_000 }, () => {
     );
   });
 
+  it('tarball contains the packaged runtime marker', () => {
+    const marker = path.join(hydraPkgDir, 'dist', 'web-runtime', '.packaged');
+    assert.ok(fs.existsSync(marker), 'dist/web-runtime/.packaged missing from tarball');
+  });
+
   it('tarball includes dist/web-runtime/ in package.json files', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(hydraPkgDir, 'package.json'), 'utf8'));
     const files = pkg.files as string[];
@@ -316,6 +321,60 @@ describe('packaging', { timeout: 120_000 }, () => {
         exitCode,
         0,
         'npm pack should fail when apps/web/dist cannot be produced (gateway exists but web source is missing)',
+      );
+
+      // ── Verify prepack failure cleanup ──────────────────────────────────
+      // build-pack.ts should have cleaned up all generated artifacts so the
+      // tree stays clean even though npm skipped postpack.
+
+      assert.ok(
+        !fs.existsSync(path.join(failClone, '.packfiles')),
+        '.packfiles should be cleaned up after prepack failure',
+      );
+      assert.ok(
+        !fs.existsSync(path.join(failClone, '.package.json.bak')),
+        '.package.json.bak should be cleaned up after prepack failure',
+      );
+      assert.ok(
+        !fs.existsSync(path.join(failClone, 'dist', 'web-runtime')),
+        'dist/web-runtime/ should be cleaned up after prepack failure',
+      );
+
+      // No stale .js files should remain alongside .ts sources
+      const staleJs: string[] = [];
+      function scanStaleJs(dir: string) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanStaleJs(full);
+          } else if (entry.name.endsWith('.js') && fs.existsSync(full.replace(/\.js$/, '.ts'))) {
+            staleJs.push(path.relative(failClone, full));
+          }
+        }
+      }
+      try {
+        scanStaleJs(path.join(failClone, 'lib'));
+      } catch {
+        /* lib/ may not exist */
+      }
+      try {
+        scanStaleJs(path.join(failClone, 'bin'));
+      } catch {
+        /* bin/ may not exist */
+      }
+      assert.deepStrictEqual(
+        staleJs,
+        [],
+        `Stale .js files found after prepack failure: ${staleJs.join(', ')}`,
+      );
+
+      // package.json should not be mutated (no .ts → .js rewrite persisted)
+      const failPkg = JSON.parse(
+        fs.readFileSync(path.join(failClone, 'package.json'), 'utf8'),
+      );
+      assert.ok(
+        (failPkg.scripts.start as string).includes('.ts'),
+        'package.json scripts.start should still reference .ts after failed prepack cleanup',
       );
     } finally {
       fs.rmSync(failClone, { recursive: true, force: true });
