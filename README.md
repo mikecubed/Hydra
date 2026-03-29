@@ -331,13 +331,29 @@ npm start
 # Terminal 2: start the packaged web gateway
 HYDRA_WEB_OPERATOR_ID=admin \
 HYDRA_WEB_OPERATOR_SECRET=password123 \
-node dist/web-runtime/server.js
+node node_modules/hydra/dist/web-runtime/server.js
 ```
 
 Then open `http://127.0.0.1:4174/login` in your browser. For remote host access, add
 `HYDRA_WEB_GATEWAY_HOST=0.0.0.0` and set `HYDRA_WEB_GATEWAY_ORIGIN` to the exact public URL
 browsers will use. See [apps/web-gateway/README.md](apps/web-gateway/README.md) for full
 remote host guidance.
+
+### Web release-readiness command set
+
+If your change touches `apps/web`, `apps/web-gateway`, or `packages/web-contracts`, run this full
+verification sequence from the repo root before opening a PR:
+
+```bash
+npm run quality
+npm test
+npm run package:evidence
+```
+
+For a manual packaged-runtime smoke test, generate a tarball with `npm pack`, install it into a
+scratch directory, and launch `node node_modules/hydra/dist/web-runtime/server.js` from that
+scratch install. `postpack` removes `dist/web-runtime/` from the source checkout, so the working
+tree is not the packaged-runtime test target after `npm pack`.
 
 > If `dist/web-runtime/` is missing from the installed package, the artifact is incomplete.
 > Rebuild from a source checkout with `npm pack` (which runs `prepack` and produces a complete

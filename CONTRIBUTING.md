@@ -99,10 +99,11 @@ npm --workspace @hydra/web-gateway run start:with-web
 Open `http://127.0.0.1:4174/login` to verify the workspace loads. If the browser bundle is already
 built, use `npm --workspace @hydra/web-gateway run start` to skip the rebuild.
 
-For packaged-runtime testing (npm tarball), verify the installed package or an unpacked tarball —
+For packaged-runtime testing (npm tarball), verify an installed package from a scratch directory —
 not the source checkout after `npm pack`. The pack flow assembles `dist/web-runtime/` during
-`prepack`, but `postpack` removes it from the working tree again. Smoke-test the packaged runtime
-from the extracted package contents, for example `node package/dist/web-runtime/server.js`.
+`prepack`, but `postpack` removes it from the working tree again. Generate a tarball with
+`npm pack`, install it into a scratch directory, and smoke-test the packaged runtime there, for
+example `node node_modules/hydra/dist/web-runtime/server.js`.
 
 ### Troubleshooting
 
@@ -110,8 +111,8 @@ from the extracted package contents, for example `node package/dist/web-runtime/
   The gateway binds to port 4174 by default.
 - **`dist/web-runtime/` missing in the source checkout** — this is expected after `npm pack` because
   `postpack` cleans the working tree. Use `npm run package:evidence` for packaging validation, or
-  inspect/extract the generated tarball if you need to run `package/dist/web-runtime/server.js`
-  manually.
+  install the generated tarball into a scratch directory if you need to run
+  `node node_modules/hydra/dist/web-runtime/server.js` manually.
 - **Browser tests fail with `vitest` errors** — ensure workspace dependencies are installed:
   `npm ci` from the repo root installs all workspace packages.
 - **ESLint boundary violations** — web packages must not import from `lib/` directly. Shared types

@@ -9,8 +9,10 @@
 - Phase 2 complete (`T011-T016`)
 - Phase 3 complete (`T017-T020`)
 - Phase 4 complete (`T021-T025`)
+- Phase 5 complete (`T026-T030`)
 - `T021-T025` complete (budgets/evidence, hotspot audit, responsiveness fixes, regressions, and packaging/build evidence)
-- Next active task: `T026` contributor verification and troubleshooting guidance
+- `T026-T030` complete (contributor guidance, web-interface status docs, workspace README verification checklists, release-readiness workflow gates, and final command-set handoff docs)
+- Feature status: all planned phases complete
 
 ## Phase 0 — Baseline and Scope Matrix
 
@@ -54,11 +56,11 @@
 
 ## Phase 5 — User Story 5: Contributor Release Readiness (Priority: P3)
 
-- [ ] T026 [US5] Write contributor verification and troubleshooting guidance in CONTRIBUTING.md
-- [ ] T027 [US5] Update web-interface status and completion guidance in docs/WEB_INTERFACE.md and docs/web-interface/06-phases-and-sdd.md
-- [ ] T028 [US5] Align workspace READMEs with the final verification checklist in apps/web/README.md and apps/web-gateway/README.md
-- [ ] T029 [US5] Add or refine release-readiness workflow checks in .github/workflows/ci.yml and .github/workflows/quality.yml
-- [ ] T030 [US5] Run and document the final release-readiness command set in README.md and CONTRIBUTING.md
+- [x] T026 [US5] Write contributor verification and troubleshooting guidance in CONTRIBUTING.md
+- [x] T027 [US5] Update web-interface status and completion guidance in docs/WEB_INTERFACE.md and docs/web-interface/06-phases-and-sdd.md
+- [x] T028 [US5] Align workspace READMEs with the final verification checklist in apps/web/README.md and apps/web-gateway/README.md
+- [x] T029 [US5] Add or refine release-readiness workflow checks in .github/workflows/ci.yml and .github/workflows/quality.yml
+- [x] T030 [US5] Run and document the final release-readiness command set in README.md and CONTRIBUTING.md
 
 ## Phase 5 Readiness Matrix
 
