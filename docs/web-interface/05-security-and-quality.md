@@ -87,7 +87,7 @@ These are Phase 0 target budgets. Enforcement via CI is planned for the evidence
 | JS bundle size (gzipped)      | ≤ 250 KB      | Vite build output — check total gzip column       |
 | CSS bundle size (gzipped)     | ≤ 50 KB       | Vite build output — check total gzip column       |
 | Build time                    | ≤ 30 s        | Wall-clock time of build command                  |
-| Package dry-run succeeds      | exit 0        | `npm run package:dry-run`                         |
+| Root CLI package dry-run succeeds | exit 0     | `npm run package:dry-run` (validates root CLI package only) |
 
 ### Runtime responsiveness targets
 
@@ -139,7 +139,7 @@ regressions from going unnoticed between phases.
 | --------------------------------- | --------------------------------------------- | ----------------------------------------------- |
 | Unnecessary rerenders per update  | ≤ 3 render cycles per single state change     | Browser spec profiling assertions (🔮 T021–T025) |
 | Visible DOM node count            | ≤ 2 000 nodes on any primary surface          | Browser spec DOM measurement (🔮 T021–T025)      |
-| Pending request queue             | ≤ 10 concurrent in-flight daemon requests     | Gateway integration test assertions (✅)         |
+| Daemon replay concurrency         | ≤ 8 concurrent replay fetches per connection  | Gateway transport defaults + tests (✅)          |
 | Error retry storms                | Capped per subsystem: stream reconnect ≤ 10 attempts (1–30 s backoff), approval hydration ≤ 3 retries; all surface failure on exhaustion | Gateway and browser spec assertions (✅) |
 
 ### Failure-mode guardrails
@@ -161,7 +161,7 @@ commands and test layers available today:
    should assert failure-mode behaviors (error banners, redirects, retry limits) where feasible.
 2. **Quality gate** — `npm run quality` catches lint, format, type, and cycle regressions.
 3. **Build verification** — `npm --workspace @hydra/web run build` confirms bundle budgets.
-4. **Package verification** — `npm run package:dry-run` confirms packaging integrity.
+4. **Root package verification** — `npm run package:dry-run` validates the published root CLI package only. It does not verify `apps/web` or gateway-served asset packaging, which remains future work for T025.
 
 No new tooling is introduced in Phase 0. Quantitative render-count and DOM-node-count enforcement
 requires instrumentation that will land with the evidence-hook tasks (T021–T025). Until then, the
