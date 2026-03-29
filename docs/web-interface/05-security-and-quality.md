@@ -76,7 +76,10 @@ Every primary web surface must meet explicit responsiveness targets under normal
 conditions. "Normal" means one active operator session on a development machine with the daemon and
 gateway running locally.
 
-### Build and bundle budgets
+### Build and bundle targets
+
+These are Phase 0 target budgets. Enforcement via CI is planned for the evidence-hook tasks
+(T021–T025).
 
 | Metric                        | Threshold     | Evidence command                                  |
 | ----------------------------- | ------------- | ------------------------------------------------- |
@@ -88,29 +91,42 @@ gateway running locally.
 
 ### Runtime responsiveness targets
 
-| Surface                       | Metric                          | Target    |
-| ----------------------------- | ------------------------------- | --------- |
-| Login page                    | Time to interactive (TTI)       | ≤ 2 s     |
-| Authenticated workspace       | Time to interactive (TTI)       | ≤ 3 s     |
-| Operations panels             | First meaningful paint          | ≤ 2 s     |
-| Mutation dialogs              | Open-to-interactive             | ≤ 500 ms  |
-| Live update cycle             | Input-to-render latency         | ≤ 200 ms  |
-| Repeated refresh (10 cycles)  | No cumulative memory growth     | < 5 % increase over baseline |
-| WebSocket reconnect           | Reconnect-to-data-flowing       | ≤ 3 s     |
+The following targets define the expected user-perceived responsiveness for each primary surface.
+Behavioral targets (marked ✅) can be verified today through jsdom-based browser specs and
+integration tests. Timing and profiling targets (marked 🔮) require real-browser instrumentation
+that is not yet in place — they are recorded here as design intent and will become enforceable once
+evidence-hook work lands (see T021–T025 in the task graph).
 
-### Enforcement and evidence
+| Surface                       | Metric                          | Target    | Verifiable now |
+| ----------------------------- | ------------------------------- | --------- | -------------- |
+| Login page                    | Mounts without error            | yes       | ✅              |
+| Authenticated workspace       | Mounts without error            | yes       | ✅              |
+| Operations panels             | Renders initial content          | yes       | ✅              |
+| Mutation dialogs              | Open-to-interactive             | ≤ 500 ms  | 🔮              |
+| Live update cycle             | Input-to-render latency         | ≤ 200 ms  | 🔮              |
+| Repeated refresh (10 cycles)  | No unreclaimed subscriptions    | 0 leaks   | ✅              |
+| WebSocket reconnect           | Reconnect attempt initiated     | ≤ 3 s     | ✅              |
+| Login page                    | Time to interactive (TTI)       | ≤ 2 s     | 🔮              |
+| Authenticated workspace       | Time to interactive (TTI)       | ≤ 3 s     | 🔮              |
+| Operations panels             | First meaningful paint (FMP)    | ≤ 2 s     | 🔮              |
+| Repeated refresh (10 cycles)  | Cumulative memory growth        | < 5 %     | 🔮              |
 
-- **Browser specs** (`apps/web/src/features/**/*.browser.spec.tsx`) must include at least one
-  timing assertion per surface listed above to prevent regression.
+### Evidence expectations
+
+These budgets are **target expectations for Phase 0**, not already-enforced CI checks. Current
+evidence relies on the commands and test layers that exist today:
+
+- **Browser specs** (`apps/web/src/features/**/*.browser.spec.tsx`) should include behavioral
+  assertions (mount success, subscription cleanup, reconnect initiation) for the ✅ rows above.
 - **Gateway tests** (`npm --workspace @hydra/web-gateway run test`) must pass without timeout
   failures.
 - **Quality gate** (`npm run quality`) must pass — this validates linting, formatting, type
   checking, and cycle detection.
-- **CI** surfaces any budget violation as a failing check. Build-size budgets are enforced by
-  checking Vite build output in CI; runtime budgets are enforced through browser spec assertions.
+- **Real-browser timing enforcement** (TTI, FMP, memory profiling) is deferred to the evidence-hook
+  tasks (T021–T025). Until those land, 🔮 rows are design targets tracked by review, not by CI.
 
-Budget thresholds are intentionally generous for Phase 0. Later phases may tighten them as
-profiling evidence accumulates.
+Budget thresholds are intentionally generous for Phase 0. Later phases may tighten them and
+introduce automated CI enforcement as profiling instrumentation matures.
 
 ## Hardening Budgets
 
@@ -119,12 +135,12 @@ regressions from going unnoticed between phases.
 
 ### State and rendering limits
 
-| Concern                           | Budget                                        | Verification                                    |
+| Concern                           | Budget                                        | Verification (target)                           |
 | --------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Unnecessary rerenders per update  | ≤ 3 render cycles per single state change     | Browser spec profiling assertions               |
-| Visible DOM node count            | ≤ 2 000 nodes on any primary surface          | Browser spec DOM measurement                    |
-| Pending request queue             | ≤ 10 concurrent in-flight daemon requests     | Gateway integration test assertions             |
-| Error retry storms                | Max 3 automatic retries, then surface failure | Gateway and browser spec assertions             |
+| Unnecessary rerenders per update  | ≤ 3 render cycles per single state change     | Browser spec profiling assertions (🔮 T021–T025) |
+| Visible DOM node count            | ≤ 2 000 nodes on any primary surface          | Browser spec DOM measurement (🔮 T021–T025)      |
+| Pending request queue             | ≤ 10 concurrent in-flight daemon requests     | Gateway integration test assertions (✅)         |
+| Error retry storms                | Max 3 automatic retries, then surface failure | Gateway and browser spec assertions (✅)         |
 
 ### Failure-mode guardrails
 
@@ -136,17 +152,20 @@ regressions from going unnoticed between phases.
 | WebSocket dropped              | Reconnect attempt within 3 s; exponential backoff capped at 30 s |
 | Gateway startup without assets | Clear unsupported-state message; no blank page              |
 
-### Evidence collection
+### Evidence expectations
 
-Hardening budgets are verified through:
+Hardening budgets are target expectations for Phase 0. Evidence should be collected through the
+commands and test layers available today:
 
-1. **Existing test suites** — `npm test` runs all unit, integration, and browser specs.
+1. **Existing test suites** — `npm test` runs all unit, integration, and browser specs. Tests
+   should assert failure-mode behaviors (error banners, redirects, retry limits) where feasible.
 2. **Quality gate** — `npm run quality` catches lint, format, type, and cycle regressions.
 3. **Build verification** — `npm --workspace @hydra/web run build` confirms bundle budgets.
 4. **Package verification** — `npm run package:dry-run` confirms packaging integrity.
 
-No new tooling is introduced in Phase 0. Evidence relies entirely on existing commands and test
-assertions.
+No new tooling is introduced in Phase 0. Quantitative render-count and DOM-node-count enforcement
+requires instrumentation that will land with the evidence-hook tasks (T021–T025). Until then, the
+state and rendering limits above are design targets verified by review.
 
 ## Test and CI Expectations
 
@@ -167,6 +186,9 @@ Required CI gates:
 - unit/integration/component/e2e tests;
 - cycle or boundary verification;
 - dependency and secret scanning;
-- no backsliding on coverage expectations;
+- no backsliding on coverage expectations.
+
+Target CI gates (to be added by evidence-hook tasks T021–T025):
+
 - build-size budget checks (Vite output, see Responsiveness Budgets above);
 - responsiveness regression assertions in browser specs.
