@@ -7,8 +7,8 @@
 - Phase 0 complete (`T001-T003`)
 - Phase 1 complete (`T004-T010`)
 - Phase 2 complete (`T011-T016`)
-- Phase 3 underway — `T017` complete; `T018` and `T019` are in progress with login, dialogs, composer, config controls, and operations panel accessibility improvements landed
-- Next active phase: Phase 3 — User Story 3: Accessible Core Workflows (`T017-T020`)
+- Phase 3 complete (`T017-T020`)
+- Next active phase: Phase 4 — User Story 4: Responsive and Efficient Operations View (`T021-T025`)
 
 ## Phase 0 — Baseline and Scope Matrix
 
@@ -38,9 +38,9 @@
 ## Phase 3 — User Story 3: Accessible Core Workflows (Priority: P2)
 
 - [x] T017 [US3] Audit focus order, labels, and error semantics in apps/web/src/features/auth/, apps/web/src/features/chat-workspace/, apps/web/src/features/operations-panels/, and apps/web/src/features/mutations/
-- [ ] T018 [US3] Implement keyboard and focus-management fixes across affected apps/web/src/features/\*_/_.tsx surfaces
-- [ ] T019 [P] [US3] Add accessibility-focused browser specs for login, workspace, operations panels, and mutation dialogs in apps/web/src/features/\*_/_.browser.spec.tsx
-- [ ] T020 [US3] Document accessibility expectations and supported viewport range in docs/web-interface/05-security-and-quality.md and apps/web/README.md
+- [x] T018 [US3] Implement keyboard and focus-management fixes across affected apps/web/src/features/\*_/_.tsx surfaces
+- [x] T019 [P] [US3] Add accessibility-focused browser specs for login, workspace, operations panels, and mutation dialogs in apps/web/src/features/\*_/_.browser.spec.tsx
+- [x] T020 [US3] Document accessibility expectations and supported viewport range in docs/web-interface/05-security-and-quality.md and apps/web/README.md
 
 ## Phase 4 — User Story 4: Responsive and Efficient Operations View (Priority: P2)
 

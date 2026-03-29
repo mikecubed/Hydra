@@ -70,6 +70,55 @@ The web initiative should use the strictest practical engineering discipline.
 - no unchecked `any` escape hatches in protocol packages;
 - mandatory tests for new public contracts and stateful workflows.
 
+## Accessibility Expectations
+
+The highest-value operator workflows must remain keyboard-operable and assistive-technology-friendly
+across both nominal and degraded states.
+
+### Required interaction guarantees
+
+- Login, composer submission, mutation confirmation, and operations controls must be completable with
+  keyboard-only interaction.
+- Dialogs and other blocking confirmation surfaces must place initial focus predictably, support
+  `Escape` dismissal when cancellation is available, and keep keyboard focus trapped inside the
+  active dialog until it closes.
+- Inline validation, degraded banners, retry guidance, and other important error states must be
+  exposed through explicit `role="alert"` / `role="status"` semantics or equivalent ARIA wiring —
+  not through color or layout alone.
+- Inputs and selectors that depend on supporting text (policy guidance, current status, validation
+  copy, pending-state explanations) must link that text through `aria-describedby` so the context is
+  available to assistive technology.
+- Async state transitions that materially change operator understanding — for example daemon recovery,
+  operations refresh state, or degraded retry feedback — must be announced in polite or assertive
+  live regions appropriate to their severity.
+
+### Evidence expectations for accessibility
+
+- Browser specs must cover login, workspace composer, operations panels, and mutation dialogs for
+  keyboard/focus/error-state behavior.
+- Dialog primitives and route-level shells should be tested through the real mounted feature path
+  whenever practical, so accessibility regressions are caught in shared components as well as in
+  feature-local wrappers.
+- `npm run quality` remains required for accessibility work because lint, formatting, type-checking,
+  and cycle detection protect the maintainability of these stateful UI flows.
+
+## Supported Viewport Range
+
+The current operator-facing browser surface is supported for **full workflow completion** at viewport
+widths of **1024 px and above**. This range reflects the present two-column workspace and operations
+sidebar layout, including the guarded `minWidth: 0` grid behavior used to prevent the chat column
+from blowing out during operations refreshes.
+
+Additional notes:
+
+- The login screen, session banners, and modal dialogs remain usable below 1024 px, but the full
+  authenticated workspace + operations-sidebar experience is not yet treated as release-ready below
+  that width.
+- Narrower viewport hardening remains a Phase 4 concern (T021–T025). Until that work lands, widths
+  below 1024 px are best-effort for inspection and recovery, not the guaranteed operator target.
+- Documentation and review should treat unexpected overlap, hidden controls, or task-blocking
+  clipping at 1024 px and above as regressions against this supported range.
+
 ## Responsiveness Budgets
 
 Every primary web surface must meet explicit responsiveness targets under normal local operating

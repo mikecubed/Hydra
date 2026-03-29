@@ -210,6 +210,28 @@ open automatically.
 - If connection, session, or daemon health degrades, expect the banner state to explain why the UI
   is limited.
 
+### Accessibility expectations
+
+- Core operator workflows are expected to work with keyboard-only interaction: login, composer
+  submission, mutation confirmation, and operations control actions.
+- Important failure or recovery states are surfaced through explicit alerts/status regions rather
+  than color alone. This includes session expiry, daemon unavailability, degraded operations
+  snapshots, and inline mutation validation.
+- Dialogs and confirmation flows are expected to manage focus predictably: initial focus is placed on
+  the first safe action, `Escape` closes cancellable dialogs, and focus stays inside the dialog
+  while it is open.
+- Inputs/selectors with supporting guidance or validation state should expose that context through
+  `aria-describedby` / `aria-invalid`, not just adjacent text.
+
+### Supported viewport range
+
+- **Guaranteed full workspace support:** `1024px` viewport width and above.
+- Below `1024px`, the login route, banners, and dialogs should remain usable, but the combined
+  workspace + operations-sidebar layout is still best-effort rather than a release-ready target.
+- If you are validating accessibility or usability for the main authenticated workspace, use a
+  desktop-class viewport (`>=1024px`) until the narrower viewport hardening work in the next phase
+  lands.
+
 ## Source Layout
 
 ```
