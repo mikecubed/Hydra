@@ -28,10 +28,21 @@ export function SessionProvider({
 }: SessionProviderProps): React.JSX.Element {
   const session = useSession(pollInterval);
   const redirectScheduled = useRef(false);
+  const hadAuthenticatedSession = useRef(false);
 
   useEffect(() => {
     const state = session.session?.state;
-    if (state != null && REDIRECT_STATES.has(state) && !redirectScheduled.current) {
+    if (session.session != null) {
+      hadAuthenticatedSession.current = true;
+    }
+
+    const lostSessionAfterAuth =
+      session.session == null && !session.isLoading && hadAuthenticatedSession.current;
+
+    if ((state != null && REDIRECT_STATES.has(state)) || lostSessionAfterAuth) {
+      if (redirectScheduled.current) {
+        return;
+      }
       redirectScheduled.current = true;
       const redirect = onRedirect ?? ((path: string) => globalThis.location?.assign(path));
       const timer = setTimeout(() => {
@@ -41,10 +52,10 @@ export function SessionProvider({
         clearTimeout(timer);
       };
     }
-    if (state != null && !REDIRECT_STATES.has(state)) {
+    if (session.session != null && !REDIRECT_STATES.has(state)) {
       redirectScheduled.current = false;
     }
-  }, [session.session?.state, loginPath, onRedirect]);
+  }, [session.isLoading, session.session, session.session?.state, loginPath, onRedirect]);
 
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
 }

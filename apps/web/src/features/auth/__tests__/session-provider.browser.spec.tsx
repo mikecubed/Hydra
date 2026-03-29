@@ -305,4 +305,42 @@ describe('SessionProvider redirect on expiry (T012)', () => {
 
     vi.useRealTimers();
   });
+
+  it('redirects to /login when a previously-authenticated session collapses to null', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession
+      .mockReturnValueOnce(
+        makeSessionResult({
+          session: {
+            operatorId: 'op-1',
+            state: 'active',
+            expiresAt: now,
+            lastActivityAt: now,
+            createdAt: now,
+          },
+        }),
+      )
+      .mockReturnValueOnce(makeSessionResult({ session: null, isLoading: false }));
+
+    const { rerender } = render(
+      <SessionProvider onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    rerender(
+      <SessionProvider onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledWith('/login');
+
+    vi.useRealTimers();
+  });
 });

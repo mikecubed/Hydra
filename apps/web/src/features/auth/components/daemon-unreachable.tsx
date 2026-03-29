@@ -63,6 +63,8 @@ export function DaemonUnreachable(): React.JSX.Element | null {
     setRetryError(null);
     try {
       await refresh();
+      setRetryCount((c) => c + 1);
+      setRetryError('Hydra daemon is still unavailable. Try again shortly.');
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Could not reach the daemon. Try again shortly.';

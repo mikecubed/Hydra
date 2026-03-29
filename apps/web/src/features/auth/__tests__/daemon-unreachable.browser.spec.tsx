@@ -299,4 +299,33 @@ describe('DaemonUnreachable', () => {
       expect(screen.queryByTestId('daemon-unreachable')).not.toBeInTheDocument();
     });
   });
+
+  it('shows explicit feedback when refresh succeeds but daemon remains unavailable', async () => {
+    const user = userEvent.setup();
+    const refreshFn = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    mockUseSessionContext.mockReturnValue(
+      makeMockContext({
+        session: {
+          operatorId: 'op-1',
+          state: 'daemon-unreachable',
+          expiresAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        refresh: refreshFn,
+      }),
+    );
+
+    render(<DaemonUnreachable />);
+
+    await user.click(screen.getByTestId('daemon-unreachable-retry'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('daemon-retry-error')).toHaveTextContent(
+        'Hydra daemon is still unavailable. Try again shortly.',
+      );
+      expect(screen.getByTestId('daemon-retry-count')).toHaveTextContent('1 failed attempt');
+    });
+  });
 });
