@@ -61,38 +61,41 @@ To keep the work easier to reason about, the design has been split into smaller 
 
 ## Supported Packaging Targets
 
-The web interface is available only from a **source checkout**. The npm package and standalone
-executable do not include the web workspace packages.
+The web interface is supported from both a **source checkout** and the published **npm package**.
+Standalone executables remain CLI-only.
 
-| Distribution form         | Web interface status | Reason                                                          |
-| ------------------------- | -------------------- | --------------------------------------------------------------- |
-| **Source checkout**       | ✅ Supported         | Full monorepo; build browser bundle, start gateway + daemon     |
-| **npm package** (tarball) | ❌ Not included      | `apps/` and `packages/` are excluded from the published tarball |
-| **Standalone executable** | ❌ Not included      | Single binary; operator mode only (`--full` unsupported)        |
+| Distribution form         | Web interface status | Reason                                                                               |
+| ------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| **Source checkout**       | ✅ Supported         | Full monorepo; build browser bundle, start gateway + daemon                          |
+| **npm package** (tarball) | ✅ Included          | Published artifact ships `dist/web-runtime/` with bundled gateway entry + web assets |
+| **Standalone executable** | ❌ Not included      | Single binary; operator mode only (`--full` unsupported)                             |
 
 ### What this means for operators
 
 - **Source checkout users** follow the startup commands in
   [apps/web-gateway/README.md](../apps/web-gateway/README.md) to build the browser bundle, start
   the daemon, and launch the same-origin gateway.
-- **npm package users** get full CLI/REPL orchestration (daemon, concierge, council, tasks, evolve,
-  operator console) but cannot start the web interface. If the gateway is somehow started without
-  the browser bundle, it returns an explicit **503** response:
-  `Missing built frontend assets. Run npm --workspace @hydra/web run build first.`
+- **npm package users** get full CLI/REPL orchestration and can also start the packaged web
+  interface via `node dist/web-runtime/server.js`. The published tarball includes
+  `dist/web-runtime/server.js`, bundled browser assets under `dist/web-runtime/web/`, and a
+  `.packaged` sentinel used for packaged-runtime detection. If those bundled assets are missing,
+  the package artifact is incomplete and should be rebuilt from a source checkout.
 - **Standalone exe users** get operator-mode CLI support (`hydra`, `hydra --prompt`, subcommands)
   but `hydra --full` is explicitly rejected in standalone `.exe` builds. The web interface is not
   available.
 
-### Why the web interface is source-checkout only
+### Why source checkout and npm package support differ
 
 The web interface is built around a same-origin gateway that serves the React browser bundle
-(`apps/web/dist`) and owns HTTP/WebSocket routing, authentication, CSRF protection, and session
-management. This architecture relies on the full monorepo workspace structure (`apps/web`,
-`apps/web-gateway`, `packages/web-contracts`) which is intentionally excluded from the npm tarball
-and standalone binary to keep those artifacts focused on CLI orchestration.
+(`apps/web/dist` in a source checkout, `dist/web-runtime/web/` in the npm package) and owns
+HTTP/WebSocket routing, authentication, CSRF protection, and session management.
 
-Packaging the web runtime into the tarball or executable is a potential future enhancement tracked
-in the [Phase 5 roadmap tasks](../.sdd/web-hardening-packaging-v7n2k4q9/tasks.md) (T004–T010).
+- **Source checkout** keeps the full monorepo layout (`apps/web`, `apps/web-gateway`,
+  `packages/web-contracts`) and is the best surface for active development.
+- **npm package** ships a prebuilt packaged runtime under `dist/web-runtime/` so operators can run
+  the gateway and bundled frontend without the workspace sources.
+- **Standalone executable** stays focused on CLI orchestration and does not include the packaged web
+  runtime.
 
 ## Next Step
 

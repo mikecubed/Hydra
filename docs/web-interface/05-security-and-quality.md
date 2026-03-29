@@ -161,7 +161,10 @@ commands and test layers available today:
    should assert failure-mode behaviors (error banners, redirects, retry limits) where feasible.
 2. **Quality gate** — `npm run quality` catches lint, format, type, and cycle regressions.
 3. **Build verification** — `npm --workspace @hydra/web run build` confirms bundle budgets.
-4. **Root package verification** — `npm run package:dry-run` validates the published root CLI package only. It does not verify `apps/web` or gateway-served asset packaging, which remains future work for T025.
+4. **Root package verification** — `npm run package:dry-run` validates the published root CLI
+   package shape only. Packaged web runtime verification now comes from `test/packaging.test.ts`,
+   which asserts that the tarball includes `dist/web-runtime/` and that the bundled gateway starts
+   successfully. Broader packaging/build evidence automation for CI remains future work for T025.
 
 No new tooling is introduced in Phase 0. Quantitative render-count and DOM-node-count enforcement
 requires instrumentation that will land with the evidence-hook tasks (T021–T025). Until then, the
