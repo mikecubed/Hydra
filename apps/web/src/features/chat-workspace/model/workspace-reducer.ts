@@ -143,13 +143,6 @@ function ensureConversation(
   return conversations.get(conversationId) ?? createConversationViewState({ id: conversationId });
 }
 
-function ensureDraft(
-  drafts: ReadonlyMap<string, ComposerDraftState>,
-  conversationId: string,
-): ComposerDraftState {
-  return drafts.get(conversationId) ?? createDraftState(conversationId);
-}
-
 function withDraft(
   drafts: ReadonlyMap<string, ComposerDraftState>,
   conversationId: string,
@@ -374,7 +367,7 @@ function applyConversationLoadState(
   loadState: ConversationLoadState,
 ): WorkspaceState {
   const current = state.conversations.get(conversationId);
-  if (current != null && current.loadState === loadState) return state;
+  if (current?.loadState === loadState) return state;
 
   const resolved = current ?? createConversationViewState({ id: conversationId });
   const nextConversations = new Map(state.conversations);

@@ -8,9 +8,9 @@
 - Phase 1 complete (`T004-T010`)
 - Phase 2 complete (`T011-T016`)
 - Phase 3 complete (`T017-T020`)
-- Phase 4 in progress (`T021-T025`)
-- `T021-T023` complete (budgets/evidence, hotspot audit, and responsiveness fixes)
-- Next active task: `T024` responsiveness regression coverage
+- Phase 4 complete (`T021-T025`)
+- `T021-T025` complete (budgets/evidence, hotspot audit, responsiveness fixes, regressions, and packaging/build evidence)
+- Next active task: `T026` contributor verification and troubleshooting guidance
 
 ## Phase 0 — Baseline and Scope Matrix
 
@@ -49,8 +49,8 @@
 - [x] T021 [US4] Define responsiveness budgets and evidence collection points in docs/web-interface/05-security-and-quality.md and .github/workflows/quality.yml
 - [x] T022 [US4] Audit render, refresh, and reconnect hotspots in apps/web/src/features/chat-workspace/model/ and apps/web/src/features/operations-panels/model/
 - [x] T023 [US4] Implement targeted responsiveness fixes in apps/web/src/features/chat-workspace/, apps/web/src/features/operations-panels/, and apps/web/src/features/mutations/
-- [ ] T024 [P] [US4] Add regression coverage for narrow viewport and refresh-cycle responsiveness in apps/web/src/features/\*_/_.browser.spec.tsx
-- [ ] T025 [P] [US4] Add packaging/build evidence checks in package.json and .github/workflows/ci.yml
+- [x] T024 [P] [US4] Add regression coverage for narrow viewport and refresh-cycle responsiveness in apps/web/src/features/\*_/_.browser.spec.tsx
+- [x] T025 [P] [US4] Add packaging/build evidence checks in package.json and .github/workflows/ci.yml
 
 ## Phase 5 — User Story 5: Contributor Release Readiness (Priority: P3)
 

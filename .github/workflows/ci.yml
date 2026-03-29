@@ -56,3 +56,43 @@ jobs:
         env:
           HUSKY: '0'
       - run: npm test
+
+  package-evidence:
+    name: Packaging evidence
+    needs: syntax
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+        env:
+          HUSKY: '0'
+      - name: Validate packed tarball evidence
+        run: npm run package:evidence
+        env:
+          HUSKY: '0'
+
+  exe-build-evidence:
+    name: EXE build evidence
+    needs: syntax
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+        env:
+          HUSKY: '0'
+      - name: Validate standalone EXE build
+        run: npm run build:exe:ci
+        env:
+          HUSKY: '0'

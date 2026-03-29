@@ -127,21 +127,23 @@ gateway running locally.
 
 ### Build and bundle targets
 
-| Metric                            | Threshold | Evidence command                                            | CI enforced |
-| --------------------------------- | --------- | ----------------------------------------------------------- | ----------- |
-| Production build succeeds         | exit 0    | `npm --workspace @hydra/web run build`                      | ✅          |
-| JS bundle size (gzipped)          | ≤ 250 KB  | Vite build output — check total gzip column                 | ✅          |
-| CSS bundle size (gzipped)         | ≤ 50 KB   | Vite build output — check total gzip column                 | ✅          |
-| Build time                        | ≤ 30 s    | Wall-clock time of build command                            | ✅          |
-| Root CLI package dry-run succeeds | exit 0    | `npm run package:dry-run` (validates root CLI package only) | —           |
+| Metric                         | Threshold | Evidence command                                                    | CI enforced |
+| ------------------------------ | --------- | ------------------------------------------------------------------- | ----------- |
+| Production build succeeds      | exit 0    | `npm --workspace @hydra/web run build`                              | ✅          |
+| JS bundle size (gzipped)       | ≤ 250 KB  | Vite build output — check total gzip column                         | ✅          |
+| CSS bundle size (gzipped)      | ≤ 50 KB   | Vite build output — check total gzip column                         | ✅          |
+| Build time                     | ≤ 30 s    | Wall-clock time of build command                                    | ✅          |
+| Root package evidence succeeds | exit 0    | `npm run package:evidence` (dry-run pack + packaged tarball checks) | ✅          |
 
 The `web-responsiveness` job in `.github/workflows/quality.yml` enforces the first four rows on the
 workflow's currently configured trigger set: pushes to `main` / `dev` / `fix/**` / `feat/**` /
 `feature/**` / `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` /
 `feature/**`. The job builds the web workspace, parses Vite's output for gzipped asset sizes, and
 fails the run if any threshold is exceeded. Build time is measured via wall-clock timing of the
-build step. Root CLI package dry-run is not included because it validates packaging scope (T025),
-not responsiveness.
+build step. Packaging scope now has its own evidence wiring in `.github/workflows/ci.yml` via the
+`package-evidence` job (`npm run package:evidence`) plus the Windows `exe-build-evidence` job
+(`npm run build:exe:ci`), so packaging verification is explicit without overloading the
+`web-responsiveness` gate.
 
 ### Runtime responsiveness targets
 

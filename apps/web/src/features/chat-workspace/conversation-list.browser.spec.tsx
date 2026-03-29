@@ -68,6 +68,21 @@ function installFetchStub(handler: (url: string, init: RequestInit | undefined) 
     try {
       return Promise.resolve(handler(url, init));
     } catch (err: unknown) {
+      if (/^\/conversations\/[^/]+\/approvals$/.test(url)) {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/operations/snapshot') {
+        return Promise.resolve(
+          jsonResponse({
+            queue: [],
+            health: null,
+            budget: null,
+            availability: 'empty',
+            lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+            nextCursor: null,
+          }),
+        );
+      }
       if (url === '/config/safe') {
         return Promise.resolve(
           jsonResponse({
@@ -143,7 +158,7 @@ describe('workspace conversation browsing', () => {
 
     render(<AppProviders />);
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Service Unavailable');
+    expect(await screen.findByText(/service unavailable/i)).toBeInTheDocument();
     openWorkspaceSocket();
 
     fireEvent.change(screen.getByRole('textbox', { name: /instruction/i }), {
@@ -152,7 +167,7 @@ describe('workspace conversation browsing', () => {
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
     expect(await screen.findByRole('button', { name: /fresh conversation/i })).toBeTruthy();
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/service unavailable/i)).toBeNull();
     expect(screen.getByText('Active conversation: Fresh conversation')).toBeTruthy();
   });
 

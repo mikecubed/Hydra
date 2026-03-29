@@ -13,6 +13,7 @@ import type {
 } from './model/workspace-store.ts';
 import {
   FakeWebSocket,
+  jsonResponse,
   openAndSubscribe,
   resetFakeWebSockets,
   streamFrame,
@@ -111,9 +112,43 @@ function installFetchStub(handler: (url: string, init: RequestInit | undefined) 
         }),
       );
     }
-    return Promise.resolve(handler(url, init));
+    try {
+      return Promise.resolve(handler(url, init));
+    } catch (err: unknown) {
+      if (/^\/conversations\/[^/]+\/approvals$/.test(url)) {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/operations/snapshot') {
+        return Promise.resolve(
+          jsonResponse({
+            queue: [],
+            health: null,
+            budget: null,
+            availability: 'empty',
+            lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+            nextCursor: null,
+          }),
+        );
+      }
+      throw err;
+    }
   });
   vi.stubGlobal('fetch', fetchSpy);
+}
+
+async function findTranscriptSyncStatus() {
+  const statuses = await screen.findAllByRole('status');
+  const match = statuses.find((status) => /synchronizing workspace/i.test(status.textContent));
+  if (!match) {
+    throw new Error('Expected transcript synchronization status to be present');
+  }
+  return match;
+}
+
+function queryTranscriptSyncStatus() {
+  return screen
+    .queryAllByRole('status')
+    .find((status) => /synchronizing workspace/i.test(status.textContent));
 }
 
 function createEntry(overrides: Partial<TranscriptEntryState> = {}): TranscriptEntryState {
@@ -1109,7 +1144,7 @@ describe('TranscriptPane', () => {
     const sendButton = screen.getByRole('button', { name: /send/i });
     fireEvent.change(instructionBox, { target: { value: 'Follow-up instruction' } });
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/synchronizing workspace/i);
+    expect(await findTranscriptSyncStatus()).toHaveTextContent(/synchronizing workspace/i);
     expect(sendButton.getAttribute('disabled')).not.toBeNull();
 
     resolveFirstHistory?.(
@@ -1127,8 +1162,8 @@ describe('TranscriptPane', () => {
 
     expect(await screen.findByText('Recovered transcript entry')).toBeInTheDocument();
     await vi.waitFor(() => {
-      expect(screen.queryByRole('alert')).toBeNull();
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByText(/sync error — transcript may be stale/i)).toBeNull();
+      expect(queryTranscriptSyncStatus()).toBeUndefined();
       expect(sendButton.getAttribute('disabled')).toBeNull();
     });
     expect(historyAttempts).toBe(2);

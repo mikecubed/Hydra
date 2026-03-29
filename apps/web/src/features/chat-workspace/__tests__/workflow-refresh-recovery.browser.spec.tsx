@@ -1270,9 +1270,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     // All three must remain present after the identical refresh payload
     const buttons = screen.getAllByRole('button');
-    const convButtons = buttons.filter(
-      (b) => b.textContent && /stable chat/i.test(b.textContent),
-    );
+    const convButtons = buttons.filter((b) => b.textContent && /stable chat/i.test(b.textContent));
     expect(convButtons).toHaveLength(3);
   });
 
@@ -1318,9 +1316,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     const ws1 = openAndSubscribe('conv-1', 0);
     act(() => {
       ws1.simulateMessage(streamFrame('conv-1', 1, 'turn-st', 'stream-started'));
-      ws1.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-st', 'text-delta', { text: 'Partial…' }),
-      );
+      ws1.simulateMessage(streamFrame('conv-1', 2, 'turn-st', 'text-delta', { text: 'Partial…' }));
     });
     expect(await screen.findByText('Partial…')).toBeInTheDocument();
     expect(screen.getByText('streaming…')).toBeInTheDocument();

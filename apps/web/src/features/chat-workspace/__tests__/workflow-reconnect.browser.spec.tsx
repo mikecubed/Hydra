@@ -170,12 +170,8 @@ describe('workspace reconnect workflow', () => {
     const ws0 = openAndSubscribe('conv-1', 0);
     act(() => {
       ws0.simulateMessage(streamFrame('conv-1', 1, 'turn-m1', 'stream-started'));
-      ws0.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-m1', 'text-delta', { text: 'Chunk-A' }),
-      );
-      ws0.simulateMessage(
-        streamFrame('conv-1', 3, 'turn-m1', 'text-delta', { text: ' Chunk-B' }),
-      );
+      ws0.simulateMessage(streamFrame('conv-1', 2, 'turn-m1', 'text-delta', { text: 'Chunk-A' }));
+      ws0.simulateMessage(streamFrame('conv-1', 3, 'turn-m1', 'text-delta', { text: ' Chunk-B' }));
     });
     expect(await screen.findByText('Chunk-A Chunk-B')).toBeInTheDocument();
 
@@ -203,12 +199,8 @@ describe('workspace reconnect workflow', () => {
     });
     // Server replays seq 3 (dup) then delivers seq 4 (new)
     act(() => {
-      ws1.simulateMessage(
-        streamFrame('conv-1', 3, 'turn-m1', 'text-delta', { text: ' Chunk-B' }),
-      );
-      ws1.simulateMessage(
-        streamFrame('conv-1', 4, 'turn-m1', 'text-delta', { text: ' Chunk-C' }),
-      );
+      ws1.simulateMessage(streamFrame('conv-1', 3, 'turn-m1', 'text-delta', { text: ' Chunk-B' }));
+      ws1.simulateMessage(streamFrame('conv-1', 4, 'turn-m1', 'text-delta', { text: ' Chunk-C' }));
     });
 
     expect(await screen.findByText('Chunk-A Chunk-B Chunk-C')).toBeInTheDocument();
@@ -236,9 +228,7 @@ describe('workspace reconnect workflow', () => {
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 4 });
     });
     act(() => {
-      ws2.simulateMessage(
-        streamFrame('conv-1', 5, 'turn-m1', 'text-delta', { text: ' Chunk-D' }),
-      );
+      ws2.simulateMessage(streamFrame('conv-1', 5, 'turn-m1', 'text-delta', { text: ' Chunk-D' }));
       ws2.simulateMessage(streamFrame('conv-1', 6, 'turn-m1', 'stream-completed'));
     });
 
@@ -290,9 +280,7 @@ describe('workspace reconnect workflow', () => {
     const ws1 = openAndSubscribe('conv-1', 0);
     act(() => {
       ws1.simulateMessage(streamFrame('conv-1', 1, 'turn-rd', 'stream-started'));
-      ws1.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-rd', 'text-delta', { text: 'Init' }),
-      );
+      ws1.simulateMessage(streamFrame('conv-1', 2, 'turn-rd', 'text-delta', { text: 'Init' }));
     });
     expect(await screen.findByText('Init')).toBeInTheDocument();
 
