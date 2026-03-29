@@ -10,6 +10,8 @@
  *   – stream-before-REST race: authoritative merge overwrites stream entries
  *   – sealed completed turns reject post-reconnect stream replays
  *   – banner visibility during reconnect recovery with stream continuity
+ *   – T024 regressions: rapid sequential deltas after refresh, multi-refresh
+ *     convergence, draft preservation, and conversation-list stability
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -984,6 +986,281 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       expect(screen.queryByRole('status')).toBeNull();
       expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
     });
+  });
+
+  // T024 regression: after a full page refresh many rapid text-deltas must each
+  // produce a visible DOM update.  Protects against T023 reference-stability
+  // early-return paths in the reducer incorrectly swallowing distinct deltas
+  // when entries-array references look "unchanged" to the mergeConversationView
+  // no-op check.
+  it('applies every rapid delta after refresh without swallowing updates', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    let refreshed = false;
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Rapid refresh')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        if (!refreshed) {
+          return jsonResponse(EMPTY_HISTORY);
+        }
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-rr', 'conv-1', {
+              response: 'Base',
+              status: 'streaming',
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /rapid refresh/i });
+
+    const ws1 = openAndSubscribe('conv-1', 0);
+    act(() => {
+      ws1.simulateMessage(streamFrame('conv-1', 1, 'turn-rr', 'stream-started'));
+      ws1.simulateMessage(
+        streamFrame('conv-1', 2, 'turn-rr', 'text-delta', { text: 'Pre-refresh' }),
+      );
+    });
+    expect(await screen.findByText('Pre-refresh')).toBeInTheDocument();
+
+    // Simulate full page refresh
+    refreshed = true;
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /rapid refresh/i });
+    await vi.waitFor(() => expect(screen.getByText('Base')).toBeInTheDocument());
+
+    const ws2 = latestSocket();
+    act(() => {
+      ws2.simulateOpen();
+      ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 3 });
+    });
+
+    // Deliver 6 rapid deltas in a single act — simulates a post-refresh burst
+    act(() => {
+      for (let i = 0; i < 6; i++) {
+        ws2.simulateMessage(
+          streamFrame('conv-1', 4 + i, 'turn-rr', 'text-delta', { text: ` d${String(i)}` }),
+        );
+      }
+      ws2.simulateMessage(streamFrame('conv-1', 10, 'turn-rr', 'stream-completed'));
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByText('streaming…')).not.toBeInTheDocument();
+    });
+
+    const articles = transcriptArticles();
+    expect(articles).toHaveLength(1);
+
+    // Every delta must appear in the rendered text
+    const rendered = articles[0].textContent ?? '';
+    for (let i = 0; i < 6; i++) {
+      expect(rendered).toContain(`d${String(i)}`);
+    }
+
+    // REST base is preserved alongside live deltas
+    expect(rendered).toContain('Base');
+
+    // Pre-refresh content must NOT reappear
+    expect(screen.queryByText('Pre-refresh')).not.toBeInTheDocument();
+  });
+
+  // T024 regression: two sequential full-page refreshes must converge to the
+  // same authoritative REST state with zero duplicate entries.  Protects the
+  // deduplicateEntries() path in selectActiveEntries and the merge-history
+  // reducer from accumulating stale entries across mount/unmount cycles.
+  it('converges with no duplicates after two sequential full-page refreshes', async () => {
+    let refreshCount = 0;
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Double refresh')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        refreshCount += 1;
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-dr', 'conv-1', {
+              response: `Snapshot v${String(refreshCount)}`,
+              status: refreshCount >= 3 ? 'completed' : 'streaming',
+              completedAt: refreshCount >= 3 ? '2026-07-01T00:00:10.000Z' : null,
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    // ── Mount 1 ─────────────────────────────────────────────────────────
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /double refresh/i });
+    await vi.waitFor(() => expect(screen.getByText('Snapshot v1')).toBeInTheDocument());
+    expect(transcriptArticles()).toHaveLength(1);
+
+    // ── Refresh 1 → Mount 2 ────────────────────────────────────────────
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /double refresh/i });
+    await vi.waitFor(() => expect(screen.getByText('Snapshot v2')).toBeInTheDocument());
+    expect(screen.queryByText('Snapshot v1')).not.toBeInTheDocument();
+    expect(transcriptArticles()).toHaveLength(1);
+
+    // ── Refresh 2 → Mount 3 (completed) ────────────────────────────────
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /double refresh/i });
+    await vi.waitFor(() => expect(screen.getByText('Snapshot v3')).toBeInTheDocument());
+
+    // Only the latest snapshot visible — no stale entries from earlier mounts
+    expect(screen.queryByText('Snapshot v1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Snapshot v2')).not.toBeInTheDocument();
+
+    const articles = transcriptArticles();
+    expect(articles).toHaveLength(1);
+    expect(screen.getByText('completed')).toBeInTheDocument();
+  });
+
+  // T024 regression: the conversation sidebar must list all conversations after
+  // a refresh, even when applyConversationUpsert returns the same state reference
+  // for an unchanged conversation.  Protects against the T023 no-op in
+  // applyConversationUpsert that returns state when `previous === merged`.
+  it('conversation list remains complete after refresh when upsert detects identical data', async () => {
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [
+            conversation('conv-1', 'Stable chat A'),
+            conversation('conv-2', 'Stable chat B'),
+            conversation('conv-3', 'Stable chat C'),
+          ],
+          totalCount: 3,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        return jsonResponse(EMPTY_HISTORY);
+      }
+      if (url === '/conversations/conv-2/turns?limit=50') {
+        return jsonResponse(EMPTY_HISTORY);
+      }
+      if (url === '/conversations/conv-3/turns?limit=50') {
+        return jsonResponse(EMPTY_HISTORY);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    // First mount: all three conversations appear
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /stable chat a/i });
+    expect(screen.getByRole('button', { name: /stable chat b/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /stable chat c/i })).toBeInTheDocument();
+
+    // Simulate refresh — same data returned
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /stable chat a/i });
+    expect(screen.getByRole('button', { name: /stable chat b/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /stable chat c/i })).toBeInTheDocument();
+
+    // All three must be present — the upsert no-op must not drop any
+    const buttons = screen.getAllByRole('button');
+    const convButtons = buttons.filter(
+      (b) => b.textContent && /stable chat/i.test(b.textContent),
+    );
+    expect(convButtons).toHaveLength(3);
+  });
+
+  // T024 regression: after a refresh during active streaming, a completed-turn
+  // REST snapshot must replace the stream-populated entry AND the transcript
+  // must show the REST status — not leave a stale "streaming…" indicator.
+  // Protects mergeAuthoritativeEntries and the reducer's replace-entries path.
+  it('transitions streaming indicator to completed after refresh when REST reports turn completed', async () => {
+    let refreshed = false;
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({
+          conversations: [conversation('conv-1', 'Status transition')],
+          totalCount: 1,
+        });
+      }
+      if (url === '/conversations/conv-1/turns?limit=50') {
+        if (!refreshed) {
+          return jsonResponse(EMPTY_HISTORY);
+        }
+        // After refresh: turn completed server-side while we were disconnected
+        return jsonResponse({
+          turns: [
+            agentTurn('turn-st', 'conv-1', {
+              response: 'Final answer.',
+              status: 'completed',
+              completedAt: '2026-07-01T00:00:10.000Z',
+            }),
+          ],
+          totalCount: 1,
+          hasMore: false,
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /status transition/i });
+
+    const ws1 = openAndSubscribe('conv-1', 0);
+    act(() => {
+      ws1.simulateMessage(streamFrame('conv-1', 1, 'turn-st', 'stream-started'));
+      ws1.simulateMessage(
+        streamFrame('conv-1', 2, 'turn-st', 'text-delta', { text: 'Partial…' }),
+      );
+    });
+    expect(await screen.findByText('Partial…')).toBeInTheDocument();
+    expect(screen.getByText('streaming…')).toBeInTheDocument();
+
+    // Full page refresh — server completed the turn while we were away
+    refreshed = true;
+    cleanup();
+    resetFakeWebSockets();
+
+    render(<AppProviders />);
+    await screen.findByRole('button', { name: /status transition/i });
+
+    // REST snapshot shows the completed turn
+    await vi.waitFor(() => {
+      expect(screen.getByText('Final answer.')).toBeInTheDocument();
+    });
+
+    // Streaming indicator must be gone — replaced by completed status
+    expect(screen.queryByText('streaming…')).not.toBeInTheDocument();
+    expect(screen.getByText('completed')).toBeInTheDocument();
+
+    // Partial stream content from before refresh must not linger
+    expect(screen.queryByText('Partial…')).not.toBeInTheDocument();
+
+    // Single article — merge deduplicates by turnId
+    expect(transcriptArticles()).toHaveLength(1);
   });
 });
 
