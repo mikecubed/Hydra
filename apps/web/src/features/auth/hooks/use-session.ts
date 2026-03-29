@@ -26,7 +26,7 @@ export interface UseSessionResult {
   pollErrorCount: number;
   extend: () => Promise<void>;
   logout: () => Promise<void>;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<SessionInfoType | null>;
 }
 
 // ─── Session manager (testable core) ────────────────────────────────────────
@@ -76,7 +76,7 @@ export interface SessionManager {
   subscribe(listener: Listener): () => void;
   extend(): Promise<void>;
   logout(): Promise<void>;
-  refresh(): Promise<void>;
+  refresh(): Promise<SessionInfoType | null>;
   destroy(): void;
 }
 
@@ -136,9 +136,7 @@ async function doPoll(ctx: ManagerInternals, deps: SessionManagerDeps) {
     setState(ctx, { session: info, pollErrorCount: 0 });
   } catch {
     // Track consecutive poll errors so the UI can surface degraded feedback.
-    if (!ctx.destroyed) {
-      setState(ctx, { pollErrorCount: ctx.state.pollErrorCount + 1 });
-    }
+    setState(ctx, { pollErrorCount: ctx.state.pollErrorCount + 1 });
   }
   schedulePoll(ctx, deps);
 }
@@ -263,6 +261,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       const info = await deps.getSessionInfo();
       if (ctx.destroyed) return;
       setState(ctx, { session: info });
+      return info;
     },
     destroy() {
       ctx.destroyed = true;
@@ -313,7 +312,11 @@ export function useSession(pollIntervalMs?: number): UseSessionResult {
   }, []);
 
   const refresh = useCallback(async () => {
-    await mgrRef.current?.refresh();
+    const manager = mgrRef.current;
+    if (manager == null) {
+      return null;
+    }
+    return manager.refresh();
   }, []);
 
   return {

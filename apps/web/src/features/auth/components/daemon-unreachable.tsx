@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useSessionContext } from '../context/session-context.ts';
 
 const containerStyle: React.CSSProperties = {
@@ -58,13 +58,23 @@ export function DaemonUnreachable(): React.JSX.Element | null {
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
+  useEffect(() => {
+    if (session?.state === 'daemon-unreachable') {
+      return;
+    }
+    setRetryError(null);
+    setRetryCount(0);
+  }, [session?.state]);
+
   const handleRetry = useCallback(async () => {
     setRetrying(true);
     setRetryError(null);
     try {
-      await refresh();
-      setRetryCount((c) => c + 1);
-      setRetryError('Hydra daemon is still unavailable. Try again shortly.');
+      const nextSession = await refresh();
+      if (nextSession?.state === 'daemon-unreachable') {
+        setRetryCount((c) => c + 1);
+        setRetryError('Hydra daemon is still unavailable. Try again shortly.');
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : 'Could not reach the daemon. Try again shortly.';
