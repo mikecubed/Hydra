@@ -153,12 +153,19 @@ function categoryFromStatus(status: number): ErrorCategory {
   if (status === 401 || status === 403) return 'auth';
   if (status === 409 || status === 410) return 'session';
   if (status === 429) return 'rate-limit';
+  if (status === 503) return 'daemon-unavailable';
   if (status >= 400 && status < 500) return 'validation';
   return 'daemon';
 }
 
 /** Generic message for 5xx responses — never leaks internal daemon details to the browser. */
 const SANITIZED_5XX_MESSAGE = 'Internal daemon error';
+
+/** Default retryAfterMs for categories that support automatic client retry. */
+const DEFAULT_RETRY_AFTER_MS: Partial<Record<ErrorCategory, number>> = {
+  'rate-limit': 5000,
+  'daemon-unavailable': 2000,
+};
 
 function createGenericStatusError(status: number, message: string): GatewayErrorResponse {
   const category = categoryFromStatus(status);
@@ -167,14 +174,18 @@ function createGenericStatusError(status: number, message: string): GatewayError
     session: 'SESSION_EXPIRED',
     validation: 'BAD_REQUEST',
     'rate-limit': 'RATE_LIMITED',
-    daemon: 'DAEMON_UNREACHABLE',
+    daemon: 'INTERNAL_ERROR',
+    'daemon-unavailable': 'DAEMON_UNREACHABLE',
+    'stale-revision': 'STALE_REVISION',
+    'workflow-conflict': 'WORKFLOW_CONFLICT',
   };
 
   return createGatewayErrorResponse({
-    code: codeMap[category] ?? 'DAEMON_UNREACHABLE',
+    code: codeMap[category] ?? 'INTERNAL_ERROR',
     category,
     message: status >= 500 ? SANITIZED_5XX_MESSAGE : message,
     httpStatus: status,
+    retryAfterMs: DEFAULT_RETRY_AFTER_MS[category],
   });
 }
 
@@ -232,6 +243,7 @@ export function translateDaemonResponse(status: number, body: unknown): GatewayE
       conversationId: body.conversationId,
       turnId: body.turnId,
       httpStatus: status,
+      retryAfterMs: DEFAULT_RETRY_AFTER_MS[category],
     });
   }
 
@@ -248,7 +260,11 @@ export function translateDaemonResponse(status: number, body: unknown): GatewayE
 
 /**
  * Translate a fetch-level failure (network error, timeout, abort)
- * into a GatewayErrorResponse with category 'daemon'.
+ * into a GatewayErrorResponse with category 'daemon-unavailable'.
+ *
+ * Timeout/abort errors receive a distinct DAEMON_TIMEOUT code and a
+ * retryAfterMs hint so the browser can distinguish transient timeouts
+ * from sustained outages (FD-2 drill matrix).
  *
  * Raw error messages are never echoed — they may contain internal
  * network details (hostnames, IPs, ports) that must not reach clients.
@@ -256,9 +272,18 @@ export function translateDaemonResponse(status: number, body: unknown): GatewayE
 export function translateFetchFailure(error: unknown): GatewayErrorResponse {
   const isAbort = error instanceof Error && error.name === 'AbortError';
 
+  if (isAbort) {
+    return createGatewayErrorResponse({
+      code: 'DAEMON_TIMEOUT',
+      category: 'daemon-unavailable',
+      message: 'Daemon request timed out',
+      retryAfterMs: 2000,
+    });
+  }
+
   return createGatewayErrorResponse({
     code: 'DAEMON_UNREACHABLE',
-    category: 'daemon',
-    message: isAbort ? 'Daemon request timeout or abort' : 'Daemon unreachable',
+    category: 'daemon-unavailable',
+    message: 'Daemon unreachable',
   });
 }

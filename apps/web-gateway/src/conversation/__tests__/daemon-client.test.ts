@@ -464,17 +464,17 @@ describe('DaemonClient', () => {
       assert.equal(err.category, 'daemon');
     });
 
-    it('translates network failure into daemon-unreachable', async () => {
+    it('translates network failure into daemon-unavailable', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
 
       const result = await client.createConversation({});
       assert.ok('error' in result);
       const err = result.error;
-      assert.equal(err.category, 'daemon');
+      assert.equal(err.category, 'daemon-unavailable');
       assert.equal(err.code, 'DAEMON_UNREACHABLE');
     });
 
-    it('translates timeout (AbortError) into daemon-unreachable', async () => {
+    it('translates timeout (AbortError) into DAEMON_TIMEOUT', async () => {
       const abortError = new Error('The operation was aborted');
       abortError.name = 'AbortError';
       fetchMock.mock.mockImplementation(() => Promise.reject(abortError));
@@ -482,8 +482,8 @@ describe('DaemonClient', () => {
       const result = await client.openConversation('c1');
       assert.ok('error' in result);
       const err = result.error;
-      assert.equal(err.category, 'daemon');
-      assert.equal(err.code, 'DAEMON_UNREACHABLE');
+      assert.equal(err.category, 'daemon-unavailable');
+      assert.equal(err.code, 'DAEMON_TIMEOUT');
     });
 
     it('logs TypeError fetch failure via console.warn with structured context', async () => {

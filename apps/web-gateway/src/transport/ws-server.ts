@@ -73,6 +73,7 @@ function rejectUpgrade(socket: Socket, error: GatewayError): void {
       code: error.code,
       category: ERROR_CATEGORY_MAP[error.code],
       message: error.message,
+      retryAfterMs: error.retryAfterMs,
     }),
   );
   const statusCode = error.statusCode;
