@@ -278,6 +278,9 @@ describe('workspace reconnect workflow', () => {
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -367,6 +370,9 @@ describe('workspace reconnect workflow', () => {
       }
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });

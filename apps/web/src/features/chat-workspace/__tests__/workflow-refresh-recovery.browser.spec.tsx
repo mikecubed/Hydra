@@ -814,6 +814,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           hasMore: false,
         });
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -869,6 +872,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       }
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       if (url === '/operations/snapshot') {
         return jsonResponse({
@@ -978,6 +984,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
       if (url === '/operations/snapshot') {
         return jsonResponse({
           queue: [],
@@ -1062,6 +1071,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           totalCount: 1,
           hasMore: false,
         });
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -1167,6 +1179,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           totalCount: 1,
           hasMore: false,
         });
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
