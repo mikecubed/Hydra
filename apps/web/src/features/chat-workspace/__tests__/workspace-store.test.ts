@@ -2611,3 +2611,187 @@ describe('multi-session convergence: stale-control invalidation', () => {
     assert.equal(state.conversations.get('conv-1')?.controlState.staleReason, null);
   });
 });
+
+// ─── T023A: Reference stability regression tests ────────────────────────────
+
+describe('reducer reference stability', () => {
+  it('conversation/set-load-state returns same reference when loadState is unchanged', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/set-load-state',
+      conversationId: 'conv-1',
+      loadState: 'loading',
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'conversation/set-load-state',
+      conversationId: 'conv-1',
+      loadState: 'loading',
+    });
+    assert.equal(after, before, 'state reference should be identical for no-op load-state');
+  });
+
+  it('draft/set-submit-state returns same reference when values are unchanged', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'submitting',
+      validationMessage: null,
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'draft/set-submit-state',
+      conversationId: 'conv-1',
+      submitState: 'submitting',
+      validationMessage: null,
+    });
+    assert.equal(after, before, 'state reference should be identical for no-op submit-state');
+  });
+
+  it('conversation/select returns same reference when already selected with existing draft', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    assert.equal(after, before, 'state reference should be identical for re-selecting same conv');
+  });
+
+  it('draft/set-text returns same reference when text is unchanged', () => {
+    let state = createInitialWorkspaceState();
+    state = reduceWorkspaceState(state, {
+      type: 'conversation/select',
+      conversationId: 'conv-1',
+    });
+    state = reduceWorkspaceState(state, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'hello',
+    });
+    const before = state;
+    const after = reduceWorkspaceState(before, {
+      type: 'draft/set-text',
+      conversationId: 'conv-1',
+      draftText: 'hello',
+    });
+    assert.equal(after, before, 'state reference should be identical for no-op text change');
+  });
+
+  it('conversation/upsert preserves conversations Map reference on identical re-upsert', () => {
+    let state = createInitialWorkspaceState();
+    const conversation = createConversation({ id: 'conv-1', title: 'Test', status: 'active' });
+    state = reduceWorkspaceState(state, { type: 'conversation/upsert', conversation });
+    const before = state;
+    const after = reduceWorkspaceState(before, { type: 'conversation/upsert', conversation });
+    assert.equal(
+      after.conversations,
+      before.conversations,
+      'conversations Map should be same reference for identical upsert',
+    );
+  });
+});
+
+// ─── T023A: submit-flow action contract regression tests ────────────────────
+
+describe('submit-flow action contract', () => {
+  it('submitComposerDraft success path preserves the primitive action sequence', async () => {
+    const store = storeWithActiveDraft('conv-1', 'hello agent');
+    const actions: string[] = [];
+
+    store.subscribe((_state, action) => {
+      actions.push(action.type);
+    });
+
+    const client = createMockClient({
+      submitInstruction: async (_convId, body) => ({
+        turn: {
+          id: 'turn-1',
+          conversationId: 'conv-1',
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-1',
+      }),
+    });
+
+    await submitComposerDraft({ store, client });
+
+    assert.deepStrictEqual(actions, [
+      'draft/set-submit-state',
+      'conversation/append-submit-turn',
+      'draft/set-text',
+      'draft/set-submit-state',
+      'conversation/set-load-state',
+    ]);
+    assert.equal(store.getState().drafts.get('conv-1')?.draftText, '');
+    assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
+    assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'idle');
+  });
+
+  it('createAndSubmitDraft success path preserves the primitive action sequence', async () => {
+    const store = createWorkspaceStore();
+    const actions: string[] = [];
+    store.subscribe((_state, action) => {
+      actions.push(action.type);
+    });
+
+    const client = createMockClient({
+      createConversation: async () => ({
+        id: 'new-conv',
+        title: 'New conversation',
+        status: 'active' as const,
+        createdAt: '2026-04-01T00:00:00.000Z',
+        updatedAt: '2026-04-01T00:00:00.000Z',
+        turnCount: 0,
+        pendingInstructionCount: 0,
+      }),
+      submitInstruction: async (_convId, body) => ({
+        turn: {
+          id: 'turn-1',
+          conversationId: 'new-conv',
+          position: 1,
+          kind: 'operator' as const,
+          attribution: { type: 'operator' as const, label: 'Operator' },
+          instruction: body.instruction,
+          status: 'submitted' as const,
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+        streamId: 'stream-1',
+      }),
+    });
+
+    await createAndSubmitDraft({ store, client }, 'start a new thread');
+
+    assert.deepStrictEqual(actions, [
+      'conversation/upsert',
+      'conversation/select',
+      'draft/set-text',
+      'draft/set-submit-state',
+      'conversation/append-submit-turn',
+      'draft/set-text',
+      'draft/set-submit-state',
+      'conversation/set-load-state',
+    ]);
+    assert.equal(store.getState().activeConversationId, 'new-conv');
+    assert.equal(store.getState().drafts.get('new-conv')?.draftText, '');
+    assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'idle');
+  });
+});

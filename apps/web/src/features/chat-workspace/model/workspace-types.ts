@@ -273,7 +273,8 @@ export type WorkspaceAction =
       readonly conversationId: string;
       readonly turnId: string;
       readonly artifacts: readonly ArtifactReferenceState[];
-    };
+    }
+  ;
 
 export type WorkspaceListener = (state: WorkspaceState, action: WorkspaceAction) => void;
 
