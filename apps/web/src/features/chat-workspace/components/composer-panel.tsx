@@ -60,6 +60,7 @@ export function ComposerPanel({
   const isSubmitting = submitState === 'submitting';
   const inputDisabled = disabled || isSubmitting;
   const hasError = submitState === 'error' && validationMessage != null;
+  const describedBy = hasError ? 'composer-policy composer-error' : 'composer-policy';
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && canSubmit) {
@@ -79,6 +80,8 @@ export function ComposerPanel({
         value={draftText}
         disabled={inputDisabled}
         placeholder="Type an instruction…"
+        aria-describedby={describedBy}
+        aria-invalid={hasError || undefined}
         onChange={(e) => {
           onDraftChange(e.target.value);
         }}
@@ -86,7 +89,7 @@ export function ComposerPanel({
       />
 
       {hasError && (
-        <p role="alert" style={errorStyle}>
+        <p id="composer-error" role="alert" style={errorStyle}>
           {validationMessage}
         </p>
       )}
@@ -99,7 +102,9 @@ export function ComposerPanel({
           gap: '0.75rem',
         }}
       >
-        <p style={policyStyle}>{policyLabel}</p>
+        <p id="composer-policy" style={policyStyle}>
+          {policyLabel}
+        </p>
         <button
           type="button"
           disabled={!canSubmit || isSubmitting}

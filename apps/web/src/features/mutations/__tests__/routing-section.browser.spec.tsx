@@ -31,6 +31,17 @@ const config = {
 } as SafeConfigView;
 
 describe('RoutingSection', () => {
+  it('describes the routing selector with the current mode summary', () => {
+    const client = makeMockClient();
+
+    render(<RoutingSection config={config} revision="rev-1" client={client} onSuccess={vi.fn()} />);
+
+    expect(screen.getByLabelText('Change routing mode')).toHaveAttribute(
+      'aria-describedby',
+      'routing-current-mode',
+    );
+  });
+
   it('shows stale-revision guidance from the live routing panel', async () => {
     const client = makeMockClient({
       postRoutingMode: vi.fn().mockRejectedValue(

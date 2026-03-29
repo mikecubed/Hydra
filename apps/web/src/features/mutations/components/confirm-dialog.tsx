@@ -35,9 +35,12 @@ export function ConfirmDialog({
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  if (!isOpen) return null;
-
   useEffect(() => {
+    if (!isOpen) {
+      previousFocusRef.current = null;
+      return;
+    }
+
     previousFocusRef.current =
       globalThis.document.activeElement instanceof HTMLElement
         ? globalThis.document.activeElement
@@ -48,7 +51,9 @@ export function ConfirmDialog({
       previousFocusRef.current?.focus();
       previousFocusRef.current = null;
     };
-  }, []);
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {

@@ -42,6 +42,25 @@ function makeConfigWithActive(
 }
 
 describe('ModelsSection — row sync', () => {
+  it('describes each tier selector with the current active tier', () => {
+    const client = makeMockClient();
+
+    render(
+      <ModelsSection
+        config={makeConfigWithActive({ claude: 'cheap' })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByLabelText('Tier', {
+        selector: '#tier-select-claude',
+      }),
+    ).toHaveAttribute('aria-describedby', 'model-tier-current-claude');
+  });
+
   it('adds a row when a new agent appears after re-render', async () => {
     const client = makeMockClient();
     const onSuccess = vi.fn();

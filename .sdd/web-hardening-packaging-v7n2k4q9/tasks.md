@@ -7,7 +7,7 @@
 - Phase 0 complete (`T001-T003`)
 - Phase 1 complete (`T004-T010`)
 - Phase 2 complete (`T011-T016`)
-- Phase 3 underway — `T017` complete; `T018` in progress with login + confirmation dialog accessibility fixes landed
+- Phase 3 underway — `T017` complete; `T018` in progress with login, confirmation dialogs, composer, and config control accessibility fixes landed
 - Next active phase: Phase 3 — User Story 3: Accessible Core Workflows (`T017-T020`)
 
 ## Phase 0 — Baseline and Scope Matrix

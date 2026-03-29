@@ -24,6 +24,22 @@ interface BudgetRowState {
   retryAfterMs: number | null;
 }
 
+type BudgetValidationField = 'daily' | 'weekly' | 'row';
+
+interface BudgetValidationResult {
+  message: string;
+  field: BudgetValidationField;
+}
+
+interface BudgetRowFeedback {
+  validationError: BudgetValidationResult | null;
+  showAdvisory: boolean;
+  hasInput: boolean;
+  errorId: string;
+  isDailyInvalid: boolean;
+  isWeeklyInvalid: boolean;
+}
+
 export interface BudgetsSectionProps {
   config: SafeConfigView;
   revision: string;
@@ -38,13 +54,33 @@ function parsePositiveInt(val: string): number | null {
   return null;
 }
 
-function validateRow(row: BudgetRowState): string | null {
+function validateRow(row: BudgetRowState): BudgetValidationResult | null {
   const d = parsePositiveInt(row.dailyInput);
   const w = parsePositiveInt(row.weeklyInput);
-  if (row.dailyInput !== '' && d === null) return 'Daily limit must be a positive integer';
-  if (row.weeklyInput !== '' && w === null) return 'Weekly limit must be a positive integer';
-  if (row.dailyInput === '' && row.weeklyInput === '') return 'At least one limit is required';
+  if (row.dailyInput !== '' && d === null) {
+    return { message: 'Daily limit must be a positive integer', field: 'daily' };
+  }
+  if (row.weeklyInput !== '' && w === null) {
+    return { message: 'Weekly limit must be a positive integer', field: 'weekly' };
+  }
+  if (row.dailyInput === '' && row.weeklyInput === '') {
+    return { message: 'At least one limit is required', field: 'row' };
+  }
   return null;
+}
+
+function getBudgetRowFeedback(id: string, row: BudgetRowState): BudgetRowFeedback {
+  const dailyLimit = parsePositiveInt(row.dailyInput);
+  const weeklyLimit = parsePositiveInt(row.weeklyInput);
+  const validationError = validateRow(row);
+  return {
+    validationError,
+    showAdvisory: dailyLimit !== null && weeklyLimit !== null && dailyLimit > weeklyLimit,
+    hasInput: row.dailyInput !== '' || row.weeklyInput !== '',
+    errorId: `budget-error-${id}`,
+    isDailyInvalid: validationError?.field === 'daily' || validationError?.field === 'row',
+    isWeeklyInvalid: validationError?.field === 'weekly' || validationError?.field === 'row',
+  };
 }
 
 function formatLimit(val: number | undefined): string {
@@ -85,11 +121,8 @@ function BudgetRow({
   onConfirm,
   onDismissError,
 }: BudgetRowProps): JSX.Element {
-  const d = parsePositiveInt(row.dailyInput);
-  const w = parsePositiveInt(row.weeklyInput);
-  const validationError = validateRow(row);
-  const showAdvisory = d !== null && w !== null && d > w;
-  const hasInput = row.dailyInput !== '' || row.weeklyInput !== '';
+  const { validationError, showAdvisory, hasInput, errorId, isDailyInvalid, isWeeklyInvalid } =
+    getBudgetRowFeedback(id, row);
   return (
     <div aria-label={`Budget for ${id}`}>
       <span>{id}</span>
@@ -98,6 +131,8 @@ function BudgetRow({
         id={`daily-${id}`}
         type="number"
         value={row.dailyInput}
+        aria-invalid={isDailyInvalid || undefined}
+        aria-describedby={isDailyInvalid ? errorId : undefined}
         onChange={(e) => {
           onDailyChange(e.target.value);
         }}
@@ -108,6 +143,8 @@ function BudgetRow({
         id={`weekly-${id}`}
         type="number"
         value={row.weeklyInput}
+        aria-invalid={isWeeklyInvalid || undefined}
+        aria-describedby={isWeeklyInvalid ? errorId : undefined}
         onChange={(e) => {
           onWeeklyChange(e.target.value);
         }}
@@ -120,7 +157,11 @@ function BudgetRow({
       >
         Apply
       </button>
-      {validationError !== null && hasInput && <span role="alert">{validationError}</span>}
+      {validationError !== null && hasInput && (
+        <span id={errorId} role="alert">
+          {validationError.message}
+        </span>
+      )}
       <MutationErrorBanner
         message={row.error}
         category={row.errorCategory}
@@ -244,7 +285,7 @@ async function applyBudget({
   const row = rows[id];
   const validationError = validateRow(row);
   if (validationError !== null) {
-    updateRow(id, { error: validationError, errorCategory: null, retryAfterMs: null });
+    updateRow(id, { error: validationError.message, errorCategory: null, retryAfterMs: null });
     return;
   }
   updateRow(id, { isLoading: true, error: null, errorCategory: null, retryAfterMs: null });

@@ -219,6 +219,37 @@ describe('BudgetsSection — row sync', () => {
     expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent('try again in 4 seconds');
   });
 
+  it('marks invalid budget inputs and links them to the validation message', async () => {
+    const client = makeMockClient();
+
+    render(
+      <BudgetsSection
+        config={makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+        onBudgetMutated={vi.fn()}
+      />,
+    );
+
+    const dailyInput = screen.getByLabelText('Daily limit', {
+      selector: '#daily-gpt-4',
+    });
+    const weeklyInput = screen.getByLabelText('Weekly limit', {
+      selector: '#weekly-gpt-4',
+    });
+    if (!(dailyInput instanceof HTMLInputElement) || !(weeklyInput instanceof HTMLInputElement)) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+
+    fireEvent.change(dailyInput, { target: { value: '0' } });
+
+    expect(dailyInput.getAttribute('aria-invalid')).toBe('true');
+    expect(weeklyInput.getAttribute('aria-invalid')).toBeNull();
+    expect(dailyInput.getAttribute('aria-describedby')).toBe('budget-error-gpt-4');
+    expect(screen.getByRole('alert')).toHaveTextContent('Daily limit must be a positive integer');
+  });
+
   it('rolls back rejected edits to authoritative values and adopts newer server budgets after refetch', async () => {
     const client = makeMockClient();
     client.postBudget = vi.fn().mockRejectedValue(

@@ -60,13 +60,14 @@ export function RoutingSection({
   return (
     <section aria-labelledby="routing-section-heading">
       <h3 id="routing-section-heading">Routing Mode</h3>
-      <p>
+      <p id="routing-current-mode">
         Current: <strong>{currentMode}</strong>
       </p>
       <label htmlFor="routing-mode-select">Change routing mode</label>
       <select
         id="routing-mode-select"
         value={currentMode}
+        aria-describedby="routing-current-mode"
         onChange={handleSelectChange}
         disabled={isLoading}
       >
