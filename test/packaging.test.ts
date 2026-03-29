@@ -72,17 +72,6 @@ describe('packaging', { timeout: 120_000 }, () => {
       symlinkType,
     );
 
-    // Provide mock pre-built web frontend assets so the prepack web runtime
-    // step can bundle the gateway and copy browser assets without running Vite.
-    const mockWebDist = path.join(repoClone, 'apps', 'web', 'dist');
-    fs.mkdirSync(mockWebDist, { recursive: true });
-    fs.writeFileSync(
-      path.join(mockWebDist, 'index.html'),
-      '<!DOCTYPE html><html><body>Hydra Web</body></html>\n',
-    );
-    fs.mkdirSync(path.join(mockWebDist, 'assets'), { recursive: true });
-    fs.writeFileSync(path.join(mockWebDist, 'assets', 'main.js'), '// app bundle\n');
-
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-test-'));
 
     // Pack from the isolated clone — all prepack/postpack mutations stay there
@@ -103,9 +92,7 @@ describe('packaging', { timeout: 120_000 }, () => {
     tgzPath = path.join(tmpDir, tgzName);
     fs.renameSync(srcTgz, tgzPath);
 
-    // Dispose of the clone now that the tarball is captured
-    fs.rmSync(repoClone, { recursive: true, force: true });
-    repoClone = '';
+    // Keep clone alive so tests can verify postpack cleanup ran correctly.
 
     // Create a minimal package.json and install the tarball
     fs.writeFileSync(
@@ -271,13 +258,67 @@ describe('packaging', { timeout: 120_000 }, () => {
     );
   });
 
-  it('source repo dist/web-runtime/ is cleaned after postpack', () => {
-    // The real working tree should not have dist/web-runtime/ since postpack
-    // cleans it up (and the test uses an isolated clone anyway).
-    const webRuntimeDir = path.join(ROOT, 'dist', 'web-runtime');
+  it('postpack cleans dist/web-runtime/ in the packed clone', () => {
+    // Verify that clean-pack.ts (postpack) actually removed dist/web-runtime/
+    // inside the repo clone where npm pack ran — not in the untouched source repo.
+    assert.ok(repoClone, 'repoClone should still exist for cleanup verification');
+    const cloneWebRuntime = path.join(repoClone, 'dist', 'web-runtime');
     assert.ok(
-      !fs.existsSync(webRuntimeDir),
-      'dist/web-runtime/ should not exist in source repo after postpack cleanup',
+      !fs.existsSync(cloneWebRuntime),
+      'dist/web-runtime/ should be cleaned from the clone after postpack',
     );
+  });
+
+  it('packaging aborts when gateway exists but browser assets cannot be produced', () => {
+    // Create a minimal clone where the gateway entry exists but apps/web/ has
+    // no buildable source, verifying that build-pack.ts fails instead of
+    // silently producing a tarball with server.js but no browser assets.
+    const failClone = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-fail-'));
+    try {
+      // Copy only the structural essentials — no apps/web/src/ so vite build fails
+      fs.cpSync(ROOT, failClone, {
+        recursive: true,
+        filter: (src: string) => {
+          const rel = path.relative(ROOT, src);
+          if (rel === '') return true;
+          const topSegment = rel.split(path.sep)[0];
+          if (['node_modules', '.git', 'test', 'coverage', 'dist', '.tsbuild'].includes(topSegment))
+            return false;
+          const segments = rel.split(path.sep);
+          if (segments.length > 1 && segments.includes('node_modules')) return false;
+          // Exclude apps/web/src so vite build has nothing to compile
+          if (rel.startsWith(path.join('apps', 'web', 'src'))) return false;
+          return true;
+        },
+      });
+
+      const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+      fs.symlinkSync(
+        path.join(ROOT, 'node_modules'),
+        path.join(failClone, 'node_modules'),
+        symlinkType,
+      );
+
+      let exitCode: number | null = null;
+      try {
+        execSync('npm pack', {
+          cwd: failClone,
+          stdio: 'pipe',
+          encoding: 'utf8',
+          env: { ...process.env, HUSKY: '0' },
+        });
+        exitCode = 0;
+      } catch {
+        exitCode = 1;
+      }
+
+      assert.notEqual(
+        exitCode,
+        0,
+        'npm pack should fail when apps/web/dist cannot be produced (gateway exists but web source is missing)',
+      );
+    } finally {
+      fs.rmSync(failClone, { recursive: true, force: true });
+    }
   });
 });

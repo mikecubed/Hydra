@@ -128,16 +128,33 @@ if (fs.existsSync(GATEWAY_ENTRY)) {
   console.log('[prepack] Bundled gateway entry → dist/web-runtime/server.js');
 
   // 4b. Copy pre-built web frontend assets into dist/web-runtime/web/.
-  const webAssetsDest = path.join(WEB_RUNTIME_DIR, 'web');
-  if (fs.existsSync(WEB_DIST)) {
-    fs.cpSync(WEB_DIST, webAssetsDest, { recursive: true });
-    console.log('[prepack] Copied browser assets → dist/web-runtime/web/');
-  } else {
-    console.warn(
-      '[prepack] ⚠ apps/web/dist/ not found — browser assets not included. ' +
-        'Run `npm --workspace @hydra/web run build` before packing for full web support.',
-    );
+  // If apps/web/dist/ is missing, attempt to build the web workspace first.
+  // Packaging must not succeed without browser assets when a gateway is bundled.
+  if (!fs.existsSync(WEB_DIST)) {
+    console.log('[prepack] apps/web/dist/ not found — building web workspace…');
+    const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
+    if (!fs.existsSync(viteBin)) {
+      console.error('[prepack] ✗ vite not found — cannot build apps/web/.');
+      console.error('[prepack]   Run `npm install` then `npm --workspace @hydra/web run build`.');
+      exit(1);
+    }
+    const webBuild = spawnSync(process.execPath, [viteBin, 'build'], {
+      cwd: path.join(ROOT, 'apps', 'web'),
+      stdio: 'inherit',
+    });
+    if (webBuild.status !== 0) {
+      console.error('[prepack] ✗ Web workspace build failed (vite build exited non-zero).');
+      exit(1);
+    }
+    if (!fs.existsSync(WEB_DIST)) {
+      console.error('[prepack] ✗ apps/web/dist/ still missing after build.');
+      exit(1);
+    }
   }
+
+  const webAssetsDest = path.join(WEB_RUNTIME_DIR, 'web');
+  fs.cpSync(WEB_DIST, webAssetsDest, { recursive: true });
+  console.log('[prepack] Copied browser assets → dist/web-runtime/web/');
 
   console.log('[prepack] Web runtime ready.');
 } else {
