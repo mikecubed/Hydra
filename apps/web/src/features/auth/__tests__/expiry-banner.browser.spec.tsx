@@ -198,6 +198,29 @@ describe('ExpiryBanner', () => {
     vi.useRealTimers();
   });
 
+  it('clears timeout timer when extend() resolves before timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const extend = vi.fn().mockResolvedValue(null);
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    render(<ExpiryBanner />);
+
+    await user.click(screen.getByTestId('extend-session-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('extend-session-button')).not.toBeDisabled();
+    });
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+
+    clearTimeoutSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it('clears extend error when session transitions away from expiring-soon', () => {
     const extend = vi.fn().mockRejectedValue(new Error('Reauth failed'));
     mockUseSessionContext.mockReturnValue({

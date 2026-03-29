@@ -42,10 +42,13 @@ const errorStyle: React.CSSProperties = {
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
-    promise,
+    promise.finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }),
     new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timer = setTimeout(() => {
         reject(new Error('Session extension timed out. Please try again.'));
       }, ms);
     }),

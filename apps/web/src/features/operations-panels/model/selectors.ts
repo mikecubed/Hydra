@@ -2,8 +2,15 @@
  * Derived selectors for the operations panels workspace.
  *
  * Each selector extracts a commonly-needed slice of OperationsWorkspaceState
- * so UI components never duplicate map-lookup / filter plumbing. All functions
- * are pure — no hidden state, no side effects.
+ * so UI components never duplicate map-lookup / filter plumbing. Most
+ * selectors are pure functions with no hidden state.
+ *
+ * **Exception:** {@link selectFilteredQueueItems} uses module-level
+ * last-call memoization for reference stability (avoiding unnecessary
+ * re-renders). The cache is keyed on the `items` array reference and
+ * the `statusFilter` array reference, so it is automatically invalidated
+ * whenever the underlying state changes and never leaks stale results
+ * across different state instances.
  */
 
 import type {
@@ -45,7 +52,11 @@ export function selectQueueItems(state: OperationsWorkspaceState): readonly Work
   return state.snapshot?.queue ?? EMPTY_QUEUE;
 }
 
-/** Last-call cache for {@link selectFilteredQueueItems}. */
+/**
+ * Last-call memoization cache for {@link selectFilteredQueueItems}.
+ * Keyed on object identity of the items array and statusFilter array
+ * so the cache is invalidated whenever state changes.
+ */
 let _filteredLastItems: readonly WorkQueueItemView[] | null = null;
 let _filteredLastFilter: readonly WorkItemStatus[] | null = null;
 let _filteredLastResult: readonly WorkQueueItemView[] = EMPTY_QUEUE;

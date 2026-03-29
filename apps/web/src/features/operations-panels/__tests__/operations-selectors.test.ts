@@ -354,4 +354,48 @@ describe('reference stability — selectFilteredQueueItems', () => {
     const second = selectFilteredQueueItems(state);
     assert.equal(first, second, 'expected same array reference when filter is empty');
   });
+
+  it('does not leak cached results across different state instances', () => {
+    // Build state A with filter ['active']
+    const snapshotA = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({ id: 'wq-1', status: 'active' }),
+        makeQueueItem({ id: 'wq-2', status: 'completed' }),
+      ],
+    });
+    let stateA = createInitialOperationsState();
+    stateA = reduceOperationsState(stateA, { type: 'snapshot/request' });
+    stateA = reduceOperationsState(stateA, { type: 'snapshot/success', snapshot: snapshotA });
+    stateA = reduceOperationsState(stateA, {
+      type: 'filters/set-status',
+      statusFilter: ['active'],
+    });
+
+    const resultA = selectFilteredQueueItems(stateA);
+    assert.equal(resultA.length, 1, 'state A should have 1 active item');
+    assert.equal(resultA[0].id, 'wq-1');
+
+    // Build state B with a different queue and filter ['completed']
+    const snapshotB = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({ id: 'wq-3', status: 'completed' }),
+        makeQueueItem({ id: 'wq-4', status: 'completed' }),
+        makeQueueItem({ id: 'wq-5', status: 'active' }),
+      ],
+    });
+    let stateB = createInitialOperationsState();
+    stateB = reduceOperationsState(stateB, { type: 'snapshot/request' });
+    stateB = reduceOperationsState(stateB, { type: 'snapshot/success', snapshot: snapshotB });
+    stateB = reduceOperationsState(stateB, {
+      type: 'filters/set-status',
+      statusFilter: ['completed'],
+    });
+
+    const resultB = selectFilteredQueueItems(stateB);
+    assert.equal(resultB.length, 2, 'state B should have 2 completed items');
+    assert.ok(
+      resultB.every((item) => item.status === 'completed'),
+      'state B results must all be completed — cache must not leak state A results',
+    );
+  });
 });
