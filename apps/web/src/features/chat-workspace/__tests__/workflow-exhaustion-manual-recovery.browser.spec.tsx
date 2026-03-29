@@ -148,9 +148,7 @@ describe('FD-3: reconnect exhaustion and manual recovery', () => {
     // Deliver events on initial connection
     act(() => {
       ws1.simulateMessage(streamFrame('conv-1', 1, 'turn-1', 'stream-started'));
-      ws1.simulateMessage(
-        streamFrame('conv-1', 2, 'turn-1', 'text-delta', { text: 'Part one' }),
-      );
+      ws1.simulateMessage(streamFrame('conv-1', 2, 'turn-1', 'text-delta', { text: 'Part one' }));
     });
 
     expect(await screen.findByText('Part one')).toBeInTheDocument();

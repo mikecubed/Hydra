@@ -235,9 +235,7 @@ describe('FD-2: sustained daemon outage', () => {
   });
 
   it('session-active message is preserved during sustained outage', () => {
-    mockUseSessionContext.mockReturnValue(
-      makeMockContext({ session: daemonSession() }),
-    );
+    mockUseSessionContext.mockReturnValue(makeMockContext({ session: daemonSession() }));
 
     render(<DaemonUnreachable />);
 

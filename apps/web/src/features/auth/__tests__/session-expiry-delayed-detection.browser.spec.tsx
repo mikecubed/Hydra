@@ -143,9 +143,7 @@ describe('FD-1: delayed-detection session expiry', () => {
     );
 
     // Phase 2: poll detects expiring-soon (no redirect yet)
-    mockUseSession.mockReturnValue(
-      makeSessionResult({ session: makeSession('expiring-soon') }),
-    );
+    mockUseSession.mockReturnValue(makeSessionResult({ session: makeSession('expiring-soon') }));
 
     rerender(
       <SessionProvider onRedirect={onRedirect}>
@@ -220,9 +218,7 @@ describe('FD-1: delayed-detection session expiry', () => {
 
   it('ExpiryBanner is not shown once session state becomes expired (terminal)', () => {
     // expiring-soon → banner visible
-    mockUseSession.mockReturnValue(
-      makeSessionResult({ session: makeSession('expiring-soon') }),
-    );
+    mockUseSession.mockReturnValue(makeSessionResult({ session: makeSession('expiring-soon') }));
 
     const { rerender } = render(
       <SessionProvider>

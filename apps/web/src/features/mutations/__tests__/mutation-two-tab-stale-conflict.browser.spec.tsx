@@ -83,11 +83,7 @@ describe('FD-8: two-tab stale-revision conflict', () => {
 
   it('stale-revision is distinct from workflow-conflict guidance', () => {
     const { unmount } = render(
-      <MutationErrorBanner
-        message="Stale"
-        onDismiss={() => {}}
-        category="stale-revision"
-      />,
+      <MutationErrorBanner message="Stale" onDismiss={() => {}} category="stale-revision" />,
     );
 
     expect(screen.getByTestId('mutation-error-guidance')).toHaveTextContent(
@@ -96,11 +92,7 @@ describe('FD-8: two-tab stale-revision conflict', () => {
     unmount();
 
     render(
-      <MutationErrorBanner
-        message="Conflict"
-        onDismiss={() => {}}
-        category="workflow-conflict"
-      />,
+      <MutationErrorBanner message="Conflict" onDismiss={() => {}} category="workflow-conflict" />,
     );
 
     expect(screen.getByTestId('mutation-error-guidance')).toHaveTextContent(
@@ -198,9 +190,7 @@ describe('FD-8: two-tab stale-revision conflict', () => {
     );
 
     // Rate-limit hint shown instead of stale-revision guidance
-    expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent(
-      /try again in 10 seconds/i,
-    );
+    expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent(/try again in 10 seconds/i);
     expect(screen.queryByTestId('mutation-error-guidance')).not.toBeInTheDocument();
   });
 });
