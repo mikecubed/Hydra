@@ -127,16 +127,21 @@ gateway running locally.
 
 ### Build and bundle targets
 
-These are Phase 0 target budgets. Enforcement via CI is planned for the evidence-hook tasks
-(T021–T025).
+| Metric                            | Threshold | Evidence command                                            | CI enforced |
+| --------------------------------- | --------- | ----------------------------------------------------------- | ----------- |
+| Production build succeeds         | exit 0    | `npm --workspace @hydra/web run build`                      | ✅          |
+| JS bundle size (gzipped)          | ≤ 250 KB  | Vite build output — check total gzip column                 | ✅          |
+| CSS bundle size (gzipped)         | ≤ 50 KB   | Vite build output — check total gzip column                 | ✅          |
+| Build time                        | ≤ 30 s    | Wall-clock time of build command                            | ✅          |
+| Root CLI package dry-run succeeds | exit 0    | `npm run package:dry-run` (validates root CLI package only) | —           |
 
-| Metric                            | Threshold | Evidence command                                            |
-| --------------------------------- | --------- | ----------------------------------------------------------- |
-| Production build succeeds         | exit 0    | `npm --workspace @hydra/web run build`                      |
-| JS bundle size (gzipped)          | ≤ 250 KB  | Vite build output — check total gzip column                 |
-| CSS bundle size (gzipped)         | ≤ 50 KB   | Vite build output — check total gzip column                 |
-| Build time                        | ≤ 30 s    | Wall-clock time of build command                            |
-| Root CLI package dry-run succeeds | exit 0    | `npm run package:dry-run` (validates root CLI package only) |
+The `web-responsiveness` job in `.github/workflows/quality.yml` enforces the first four rows on the
+workflow's currently configured trigger set: pushes to `main` / `dev` / `fix/**` / `feat/**` /
+`feature/**` / `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` /
+`feature/**`. The job builds the web workspace, parses Vite's output for gzipped asset sizes, and
+fails the run if any threshold is exceeded. Build time is measured via wall-clock timing of the
+build step. Root CLI package dry-run is not included because it validates packaging scope (T025),
+not responsiveness.
 
 ### Runtime responsiveness targets
 
@@ -144,7 +149,8 @@ The following targets define the expected user-perceived responsiveness for each
 Behavioral targets (marked ✅) can be verified today through jsdom-based browser specs and
 integration tests. Timing and profiling targets (marked 🔮) require real-browser instrumentation
 that is not yet in place — they are recorded here as design intent and will become enforceable once
-evidence-hook work lands (see T021–T025 in the task graph).
+evidence-hook work lands (see T023–T025 in the task graph). T021 defines the collection points for
+the ✅ rows, but those behavioral targets are not yet promoted to a blocking repo-wide CI gate.
 
 | Surface                      | Metric                       | Target   | Verifiable now |
 | ---------------------------- | ---------------------------- | -------- | -------------- |
@@ -160,22 +166,42 @@ evidence-hook work lands (see T021–T025 in the task graph).
 | Operations panels            | First meaningful paint (FMP) | ≤ 2 s    | 🔮             |
 | Repeated refresh (10 cycles) | Cumulative memory growth     | < 5 %    | 🔮             |
 
-### Evidence expectations
+### Evidence collection points
 
-These budgets are **target expectations for Phase 0**, not already-enforced CI checks. Current
-evidence relies on the commands and test layers that exist today:
+Evidence for responsiveness budgets is collected at three layers, ordered from cheapest (CI) to
+most expensive (manual profiling):
 
-- **Browser specs** (`apps/web/src/features/**/*.browser.spec.tsx`) should include behavioral
-  assertions (mount success, subscription cleanup, reconnect initiation) for the ✅ rows above.
-- **Gateway tests** (`npm --workspace @hydra/web-gateway run test`) must pass without timeout
-  failures.
-- **Quality gate** (`npm run quality`) must pass — this validates linting, formatting, type
-  checking, and cycle detection.
-- **Real-browser timing enforcement** (TTI, FMP, memory profiling) is deferred to the evidence-hook
-  tasks (T021–T025). Until those land, 🔮 rows are design targets tracked by review, not by CI.
+1. **CI — `web-responsiveness` job** (`.github/workflows/quality.yml`). Runs on the workflow's
+   configured trigger set (pushes to `main` / `dev` / `fix/**` / `feat/**` / `feature/**` /
+   `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` / `feature/**`).
+   Collects the currently blocking build-side evidence:
+   - Build success / failure (exit code).
+   - JS and CSS gzipped sizes parsed from Vite build output.
+   - Build wall-clock time.
+
+2. **Existing repository evidence commands** (run directly while the broader responsiveness phase is
+   still landing):
+   - Browser specs for representative workspace and operations flows.
+   - Gateway tests (`npm --workspace @hydra/web-gateway run test`) for reconnect/refresh behavior.
+   - Contract tests (`npm --workspace @hydra/web-contracts run test`) for browser-safe state shapes.
+     These commands are evidence collection points today, but they are not all yet promoted into the
+     blocking `web-responsiveness` CI job because the broader Phase 4 responsiveness work is still in
+     progress.
+
+3. **Existing repository quality checks** (`.github/workflows/quality.yml`). Separate jobs already
+   enforce repo formatting/linting, TypeScript verification for the checked packages, and circular
+   import detection via `npm run lint:cycles`. Those checks remain complementary to
+   `web-responsiveness`; T021 does not add `npm run quality` or the web workspace's
+   `typecheck:workspace` command as new blocking CI steps.
+
+4. **Manual / future instrumentation** (review-only until real-browser tooling lands):
+   - TTI, FMP, and memory profiling for the 🔮 rows in the runtime table above.
+   - Input-to-render latency measurement for live update cycles.
+   - These remain design targets tracked by review. When real-browser instrumentation is introduced
+     in a later phase, the `web-responsiveness` job should be extended to run those checks.
 
 Budget thresholds are intentionally generous for Phase 0. Later phases may tighten them and
-introduce automated CI enforcement as profiling instrumentation matures.
+introduce real-browser profiling as instrumentation matures.
 
 ## Hardening Budgets
 
@@ -186,8 +212,8 @@ regressions from going unnoticed between phases.
 
 | Concern                          | Budget                                                                                                                                   | Verification (target)                            |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Unnecessary rerenders per update | ≤ 3 render cycles per single state change                                                                                                | Browser spec profiling assertions (🔮 T021–T025) |
-| Visible DOM node count           | ≤ 2 000 nodes on any primary surface                                                                                                     | Browser spec DOM measurement (🔮 T021–T025)      |
+| Unnecessary rerenders per update | ≤ 3 render cycles per single state change                                                                                                | Browser spec profiling assertions (🔮 T023–T025) |
+| Visible DOM node count           | ≤ 2 000 nodes on any primary surface                                                                                                     | Browser spec DOM measurement (🔮 T023–T025)      |
 | Daemon replay concurrency        | ≤ 8 concurrent replay fetches per connection                                                                                             | Gateway transport defaults + tests (✅)          |
 | Error retry storms               | Capped per subsystem: stream reconnect ≤ 10 attempts (1–30 s backoff), approval hydration ≤ 3 retries; all surface failure on exhaustion | Gateway and browser spec assertions (✅)         |
 
@@ -311,7 +337,7 @@ commands and test layers available today:
    successfully. Broader packaging/build evidence automation for CI remains future work for T025.
 
 No new tooling is introduced in Phase 0. Quantitative render-count and DOM-node-count enforcement
-requires instrumentation that will land with the evidence-hook tasks (T021–T025). Until then, the
+requires instrumentation that will land with the evidence-hook tasks (T023–T025). Until then, the
 state and rendering limits above are design targets verified by review.
 
 ## Test and CI Expectations
@@ -337,14 +363,19 @@ Current CI gates in this repo:
 - unit/integration/component/browser-spec test execution through the existing repo commands;
 - cycle or boundary verification;
 - dependency audit;
-- no backsliding on coverage expectations.
+- no backsliding on coverage expectations;
+- web build and bundle-size budget checks (`web-responsiveness` job — see Responsiveness Budgets);
+- targeted browser, gateway, and contract evidence commands are available in the repo, but they are
+  not all yet promoted into the blocking `web-responsiveness` job.
 
 Target CI additions for later hardening work:
 
 - secret scanning;
-- explicit accessibility/e2e evidence hooks tied to the Phase 5 target budgets.
+- explicit accessibility/e2e evidence hooks tied to the Phase 5 target budgets;
+- real-browser timing assertions (TTI, FMP, memory profiling) once instrumentation lands.
 
-Target CI gates (to be added by evidence-hook tasks T021–T025):
+Remaining target CI gates (to be added by evidence-hook tasks T023–T025):
 
-- build-size budget checks (Vite output, see Responsiveness Budgets above);
-- responsiveness regression assertions in browser specs.
+- responsiveness regression assertions beyond current browser spec coverage;
+- packaging evidence checks plus any remaining build-evidence wiring outside the `quality.yml`
+  `web-responsiveness` gate landed by T021 (T025).
