@@ -61,6 +61,66 @@ node --test test/hydra-ui.test.mjs    # single file
 - [ ] No secrets or personal paths in committed files
 - [ ] Commits are focused and have clear messages
 
+## Web Interface — Contributor Verification
+
+The web initiative lives in three workspace packages (`apps/web`, `apps/web-gateway`,
+`packages/web-contracts`). If your change touches any of these, run the verification sequence below
+before opening a PR.
+
+### Quick verification sequence
+
+```bash
+# 1. Quality gates (lint + format + typecheck + cycle detection + web typecheck)
+npm run quality
+
+# 2. Full test suite (core + web-gateway + browser component tests)
+npm test
+
+# 3. Packaging evidence (dry-run tarball manifest + packaging integration tests)
+npm run package:evidence
+```
+
+All three must pass before a web-interface PR is ready for review.
+
+### Running the web stack locally
+
+The browser app requires the daemon and gateway running together. From the repo root:
+
+```bash
+# Terminal 1 — start the daemon
+npm start
+
+# Terminal 2 — build the browser bundle and start the gateway
+HYDRA_WEB_OPERATOR_ID=admin \
+HYDRA_WEB_OPERATOR_SECRET=password123 \
+npm --workspace @hydra/web-gateway run start:with-web
+```
+
+Open `http://127.0.0.1:4174/login` to verify the workspace loads. If the browser bundle is already
+built, use `npm --workspace @hydra/web-gateway run start` to skip the rebuild.
+
+For packaged-runtime testing (npm tarball), start `node dist/web-runtime/server.js` instead of the
+workspace gateway command. The `dist/web-runtime/` directory is created by `npm pack` (via
+`prepack`).
+
+### Troubleshooting
+
+- **Gateway won't start / port 4174 already in use** — kill any existing gateway process and retry.
+  The gateway binds to port 4174 by default.
+- **`dist/web-runtime/` missing** — run `npm pack` from the repo root. The `prepack` script builds
+  the browser bundle and assembles the packaged runtime directory.
+- **Browser tests fail with `vitest` errors** — ensure workspace dependencies are installed:
+  `npm ci` from the repo root installs all workspace packages.
+- **ESLint boundary violations** — web packages must not import from `lib/` directly. Shared types
+  go through `packages/web-contracts`. See
+  [`docs/web-interface/07-boundaries-and-governance.md`](docs/web-interface/07-boundaries-and-governance.md).
+- **Typecheck errors in `apps/web`** — run
+  `npm --workspace @hydra/web run typecheck:workspace` to isolate web-specific type issues.
+- **Standalone exe does not include the web interface** — this is intentional. The standalone
+  executable is CLI-only; web support is available via source checkout and npm package only.
+- **Mermaid diagram validation failures** — run `npm run lint:mermaid` to check Mermaid code fences
+  in Markdown files before committing.
+
 ## Questions?
 
 Open an issue or start a discussion — we're happy to help.
