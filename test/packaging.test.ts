@@ -227,15 +227,6 @@ describe('packaging', { timeout: 120_000 }, () => {
     assert.ok(/\bimport\b/.test(content) || /\bexport\b/.test(content));
   });
 
-  it('bundled gateway sets default HYDRA_WEB_STATIC_DIR for packaged layout', () => {
-    const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
-    const content = fs.readFileSync(serverJs, 'utf8');
-    assert.ok(
-      content.includes('HYDRA_WEB_STATIC_DIR'),
-      'dist/web-runtime/server.js should reference HYDRA_WEB_STATIC_DIR for packaged static dir',
-    );
-  });
-
   it('tarball contains dist/web-runtime/web/ browser assets', () => {
     const webDir = path.join(hydraPkgDir, 'dist', 'web-runtime', 'web');
     assert.ok(fs.existsSync(webDir), 'dist/web-runtime/web/ missing from tarball');

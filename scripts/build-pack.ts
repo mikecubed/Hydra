@@ -129,7 +129,6 @@ try {
       target: ['node20'],
       legalComments: 'none',
       sourcemap: false,
-      banner: { js: esbuildBanner },
       external: WEB_RUNTIME_EXTERNALS,
     });
     console.log('[prepack] Bundled gateway entry → dist/web-runtime/server.js');
