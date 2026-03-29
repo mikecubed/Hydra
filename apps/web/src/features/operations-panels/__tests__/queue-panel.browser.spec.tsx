@@ -355,3 +355,257 @@ describe('OperationsPanelShell', () => {
     expect(section).toBeInTheDocument();
   });
 });
+
+// ─── T024 Regression: narrow-space & compact-layout interactions ────────────
+
+describe('T024 QueueItemCard narrow-space regressions', () => {
+  it('renders a long title without crashing or losing the status badge', () => {
+    const longTitle = 'A'.repeat(200);
+    render(
+      <QueueItemCard
+        item={makeItem({ title: longTitle })}
+        isSelected={false}
+        hasPendingControl={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(longTitle)).toBeInTheDocument();
+    expect(screen.getByText('active')).toBeInTheDocument();
+    expect(screen.getByRole('button')).toBeInTheDocument();
+  });
+
+  it('renders multiple risk signals without layout collapse', () => {
+    render(
+      <QueueItemCard
+        item={makeItem({
+          riskSignals: [
+            { kind: 'budget', severity: 'warning', summary: 'Budget 80% used', scope: 'global' },
+            {
+              kind: 'health',
+              severity: 'critical',
+              summary: 'Agent unresponsive',
+              scope: 'work-item',
+            },
+            { kind: 'budget', severity: 'info', summary: 'Token ceiling OK', scope: 'session' },
+          ],
+        })}
+        isSelected={false}
+        hasPendingControl={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Global\s*:\s*Budget 80% used/)).toBeInTheDocument();
+    expect(screen.getByText(/Work item\s*:\s*Agent unresponsive/)).toBeInTheDocument();
+    expect(screen.getByText(/Session\s*:\s*Token ceiling OK/)).toBeInTheDocument();
+    // All risk badges have distinct test IDs
+    expect(screen.getByTestId('risk-badge-budget-global')).toBeInTheDocument();
+    expect(screen.getByTestId('risk-badge-health-work-item')).toBeInTheDocument();
+    expect(screen.getByTestId('risk-badge-budget-session')).toBeInTheDocument();
+  });
+
+  it('renders all metadata simultaneously: owner + checkpoint + risk + pending + conversation', () => {
+    render(
+      <QueueItemCard
+        item={makeItem({
+          ownerLabel: 'gemini',
+          lastCheckpointSummary: 'CI green',
+          relatedConversationId: 'conv-99',
+          riskSignals: [
+            {
+              kind: 'health',
+              severity: 'warning',
+              summary: 'Slow response',
+              scope: 'global',
+            },
+          ],
+        })}
+        isSelected={true}
+        hasPendingControl={true}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/gemini/)).toBeInTheDocument();
+    expect(screen.getByText('CI green')).toBeInTheDocument();
+    expect(screen.getByText(/linked to conversation/i)).toBeInTheDocument();
+    expect(screen.getByText(/control pending/i)).toBeInTheDocument();
+    expect(screen.getByText(/Global\s*:\s*Slow response/)).toBeInTheDocument();
+    expect(screen.getByRole('button')).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('applies correct status colours for every work item status', () => {
+    const statuses: Array<'waiting' | 'active' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled'> = [
+      'waiting',
+      'active',
+      'paused',
+      'blocked',
+      'completed',
+      'failed',
+      'cancelled',
+    ];
+
+    for (const status of statuses) {
+      cleanup();
+      render(
+        <QueueItemCard
+          item={makeItem({ id: `wi-${status}`, status })}
+          isSelected={false}
+          hasPendingControl={false}
+          onSelect={vi.fn()}
+        />,
+      );
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.getByRole('button')).toBeInTheDocument();
+    }
+  });
+});
+
+describe('T024 QueuePanel compact density regressions', () => {
+  it('renders 10 items with correct list count', () => {
+    const items = Array.from({ length: 10 }, (_, i) =>
+      makeItem({ id: `wi-${i}`, title: `Task ${i}`, position: i }),
+    );
+    render(
+      <QueuePanel
+        items={items}
+        snapshotStatus="ready"
+        availability="ready"
+        selectedWorkItemId={null}
+        onSelectItem={vi.fn()}
+        hasPendingControl={() => false}
+      />,
+    );
+    expect(screen.getAllByRole('listitem')).toHaveLength(10);
+    expect(screen.getByRole('list')).toHaveAttribute('aria-label', 'Work queue');
+  });
+
+  it('preserves list accessibility label with mixed pending-control states', () => {
+    const items = [
+      makeItem({ id: 'wi-1', title: 'Normal' }),
+      makeItem({ id: 'wi-2', title: 'Pending' }),
+      makeItem({ id: 'wi-3', title: 'Also normal' }),
+    ];
+    render(
+      <QueuePanel
+        items={items}
+        snapshotStatus="ready"
+        availability="ready"
+        selectedWorkItemId="wi-2"
+        onSelectItem={vi.fn()}
+        hasPendingControl={(id) => id === 'wi-2'}
+      />,
+    );
+
+    // Verify all items rendered
+    expect(screen.getByText('Normal')).toBeInTheDocument();
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText('Also normal')).toBeInTheDocument();
+
+    // The pending item shows the control pending indicator
+    expect(screen.getByText(/control pending/i)).toBeInTheDocument();
+
+    // Selection is correct
+    const buttons = screen.getAllByRole('button');
+    expect(buttons[1]).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('transitions from list to empty state when items go from populated to empty', () => {
+    const { rerender } = render(
+      <QueuePanel
+        items={[makeItem({ id: 'wi-1', title: 'Vanishing' })]}
+        snapshotStatus="ready"
+        availability="ready"
+        selectedWorkItemId={null}
+        onSelectItem={vi.fn()}
+        hasPendingControl={() => false}
+      />,
+    );
+    expect(screen.getByText('Vanishing')).toBeInTheDocument();
+    expect(screen.getByRole('list')).toBeInTheDocument();
+
+    rerender(
+      <QueuePanel
+        items={[]}
+        snapshotStatus="ready"
+        availability="empty"
+        selectedWorkItemId={null}
+        onSelectItem={vi.fn()}
+        hasPendingControl={() => false}
+      />,
+    );
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/no work items/i);
+  });
+});
+
+describe('T024 OperationsPanelShell layout regressions', () => {
+  it('renders detail panel slot alongside queue content', () => {
+    render(
+      <OperationsPanelShell
+        snapshotStatus="ready"
+        freshness="live"
+        detailPanel={<div data-testid="mock-detail">Detail view</div>}
+      >
+        <p>Queue content</p>
+      </OperationsPanelShell>,
+    );
+    expect(screen.getByText('Queue content')).toBeInTheDocument();
+    expect(screen.getByTestId('detail-panel-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-detail')).toHaveTextContent('Detail view');
+  });
+
+  it('renders health-budget slot above queue when provided', () => {
+    render(
+      <OperationsPanelShell
+        snapshotStatus="ready"
+        freshness="live"
+        healthBudgetPanel={<div data-testid="mock-health">Health info</div>}
+      >
+        <p>Queue content</p>
+      </OperationsPanelShell>,
+    );
+    expect(screen.getByTestId('health-budget-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-health')).toHaveTextContent('Health info');
+  });
+
+  it('renders control strip slot inside detail panel', () => {
+    render(
+      <OperationsPanelShell
+        snapshotStatus="ready"
+        freshness="live"
+        detailPanel={<div>Detail</div>}
+        controlStripSlot={<div data-testid="mock-controls">Controls here</div>}
+      >
+        <p>Queue</p>
+      </OperationsPanelShell>,
+    );
+    expect(screen.getByTestId('control-strip-slot')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-controls')).toHaveTextContent('Controls here');
+  });
+
+  it('does not render control strip slot when detail panel is absent', () => {
+    render(
+      <OperationsPanelShell
+        snapshotStatus="ready"
+        freshness="live"
+        controlStripSlot={<div data-testid="mock-controls">Controls here</div>}
+      >
+        <p>Queue</p>
+      </OperationsPanelShell>,
+    );
+    expect(screen.queryByTestId('detail-panel-slot')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('control-strip-slot')).not.toBeInTheDocument();
+  });
+
+  it('renders all three freshness states with correct text', () => {
+    const states: Array<'live' | 'stale' | 'refreshing'> = ['live', 'stale', 'refreshing'];
+    for (const freshness of states) {
+      cleanup();
+      render(
+        <OperationsPanelShell snapshotStatus="ready" freshness={freshness}>
+          <p>Content</p>
+        </OperationsPanelShell>,
+      );
+      expect(screen.getByText(freshness)).toBeInTheDocument();
+    }
+  });
+});
