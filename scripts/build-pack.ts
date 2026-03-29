@@ -10,7 +10,8 @@
  *   2. Post-process emitted .js files: rewrite remaining string-literal
  *      ".ts" references (path.join segments, file filters, etc.) to ".js".
  *   3. Write a manifest of generated files for postpack cleanup.
- *   4. Patch package.json so published scripts also point to .js entrypoints.
+ *   4. Bundle the web runtime into dist/web-runtime/ (gateway + browser assets).
+ *   5. Patch package.json so published scripts also point to .js entrypoints.
  */
 
 import fs from 'node:fs';
@@ -24,6 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const MANIFEST_PATH = path.join(ROOT, '.packfiles');
+const WEB_RUNTIME_DIR = path.join(ROOT, 'dist', 'web-runtime');
 
 // ── Step 1: Compile ──────────────────────────────────────────────────────────
 
@@ -87,6 +89,60 @@ console.log(`[prepack] Patched string literals in ${String(patchCount)} files.`)
 
 fs.writeFileSync(MANIFEST_PATH, `${emitted.join('\n')}\n`);
 console.log(`[prepack] Manifest written to .packfiles (${String(emitted.length)} entries).`);
+
+// ── Step 4: Bundle web runtime ───────────────────────────────────────────
+// Creates dist/web-runtime/ with a bundled gateway server and browser assets.
+// Skipped gracefully when workspace sources are unavailable (e.g. minimal clone).
+
+const GATEWAY_ENTRY = path.join(ROOT, 'apps', 'web-gateway', 'src', 'server.ts');
+const WEB_DIST = path.join(ROOT, 'apps', 'web', 'dist');
+
+if (fs.existsSync(GATEWAY_ENTRY)) {
+  console.log('[prepack] Building web runtime…');
+
+  const serverOut = path.join(WEB_RUNTIME_DIR, 'server.js');
+  fs.mkdirSync(WEB_RUNTIME_DIR, { recursive: true });
+
+  // 4a. Bundle the gateway server entry with esbuild (self-contained ESM).
+  // The banner sets the default static dir to ./web relative to the bundle
+  // so the packaged layout resolves correctly without env var overrides.
+  const esbuildBanner = [
+    'import { dirname as __pkgDir } from "node:path";',
+    'import { fileURLToPath as __pkgUrl } from "node:url";',
+    'process.env.HYDRA_WEB_STATIC_DIR ??= __pkgDir(__pkgUrl(import.meta.url)) + "/web";',
+  ].join('\n');
+
+  const { build } = await import('esbuild');
+  await build({
+    entryPoints: [GATEWAY_ENTRY],
+    outfile: serverOut,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: ['node20'],
+    legalComments: 'none',
+    sourcemap: false,
+    banner: { js: esbuildBanner },
+  });
+
+  console.log('[prepack] Bundled gateway entry → dist/web-runtime/server.js');
+
+  // 4b. Copy pre-built web frontend assets into dist/web-runtime/web/.
+  const webAssetsDest = path.join(WEB_RUNTIME_DIR, 'web');
+  if (fs.existsSync(WEB_DIST)) {
+    fs.cpSync(WEB_DIST, webAssetsDest, { recursive: true });
+    console.log('[prepack] Copied browser assets → dist/web-runtime/web/');
+  } else {
+    console.warn(
+      '[prepack] ⚠ apps/web/dist/ not found — browser assets not included. ' +
+        'Run `npm --workspace @hydra/web run build` before packing for full web support.',
+    );
+  }
+
+  console.log('[prepack] Web runtime ready.');
+} else {
+  console.log('[prepack] apps/web-gateway not found — skipping web runtime build.');
+}
 
 // ── Step 5: Patch package.json for published artifact ────────────────────────
 // Rewrite scripts that reference .ts entrypoints under lib/ or bin/ so that

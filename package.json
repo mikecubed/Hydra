@@ -28,6 +28,7 @@
   "files": [
     "bin/",
     "lib/",
+    "dist/web-runtime/",
     "docs/*.md",
     "docs/research/*.md",
     "hydra.config.json",

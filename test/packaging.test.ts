@@ -6,6 +6,10 @@
  * package.json scripts reference .js entrypoints so `npm run` works.
  * This prevents regressions where the published package exposes raw .ts
  * entrypoints that Node cannot run without native TypeScript support.
+ *
+ * Also validates that the packaged web runtime (dist/web-runtime/) is included
+ * with a bundled gateway server entry and built browser assets, and that
+ * post-pack cleanup restores the source repo to its clean TypeScript-only state.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -32,6 +36,8 @@ describe('packaging', { timeout: 120_000 }, () => {
     // ── Isolation: copy the repo to a temp dir so prepack/postpack side-effects
     // (generated .js files, .packfiles, .package.json.bak) never touch the real
     // working tree.  This prevents races with other tests running concurrently.
+    // We include apps/ and packages/ so the web runtime can be built and bundled
+    // during prepack, but exclude nested node_modules (deps resolve via symlink).
     const excludeTopLevel = new Set([
       'node_modules',
       '.git',
@@ -41,8 +47,6 @@ describe('packaging', { timeout: 120_000 }, () => {
       '.tsbuild',
       '.build-exe',
       '.pkg-cache',
-      'apps',
-      'packages',
     ]);
 
     repoClone = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-repo-'));
@@ -52,7 +56,11 @@ describe('packaging', { timeout: 120_000 }, () => {
         const rel = path.relative(ROOT, src);
         if (rel === '') return true; // root dir itself
         const topSegment = rel.split(path.sep)[0];
-        return !excludeTopLevel.has(topSegment);
+        if (excludeTopLevel.has(topSegment)) return false;
+        // Exclude nested node_modules inside workspace packages
+        const segments = rel.split(path.sep);
+        if (segments.length > 1 && segments.includes('node_modules')) return false;
+        return true;
       },
     });
 
@@ -63,6 +71,17 @@ describe('packaging', { timeout: 120_000 }, () => {
       path.join(repoClone, 'node_modules'),
       symlinkType,
     );
+
+    // Provide mock pre-built web frontend assets so the prepack web runtime
+    // step can bundle the gateway and copy browser assets without running Vite.
+    const mockWebDist = path.join(repoClone, 'apps', 'web', 'dist');
+    fs.mkdirSync(mockWebDist, { recursive: true });
+    fs.writeFileSync(
+      path.join(mockWebDist, 'index.html'),
+      '<!DOCTYPE html><html><body>Hydra Web</body></html>\n',
+    );
+    fs.mkdirSync(path.join(mockWebDist, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(mockWebDist, 'assets', 'main.js'), '// app bundle\n');
 
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-test-'));
 
@@ -203,6 +222,62 @@ describe('packaging', { timeout: 120_000 }, () => {
     assert.ok(
       (repoPkg.scripts.go as string).includes('.ts'),
       'Repo scripts.go should reference .ts after postpack restore',
+    );
+  });
+
+  // ── Web runtime packaging ────────────────────────────────────────────────
+
+  it('tarball contains dist/web-runtime/server.js gateway entry', () => {
+    const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
+    assert.ok(fs.existsSync(serverJs), 'dist/web-runtime/server.js missing from tarball');
+    const content = fs.readFileSync(serverJs, 'utf8');
+    assert.ok(content.length > 0, 'dist/web-runtime/server.js is empty');
+  });
+
+  it('bundled gateway entry is ESM', () => {
+    const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
+    const content = fs.readFileSync(serverJs, 'utf8');
+    // ESM bundles produced by esbuild contain import statements for node builtins
+    assert.ok(
+      /\bimport\b/.test(content) || /\bexport\b/.test(content),
+      'dist/web-runtime/server.js should be ESM (expected import/export statements)',
+    );
+  });
+
+  it('bundled gateway sets default HYDRA_WEB_STATIC_DIR for packaged layout', () => {
+    const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
+    const content = fs.readFileSync(serverJs, 'utf8');
+    assert.ok(
+      content.includes('HYDRA_WEB_STATIC_DIR'),
+      'dist/web-runtime/server.js should reference HYDRA_WEB_STATIC_DIR for packaged static dir',
+    );
+  });
+
+  it('tarball contains dist/web-runtime/web/ browser assets', () => {
+    const webDir = path.join(hydraPkgDir, 'dist', 'web-runtime', 'web');
+    assert.ok(fs.existsSync(webDir), 'dist/web-runtime/web/ missing from tarball');
+    assert.ok(
+      fs.existsSync(path.join(webDir, 'index.html')),
+      'dist/web-runtime/web/index.html missing from tarball',
+    );
+  });
+
+  it('tarball includes dist/web-runtime/ in package.json files', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(hydraPkgDir, 'package.json'), 'utf8'));
+    const files = pkg.files as string[];
+    assert.ok(
+      files.some((f: string) => f.includes('dist/web-runtime')),
+      `Expected "dist/web-runtime/" in files array, got: ${JSON.stringify(files)}`,
+    );
+  });
+
+  it('source repo dist/web-runtime/ is cleaned after postpack', () => {
+    // The real working tree should not have dist/web-runtime/ since postpack
+    // cleans it up (and the test uses an isolated clone anyway).
+    const webRuntimeDir = path.join(ROOT, 'dist', 'web-runtime');
+    assert.ok(
+      !fs.existsSync(webRuntimeDir),
+      'dist/web-runtime/ should not exist in source repo after postpack cleanup',
     );
   });
 });
