@@ -439,10 +439,9 @@ jobs:
           exit $failed
 
   # ── Quality Gate ───────────────────────────────────────────────────────
-  # Single status check that aggregates the core quality jobs.  Branch
-  # protection can reference this one check for quality enforcement.
-  # Warn-only jobs (audit) and PR-only jobs (lint-pr-title, new-file-policy)
-  # are intentionally excluded — they provide signal but are not hard gates.
+  # Aggregate summary for the always-on core quality jobs.  This is a
+  # convenience signal, not a replacement for separately required PR-only or
+  # policy checks such as mutation-testing and new-file-policy.
   quality-gate:
     name: Quality gate
     if: always()
