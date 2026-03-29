@@ -2,10 +2,11 @@
  * T7 — BudgetsSection browser specs: rows re-sync when model IDs change after refetch.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, act } from '@testing-library/react';
+import { cleanup, render, screen, act, fireEvent } from '@testing-library/react';
 
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
+import { MutationsRequestError } from '../api/mutations-client.ts';
 import { BudgetsSection } from '../components/budgets-section.tsx';
 
 afterEach(() => {
@@ -185,5 +186,36 @@ describe('BudgetsSection — row sync', () => {
     }
     expect(refreshedDaily.value).toBe('2000');
     expect(refreshedWeekly.value).toBe('8000');
+  });
+
+  it('shows rate-limit retry guidance from the live budget row', async () => {
+    const client = makeMockClient();
+    client.postBudget = vi.fn().mockRejectedValue(
+      new MutationsRequestError(429, {
+        ok: false,
+        code: 'RATE_LIMITED',
+        category: 'rate-limit',
+        message: 'Too many updates',
+        httpStatus: 429,
+        retryAfterMs: 4000,
+      }),
+    );
+
+    render(
+      <BudgetsSection
+        config={makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+        onBudgetMutated={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByText('Confirm'));
+
+    await act(async () => {});
+
+    expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent('try again in 4 seconds');
   });
 });

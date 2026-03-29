@@ -11,6 +11,7 @@ import { useState, useCallback, type JSX } from 'react';
 import type { WorkflowName } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
+import type { ErrorCategory } from '../../../shared/gateway-errors.ts';
 import { ConfirmDialog } from './confirm-dialog.tsx';
 import { DestructiveConfirmDialog } from './destructive-confirm-dialog.tsx';
 import { MutationErrorBanner } from './mutation-error-banner.tsx';
@@ -66,7 +67,10 @@ function LaunchDialog({
   );
 }
 
-type LaunchOutcome = { taskId: string } | { conflict: string } | { error: string };
+type LaunchOutcome =
+  | { taskId: string }
+  | { conflict: string }
+  | { error: string; category: ErrorCategory | null; retryAfterMs: number | null };
 
 async function executeLaunch(
   client: MutationsClient,
@@ -85,10 +89,18 @@ async function executeLaunch(
       if (err.gatewayError.category === 'workflow-conflict')
         return { conflict: 'Workflow already running' };
       if (err.gatewayError.category === 'daemon-unavailable')
-        return { error: 'Config unavailable — daemon unreachable' };
-      return { error: err.gatewayError.message };
+        return {
+          error: 'Config unavailable — daemon unreachable',
+          category: err.gatewayError.category,
+          retryAfterMs: err.gatewayError.retryAfterMs ?? null,
+        };
+      return {
+        error: err.gatewayError.message,
+        category: err.gatewayError.category,
+        retryAfterMs: err.gatewayError.retryAfterMs ?? null,
+      };
     }
-    return { error: 'Unexpected error' };
+    return { error: 'Unexpected error', category: null, retryAfterMs: null };
   }
 }
 
@@ -97,6 +109,8 @@ export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelPro
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCategory, setErrorCategory] = useState<ErrorCategory | null>(null);
+  const [retryAfterMs, setRetryAfterMs] = useState<number | null>(null);
   const [launchedTaskId, setLaunchedTaskId] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
 
@@ -104,6 +118,8 @@ export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelPro
     setIsDialogOpen(true);
     setConflictMessage(null);
     setError(null);
+    setErrorCategory(null);
+    setRetryAfterMs(null);
     setLaunchedTaskId(null);
   }, []);
 
@@ -118,7 +134,11 @@ export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelPro
       const outcome = await executeLaunch(client, selectedWorkflow, revision);
       if ('taskId' in outcome) setLaunchedTaskId(outcome.taskId);
       else if ('conflict' in outcome) setConflictMessage(outcome.conflict);
-      else setError(outcome.error);
+      else {
+        setError(outcome.error);
+        setErrorCategory(outcome.category);
+        setRetryAfterMs(outcome.retryAfterMs);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -155,8 +175,12 @@ export function WorkflowLaunchPanel({ revision, client }: WorkflowLaunchPanelPro
       )}
       <MutationErrorBanner
         message={error}
+        category={errorCategory}
+        retryAfterMs={retryAfterMs}
         onDismiss={() => {
           setError(null);
+          setErrorCategory(null);
+          setRetryAfterMs(null);
         }}
       />
       <LaunchDialog
