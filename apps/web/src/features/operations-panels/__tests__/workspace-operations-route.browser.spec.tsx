@@ -8,6 +8,7 @@ import type {
 } from '@hydra/web-contracts';
 
 import { AppProviders } from '../../../app/providers.tsx';
+import { WorkspaceOperationsPanel } from '../components/workspace-operations-panel.tsx';
 import {
   FakeWebSocket,
   fetchSpy,
@@ -463,7 +464,7 @@ describe('T024 refresh-cycle regressions', () => {
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
-    render(<AppProviders />);
+    const { rerender } = render(<WorkspaceOperationsPanel refreshNonce={0} />);
 
     // Select item and load detail
     const queueItem = await screen.findByText('Investigate queue hydration');
@@ -471,9 +472,15 @@ describe('T024 refresh-cycle regressions', () => {
     expect(await screen.findByText('Phase alpha')).toBeInTheDocument();
     expect(snapshotCallCount).toBe(1);
 
-    // The selected card should have aria-current=true
-    const selectedButton = screen.getByRole('button', { name: /Investigate queue hydration/i });
+    rerender(<WorkspaceOperationsPanel refreshNonce={1} />);
+
+    await waitFor(() => {
+      expect(snapshotCallCount).toBe(2);
+    });
+
+    const selectedButton = await screen.findByRole('button', { name: /Updated title/i });
     expect(selectedButton).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('Phase alpha')).toBeInTheDocument();
   });
 
   it('clears selection when a snapshot refresh removes the selected item', async () => {
@@ -499,96 +506,46 @@ describe('T024 refresh-cycle regressions', () => {
     };
 
     let snapshotCallCount = 0;
-    let resolveSecondSnapshot!: (r: Response) => void;
-    const secondSnapshotPromise = new Promise<Response>((r) => {
-      resolveSecondSnapshot = r;
-    });
-
-    fetchSpy.mockImplementation((input: RequestInfo | URL) => {
-      const url = resolveUrl(input);
-      if (url === '/session/info') {
-        return Promise.resolve(
-          jsonResponse({
-            operatorId: 'test-operator',
-            state: 'active',
-            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-            lastActivityAt: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-          }),
-        );
-      }
-      if (url === '/conversations?status=active&limit=20') {
-        return Promise.resolve(jsonResponse({ conversations: [], totalCount: 0 }));
-      }
+    installFetchStub((url) => {
       if (url === '/operations/snapshot') {
         snapshotCallCount += 1;
-        if (snapshotCallCount === 1) {
-          return Promise.resolve(
-            jsonResponse({
-              queue: [item],
-              health: null,
-              budget: null,
-              availability: 'ready',
-              lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
-              nextCursor: null,
-            }),
-          );
-        }
-        return secondSnapshotPromise;
+        return jsonResponse({
+          queue: snapshotCallCount === 1 ? [item] : [],
+          health: null,
+          budget: null,
+          availability: snapshotCallCount === 1 ? 'ready' : 'empty',
+          lastSynchronizedAt:
+            snapshotCallCount === 1 ? '2026-07-01T00:00:00.000Z' : '2026-07-02T00:00:00.000Z',
+          nextCursor: null,
+        });
       }
       if (url === '/operations/work-items/wi-42') {
-        return Promise.resolve(jsonResponse(detail));
+        return jsonResponse(detail);
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
-    vi.stubGlobal('fetch', fetchSpy);
 
-    render(<AppProviders />);
+    const { rerender } = render(<WorkspaceOperationsPanel refreshNonce={0} />);
 
     // Select item
     const queueItem = await screen.findByText('Investigate queue hydration');
     fireEvent.click(queueItem);
     expect(await screen.findByText('Disappearing checkpoint')).toBeInTheDocument();
-
-    // Trigger retry (simulates a second snapshot fetch)
-    // The degraded banner is not showing since first snapshot succeeded,
-    // so we use a direct mechanism: click on the queue item to trigger re-render,
-    // but the key test is that after snapshot resolves without the item, selection clears.
-    // We need to trigger another snapshot fetch. The workspace panel retries via
-    // the degraded banner or via refreshNonce. Since this is an integration test
-    // with AppProviders, we simulate by resolving the pending snapshot without the item.
-
-    // The snapshot was already requested once. To trigger a second,
-    // we indirectly fire via a real UI action: the retry mechanism is
-    // baked into workspace-operations-panel via refreshNonce or manual retry.
-    // In this test, we simply resolve the second pending snapshot promise
-    // (which was triggered by the syncController's design of re-fetching).
-    // Actually, the mount useEffect fires fetchSnapshot once. We need to trigger
-    // a second snapshot fetch. Let's confirm the first resolved:
     expect(snapshotCallCount).toBe(1);
 
-    // For the purpose of this regression, verify the *reducer* behavior:
-    // when a second snapshot arrives without the item, the detail panel clears.
-    // We can trigger this by clicking retry if we force a failure first.
-    // Instead, let's simply verify the selection is intact and the component
-    // shows the checkpoint, proving stability.
-    expect(screen.getByText('Disappearing checkpoint')).toBeInTheDocument();
-    const selectedBtn = screen.getAllByRole('button').find(
-      (btn) => btn.getAttribute('aria-current') === 'true',
-    );
-    expect(selectedBtn).toBeDefined();
+    rerender(<WorkspaceOperationsPanel refreshNonce={1} />);
 
-    // Now resolve the second snapshot (empty queue — item removed)
-    resolveSecondSnapshot(
-      jsonResponse({
-        queue: [],
-        health: null,
-        budget: null,
-        availability: 'empty',
-        lastSynchronizedAt: '2026-07-02T00:00:00.000Z',
-        nextCursor: null,
-      }),
-    );
+    await waitFor(() => {
+      expect(snapshotCallCount).toBe(2);
+      expect(screen.queryByText('Disappearing checkpoint')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/no work items/i);
+    expect(screen.queryByTestId('detail-panel-slot')).not.toBeInTheDocument();
+    expect(
+      screen
+        .queryAllByRole('button')
+        .some((button) => button.getAttribute('aria-current') === 'true'),
+    ).toBe(false);
   });
 
   it('concurrent snapshot refreshes do not clobber the freshness badge', async () => {
@@ -627,7 +584,7 @@ describe('T024 refresh-cycle regressions', () => {
     });
     vi.stubGlobal('fetch', fetchSpy);
 
-    render(<AppProviders />);
+    const { rerender } = render(<WorkspaceOperationsPanel refreshNonce={0} />);
 
     // Initial mount triggers first snapshot fetch
     await waitFor(() => {
@@ -635,7 +592,25 @@ describe('T024 refresh-cycle regressions', () => {
     });
     expect(screen.getByText('Refreshing…')).toBeInTheDocument();
 
-    // Resolve first snapshot
+    rerender(<WorkspaceOperationsPanel refreshNonce={1} />);
+    await waitFor(() => {
+      expect(snapshotCalls).toBe(2);
+    });
+
+    resolveSecond(
+      jsonResponse({
+        queue: [{ ...makeHydrationItem(), title: 'Second snapshot wins' }],
+        health: null,
+        budget: null,
+        availability: 'ready',
+        lastSynchronizedAt: '2026-07-02T00:00:00.000Z',
+        nextCursor: null,
+      }),
+    );
+
+    expect(await screen.findByText('live')).toBeInTheDocument();
+    expect(await screen.findByText('Second snapshot wins')).toBeInTheDocument();
+
     resolveFirst(
       jsonResponse({
         queue: [makeHydrationItem()],
@@ -647,8 +622,13 @@ describe('T024 refresh-cycle regressions', () => {
       }),
     );
 
-    expect(await screen.findByText('live')).toBeInTheDocument();
-    expect(await screen.findByText('Investigate queue hydration')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('status', { name: 'Operations refresh status' })).toHaveTextContent(
+        'live',
+      );
+    });
+    expect(screen.getByText('Second snapshot wins')).toBeInTheDocument();
+    expect(screen.queryByText('Investigate queue hydration')).not.toBeInTheDocument();
   });
 
   it('does not flash stale badge during normal snapshot loading cycle', async () => {

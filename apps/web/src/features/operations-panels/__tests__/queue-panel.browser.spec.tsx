@@ -356,9 +356,9 @@ describe('OperationsPanelShell', () => {
   });
 });
 
-// ─── T024 Regression: narrow-space & compact-layout interactions ────────────
+// ─── T024 Regression: dense metadata rendering and shell layout ──────────────
 
-describe('T024 QueueItemCard narrow-space regressions', () => {
+describe('T024 QueueItemCard dense metadata regressions', () => {
   it('renders a long title without crashing or losing the status badge', () => {
     const longTitle = 'A'.repeat(200);
     render(
@@ -433,15 +433,9 @@ describe('T024 QueueItemCard narrow-space regressions', () => {
   });
 
   it('applies correct status colours for every work item status', () => {
-    const statuses: Array<'waiting' | 'active' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled'> = [
-      'waiting',
-      'active',
-      'paused',
-      'blocked',
-      'completed',
-      'failed',
-      'cancelled',
-    ];
+    const statuses: Array<
+      'waiting' | 'active' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled'
+    > = ['waiting', 'active', 'paused', 'blocked', 'completed', 'failed', 'cancelled'];
 
     for (const status of statuses) {
       cleanup();
@@ -459,7 +453,7 @@ describe('T024 QueueItemCard narrow-space regressions', () => {
   });
 });
 
-describe('T024 QueuePanel compact density regressions', () => {
+describe('T024 QueuePanel density regressions', () => {
   it('renders 10 items with correct list count', () => {
     const items = Array.from({ length: 10 }, (_, i) =>
       makeItem({ id: `wi-${i}`, title: `Task ${i}`, position: i }),
@@ -551,6 +545,9 @@ describe('T024 OperationsPanelShell layout regressions', () => {
     expect(screen.getByText('Queue content')).toBeInTheDocument();
     expect(screen.getByTestId('detail-panel-slot')).toBeInTheDocument();
     expect(screen.getByTestId('mock-detail')).toHaveTextContent('Detail view');
+    expect(screen.getByTestId('detail-panel-slot').parentElement).toHaveStyle({
+      gridTemplateColumns: '1fr 1fr',
+    });
   });
 
   it('renders health-budget slot above queue when provided', () => {
