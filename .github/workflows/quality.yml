@@ -335,3 +335,88 @@ jobs:
           HUSKY: '0'
       - name: Check new files have tests
         run: npm run test:new-file-policy -- origin/${{ github.base_ref }}
+
+  web-responsiveness:
+    name: Web Responsiveness Budgets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          HUSKY: '0'
+
+      # ── Build and bundle-size evidence ────────────────────────────────────
+      - name: Build web workspace
+        id: web-build
+        run: |
+          start_time=$(date +%s)
+          npm --workspace @hydra/web run build 2>&1 | tee build-output.txt
+          end_time=$(date +%s)
+          elapsed=$((end_time - start_time))
+          echo "elapsed=${elapsed}" >> "$GITHUB_OUTPUT"
+          echo "Build completed in ${elapsed}s"
+
+      - name: Check build time budget (≤ 30s)
+        run: |
+          elapsed=${{ steps.web-build.outputs.elapsed }}
+          echo "Build time: ${elapsed}s (budget: 30s)"
+          if [ "$elapsed" -gt 30 ]; then
+            echo "::error::Build time ${elapsed}s exceeds 30s budget"
+            exit 1
+          fi
+
+      - name: Check bundle size budgets
+        run: |
+          # Parse gzipped sizes from Vite build output.
+          # Vite prints lines like: dist/assets/index-abc123.js  120.45 kB │ gzip: 38.12 kB
+          js_total=0
+          css_total=0
+          while IFS= read -r line; do
+            # Extract gzip size in kB from lines containing "gzip:"
+            gzip_kb=$(echo "$line" | grep -oP 'gzip:\s*\K[\d.]+' || true)
+            if [ -z "$gzip_kb" ]; then
+              continue
+            fi
+            # Convert to integer bytes for comparison (multiply by 1000, truncate)
+            gzip_bytes=$(echo "$gzip_kb" | awk '{printf "%d", $1 * 1024}')
+            if echo "$line" | grep -qE '\.js(\s|$)'; then
+              js_total=$((js_total + gzip_bytes))
+            elif echo "$line" | grep -qE '\.css(\s|$)'; then
+              css_total=$((css_total + gzip_bytes))
+            fi
+          done < build-output.txt
+
+          js_kb=$((js_total / 1024))
+          css_kb=$((css_total / 1024))
+          echo "JS bundle (gzipped):  ${js_kb} KB (budget: 250 KB)"
+          echo "CSS bundle (gzipped): ${css_kb} KB (budget: 50 KB)"
+
+          failed=0
+          if [ "$js_kb" -gt 250 ]; then
+            echo "::error::JS bundle ${js_kb} KB exceeds 250 KB budget"
+            failed=1
+          fi
+          if [ "$css_kb" -gt 50 ]; then
+            echo "::error::CSS bundle ${css_kb} KB exceeds 50 KB budget"
+            failed=1
+          fi
+          exit $failed
+
+      # ── Workspace test evidence ───────────────────────────────────────────
+      - name: Run contract tests
+        run: npm --workspace @hydra/web-contracts run test
+
+      - name: Run gateway tests
+        run: npm --workspace @hydra/web-gateway run test
+
+      - name: Run browser specs
+        run: npm --workspace @hydra/web run test:browser
