@@ -52,6 +52,9 @@ describe('workspace reconnect workflow', () => {
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -153,6 +156,9 @@ describe('workspace reconnect workflow', () => {
       }
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -303,9 +309,23 @@ describe('workspace reconnect workflow', () => {
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 2 });
     });
 
-    // Deliver 8 rapid deltas in a single act() — simulates a burst of server events
+    // Deliver the first half of the burst and assert the transcript updates
+    // before completion, so buffered-at-end rendering cannot pass this test.
     act(() => {
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 4; i++) {
+        ws2.simulateMessage(
+          streamFrame('conv-1', 3 + i, 'turn-rd', 'text-delta', { text: ` w${String(i)}` }),
+        );
+      }
+    });
+
+    await vi.waitFor(() => {
+      expect(screen.getByText('Init w0 w1 w2 w3')).toBeInTheDocument();
+    });
+    expect(screen.getByText('streaming…')).toBeInTheDocument();
+
+    act(() => {
+      for (let i = 4; i < 8; i++) {
         ws2.simulateMessage(
           streamFrame('conv-1', 3 + i, 'turn-rd', 'text-delta', { text: ` w${String(i)}` }),
         );

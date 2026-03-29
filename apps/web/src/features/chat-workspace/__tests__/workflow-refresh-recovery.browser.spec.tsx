@@ -75,6 +75,18 @@ function requestUrl(input: string | URL | Request): string {
   return input.url;
 }
 
+function findReconnectStatus(): HTMLElement | undefined {
+  return screen
+    .queryAllByRole('status')
+    .find((element) => /reconnecting/i.test(element.textContent ?? ''));
+}
+
+function findReconnectAlert(): HTMLElement | undefined {
+  return screen
+    .queryAllByRole('alert')
+    .find((element) => /reconnecting/i.test(element.textContent ?? ''));
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('workspace refresh/reconnect recovery workflows', () => {
@@ -105,6 +117,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           totalCount: 1,
           hasMore: false,
         });
+      }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
       }
       throw new Error(`Unexpected fetch: ${url}`);
     });
@@ -726,6 +741,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           hasMore: false,
         });
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return jsonResponse({ approvals: [] });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -852,6 +870,16 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
       }
+      if (url === '/operations/snapshot') {
+        return jsonResponse({
+          queue: [],
+          health: null,
+          budget: null,
+          availability: 'empty',
+          lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+          nextCursor: null,
+        });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -862,7 +890,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     const ws1 = openAndSubscribe('conv-1', 0);
     await vi.waitFor(() => {
       expect(screen.queryByRole('alert')).toBeNull();
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(findReconnectStatus()).toBeUndefined();
     });
 
     // Begin streaming
@@ -887,7 +915,11 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     });
 
     // Banner must show reconnecting status
-    const banner = await screen.findByRole('status');
+    const banner = await vi.waitFor(() => {
+      const element = findReconnectStatus();
+      expect(element).toBeDefined();
+      return element;
+    });
     expect(banner).toHaveTextContent(/reconnecting/i);
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
 
@@ -915,7 +947,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     // Banner should hide after successful reconnect + subscribe
     await vi.waitFor(() => {
       expect(screen.queryByRole('alert')).toBeNull();
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(findReconnectStatus()).toBeUndefined();
     });
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
 
@@ -946,6 +978,16 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       if (url === '/conversations/conv-1/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
       }
+      if (url === '/operations/snapshot') {
+        return jsonResponse({
+          queue: [],
+          health: null,
+          budget: null,
+          availability: 'empty',
+          lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+          nextCursor: null,
+        });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -963,7 +1005,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       ws1.simulateClose(1006, 'offline');
     });
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/reconnecting/i);
+    await vi.waitFor(() => {
+      expect(findReconnectAlert()).toBeDefined();
+    });
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
 
     act(() => {
@@ -983,7 +1027,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
 
     await vi.waitFor(() => {
       expect(screen.queryByRole('alert')).toBeNull();
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(findReconnectStatus()).toBeUndefined();
       expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
     });
   });
@@ -1049,9 +1093,27 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       ws2.simulateMessage({ type: 'subscribed', conversationId: 'conv-1', currentSeq: 3 });
     });
 
-    // Deliver 6 rapid deltas in a single act — simulates a post-refresh burst
+    // Deliver part of the burst first and assert incremental rendering before
+    // completion, so buffered-only-at-end updates cannot pass this test.
     act(() => {
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 3; i++) {
+        ws2.simulateMessage(
+          streamFrame('conv-1', 4 + i, 'turn-rr', 'text-delta', { text: ` d${String(i)}` }),
+        );
+      }
+    });
+
+    await vi.waitFor(() => {
+      const articleText = transcriptArticles()[0]?.textContent ?? '';
+      expect(articleText).toContain('Base');
+      expect(articleText).toContain('d0');
+      expect(articleText).toContain('d1');
+      expect(articleText).toContain('d2');
+    });
+    expect(screen.getByText('streaming…')).toBeInTheDocument();
+
+    act(() => {
+      for (let i = 3; i < 6; i++) {
         ws2.simulateMessage(
           streamFrame('conv-1', 4 + i, 'turn-rr', 'text-delta', { text: ` d${String(i)}` }),
         );
@@ -1142,11 +1204,11 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(screen.getByText('completed')).toBeInTheDocument();
   });
 
-  // T024 regression: the conversation sidebar must list all conversations after
-  // a refresh, even when applyConversationUpsert returns the same state reference
-  // for an unchanged conversation.  Protects against the T023 no-op in
-  // applyConversationUpsert that returns state when `previous === merged`.
-  it('conversation list remains complete after refresh when upsert detects identical data', async () => {
+  // T024 regression: the conversation sidebar must remain complete after a
+  // refresh that returns the same conversation snapshots. This protects the
+  // refresh path against dropping conversations when identical data is
+  // rehydrated on a new mount.
+  it('conversation list remains complete after refresh with identical conversation snapshots', async () => {
     installFetchStub((url) => {
       if (url === '/conversations?status=active&limit=20') {
         return jsonResponse({
@@ -1167,6 +1229,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
       if (url === '/conversations/conv-3/turns?limit=50') {
         return jsonResponse(EMPTY_HISTORY);
       }
+      if (/^\/conversations\/conv-[123]\/approvals$/.test(url)) {
+        return jsonResponse({ approvals: [] });
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
 
@@ -1185,7 +1250,7 @@ describe('workspace refresh/reconnect recovery workflows', () => {
     expect(screen.getByRole('button', { name: /stable chat b/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /stable chat c/i })).toBeInTheDocument();
 
-    // All three must be present — the upsert no-op must not drop any
+    // All three must remain present after the identical refresh payload
     const buttons = screen.getAllByRole('button');
     const convButtons = buttons.filter(
       (b) => b.textContent && /stable chat/i.test(b.textContent),
