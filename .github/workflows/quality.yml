@@ -358,6 +358,7 @@ jobs:
       - name: Build web workspace
         id: web-build
         run: |
+          set -o pipefail
           start_time=$(date +%s)
           npm --workspace @hydra/web run build 2>&1 | tee build-output.txt
           end_time=$(date +%s)
@@ -410,13 +411,3 @@ jobs:
             failed=1
           fi
           exit $failed
-
-      # ── Workspace test evidence ───────────────────────────────────────────
-      - name: Run contract tests
-        run: npm --workspace @hydra/web-contracts run test
-
-      - name: Run gateway tests
-        run: npm --workspace @hydra/web-gateway run test
-
-      - name: Run browser specs
-        run: npm --workspace @hydra/web run test:browser

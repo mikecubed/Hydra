@@ -147,8 +147,8 @@ The following targets define the expected user-perceived responsiveness for each
 Behavioral targets (marked ✅) can be verified today through jsdom-based browser specs and
 integration tests. Timing and profiling targets (marked 🔮) require real-browser instrumentation
 that is not yet in place — they are recorded here as design intent and will become enforceable once
-evidence-hook work lands (see T023–T025 in the task graph). Behavioral targets (✅ rows) are now
-CI-enforced via the `web-responsiveness` job added by T021.
+evidence-hook work lands (see T023–T025 in the task graph). T021 defines the collection points for
+the ✅ rows, but those behavioral targets are not yet promoted to a blocking repo-wide CI gate.
 
 | Surface                      | Metric                       | Target   | Verifiable now |
 | ---------------------------- | ---------------------------- | -------- | -------------- |
@@ -170,19 +170,25 @@ Evidence for responsiveness budgets is collected at three layers, ordered from c
 most expensive (manual profiling):
 
 1. **CI — `web-responsiveness` job** (`.github/workflows/quality.yml`). Runs on every PR and push.
-   Collects:
+   Collects the currently blocking build-side evidence:
    - Build success / failure (exit code).
    - JS and CSS gzipped sizes parsed from Vite build output.
    - Build wall-clock time.
-   - Browser spec pass / fail (`npm --workspace @hydra/web run test:browser`).
-   - Gateway test pass / fail (`npm --workspace @hydra/web-gateway run test`).
-   - Contract test pass / fail (`npm --workspace @hydra/web-contracts run test`).
 
-2. **Existing quality gate** (`npm run quality`). Already enforced in the `lint` and `typecheck`
+2. **Existing repository evidence commands** (run directly while the broader responsiveness phase is
+   still landing):
+   - Browser specs for representative workspace and operations flows.
+   - Gateway tests (`npm --workspace @hydra/web-gateway run test`) for reconnect/refresh behavior.
+   - Contract tests (`npm --workspace @hydra/web-contracts run test`) for browser-safe state shapes.
+     These commands are evidence collection points today, but they are not all yet promoted into the
+     blocking `web-responsiveness` CI job because the broader Phase 4 responsiveness work is still in
+     progress.
+
+3. **Existing quality gate** (`npm run quality`). Already enforced in the `lint` and `typecheck`
    jobs. Validates formatting, linting, type-checking, and cycle detection across the full repo
    including web workspaces.
 
-3. **Manual / future instrumentation** (review-only until real-browser tooling lands):
+4. **Manual / future instrumentation** (review-only until real-browser tooling lands):
    - TTI, FMP, and memory profiling for the 🔮 rows in the runtime table above.
    - Input-to-render latency measurement for live update cycles.
    - These remain design targets tracked by review. When real-browser instrumentation is introduced
