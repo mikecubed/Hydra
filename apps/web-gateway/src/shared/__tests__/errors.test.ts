@@ -37,6 +37,7 @@ describe('createError', () => {
     'BAD_REQUEST',
     'INTERNAL_ERROR',
     'DAEMON_UNREACHABLE',
+    'DAEMON_TIMEOUT',
     'CLOCK_UNRELIABLE',
     'CSRF_INVALID',
     'ORIGIN_REJECTED',
@@ -65,7 +66,7 @@ describe('createError', () => {
 describe('ERROR_STATUS_MAP', () => {
   it('maps all codes to HTTP status codes', () => {
     const codes = Object.keys(ERROR_STATUS_MAP);
-    assert.equal(codes.length, 19);
+    assert.equal(codes.length, 20);
     for (const code of codes) {
       const status = ERROR_STATUS_MAP[code as ErrorCode];
       assert.ok(status >= 400 && status < 600, `${code} should map to a 4xx/5xx status`);

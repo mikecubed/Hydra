@@ -26,6 +26,7 @@ export type SystemErrorCode =
   | 'BAD_REQUEST'
   | 'INTERNAL_ERROR'
   | 'DAEMON_UNREACHABLE'
+  | 'DAEMON_TIMEOUT'
   | 'CLOCK_UNRELIABLE'
   | 'CSRF_INVALID'
   | 'ORIGIN_REJECTED';
@@ -35,12 +36,14 @@ export type ErrorCode = AuthErrorCode | SessionErrorCode | ConversationErrorCode
 export class GatewayError extends Error {
   readonly code: ErrorCode;
   readonly statusCode: number;
+  readonly retryAfterMs?: number;
 
-  constructor(code: ErrorCode, message: string, statusCode = 401) {
+  constructor(code: ErrorCode, message: string, statusCode = 401, retryAfterMs?: number) {
     super(message);
     this.name = 'GatewayError';
     this.code = code;
     this.statusCode = statusCode;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -56,6 +59,7 @@ export const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
   BAD_REQUEST: 400,
   INTERNAL_ERROR: 500,
   DAEMON_UNREACHABLE: 503,
+  DAEMON_TIMEOUT: 504,
   CLOCK_UNRELIABLE: 503,
   CSRF_INVALID: 403,
   ORIGIN_REJECTED: 403,
@@ -78,7 +82,8 @@ export const ERROR_CATEGORY_MAP: Record<ErrorCode, ErrorCategory> = {
   IDLE_TIMEOUT: 'session',
   BAD_REQUEST: 'validation',
   INTERNAL_ERROR: 'daemon',
-  DAEMON_UNREACHABLE: 'daemon',
+  DAEMON_UNREACHABLE: 'daemon-unavailable',
+  DAEMON_TIMEOUT: 'daemon-unavailable',
   CLOCK_UNRELIABLE: 'daemon',
   CSRF_INVALID: 'validation',
   ORIGIN_REJECTED: 'auth',
@@ -102,6 +107,7 @@ export function createError(code: ErrorCode, message?: string): GatewayError {
     BAD_REQUEST: 'Bad request',
     INTERNAL_ERROR: 'Internal error',
     DAEMON_UNREACHABLE: 'Hydra daemon is unreachable',
+    DAEMON_TIMEOUT: 'Daemon request timed out',
     CLOCK_UNRELIABLE: 'System clock is unreliable',
     CSRF_INVALID: 'CSRF token missing or invalid',
     ORIGIN_REJECTED: 'Origin not allowed',

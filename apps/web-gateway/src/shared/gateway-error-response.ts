@@ -70,3 +70,14 @@ export function createGatewayErrorResponse(
   };
   return response;
 }
+
+/** Categories where the browser may safely auto-retry after a delay. */
+const RETRYABLE_CATEGORIES: ReadonlySet<ErrorCategory> = new Set([
+  'daemon-unavailable',
+  'rate-limit',
+]);
+
+/** Whether the given error category is safe for automatic client-side retry. */
+export function isRetryableCategory(category: ErrorCategory): boolean {
+  return RETRYABLE_CATEGORIES.has(category);
+}
