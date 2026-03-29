@@ -89,6 +89,7 @@ function buildTestApp(mutClient: DaemonMutationsClient): Hono {
   app.use('*', async (c, next) => {
     c.set('operatorId' as never, 'test-operator' as never);
     c.set('sessionId' as never, 'test-session-123' as never);
+    c.set('sourceKey' as never, '127.0.0.1' as never);
     await next();
   });
   app.route('/', createMutationsRouter(mutClient));
@@ -168,6 +169,12 @@ describe('Mutations routes — POST /config/routing/mode (T013)', () => {
     const data = (await res.json()) as PatchRoutingModeResponse;
     assert.equal(data.appliedRevision, 'rev-2');
     assert.equal(mockClient.postRoutingMode.mock.callCount(), 1);
+    const [, provenance] = mockClient.postRoutingMode.mock.calls[0].arguments;
+    assert.deepStrictEqual(provenance, {
+      operatorId: 'test-operator',
+      sessionId: 'test-session-123',
+      sourceIp: '127.0.0.1',
+    });
   });
 
   it('returns 400 on invalid mode value', async () => {
@@ -627,6 +634,12 @@ describe('Mutations routes — POST /workflows/launch (T019)', () => {
     assert.equal(res.status, 202);
     const data = (await res.json()) as PostWorkflowLaunchResponse;
     assert.equal(data.destructive, true);
+    const [, provenance] = mockClient.postWorkflowLaunch.mock.calls[0].arguments;
+    assert.deepStrictEqual(provenance, {
+      operatorId: 'test-operator',
+      sessionId: 'test-session-123',
+      sourceIp: '127.0.0.1',
+    });
   });
 
   it('returns 400 for unknown workflow name (T019-AC3)', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import type http from 'node:http';
 import fs from 'node:fs';
@@ -18,9 +18,12 @@ import {
   _clearWorkflowLaunchesForTest,
   _injectWorkflowLaunchForTest,
   _setWorkflowTaskStatusResolverForTest,
+  _setWorkflowStateAccessorsForTest,
   _hasForbiddenKeyForTest,
 } from '../../lib/daemon/mutation-routes.ts';
 import type { MutationAuditRecord } from '@hydra/web-contracts';
+import { createDefaultState } from '../../lib/daemon/state.ts';
+import type { HydraStateShape } from '../../lib/types.ts';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +83,7 @@ function fakeReq(
   method: string,
   urlStr: string,
   body?: Record<string, unknown>,
+  headers?: Record<string, string>,
 ): http.IncomingMessage {
   const bodyStr = body ? JSON.stringify(body) : '';
   const readable = new Readable({
@@ -91,7 +95,7 @@ function fakeReq(
   Object.assign(readable, {
     method,
     url: urlStr,
-    headers: { host: 'localhost:4173', 'content-type': 'application/json' },
+    headers: { host: 'localhost:4173', 'content-type': 'application/json', ...headers },
   });
   return readable as unknown as http.IncomingMessage;
 }
@@ -143,16 +147,25 @@ function makeAuditRecord(overrides: Partial<MutationAuditRecord> = {}): Mutation
 
 describe('mutation-routes', () => {
   let tmpDir: string;
+  let testState: HydraStateShape;
 
   beforeEach(() => {
     tmpDir = tmpConfigDir();
+    testState = createDefaultState();
     _clearAuditStoreForTest();
     _clearWorkflowLaunchesForTest();
     _setWorkflowTaskStatusResolverForTest(null);
+    _setWorkflowStateAccessorsForTest({
+      read: () => testState,
+      write: (nextState) => {
+        testState = nextState;
+      },
+    });
   });
 
   afterEach(() => {
     _setWorkflowTaskStatusResolverForTest(null);
+    _setWorkflowStateAccessorsForTest(null);
     cleanupDir(tmpDir);
   });
 
@@ -526,6 +539,66 @@ describe('mutation-routes', () => {
       assert.equal(resp['destructive'], false);
     });
 
+    it('materializes a daemon task entry for launched workflows', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+
+      const req = fakeReq(
+        'POST',
+        '/workflows/launch',
+        {
+          workflow: 'tasks',
+          label: 'Backfill queue projections',
+          idempotencyKey: crypto.randomUUID(),
+          expectedRevision: revision,
+        },
+        {
+          'x-hydra-operator-id': 'operator-21',
+          'x-hydra-session-id': 'session-33',
+          'x-hydra-source-ip': '10.2.3.4',
+        },
+      );
+      const { res, getResult } = fakeRes();
+      const url = new URL('http://localhost:4173/workflows/launch');
+
+      const handled = await handleMutationRoute(req, res, url);
+      assert.equal(handled, true);
+
+      const { status, body } = getResult();
+      assert.equal(status, 202);
+      const responseTaskId = (body as Record<string, unknown>)['taskId'];
+      assert.equal(responseTaskId, 'T001');
+      assert.equal(testState.tasks.length, 1);
+      assert.deepStrictEqual(testState.tasks[0], {
+        id: 'T001',
+        title: 'Workflow: tasks — Backfill queue projections',
+        owner: 'codex',
+        status: 'in_progress',
+        type: 'workflow',
+        files: [],
+        notes: 'Launched via controlled mutation endpoint.',
+        blockedBy: [],
+        updatedAt: testState.tasks[0]?.updatedAt,
+      });
+
+      const auditReq = fakeReq('GET', '/audit');
+      const { res: auditRes, getResult: getAuditResult } = fakeRes();
+      const auditHandled = await handleMutationRoute(
+        auditReq,
+        auditRes,
+        new URL('http://localhost:4173/audit'),
+      );
+      assert.equal(auditHandled, true);
+      const auditRecords = (getAuditResult().body as Record<string, unknown>)[
+        'records'
+      ] as MutationAuditRecord[];
+      assert.equal(auditRecords[0]?.operatorId, 'operator-21');
+      assert.equal(auditRecords[0]?.sessionId, 'session-33');
+      assert.equal(auditRecords[0]?.sourceIp, '10.2.3.4');
+    });
+
     it('returns 202 with destructive:true for "evolve" workflow', async () => {
       setupTestConfig(tmpDir);
       invalidateConfigCache();
@@ -778,6 +851,42 @@ describe('mutation-routes', () => {
       const records = (body as Record<string, unknown>)['records'] as MutationAuditRecord[];
       assert.equal(records.length, 1);
       assert.equal(records[0]?.eventType, 'config.routing.mode.changed');
+    });
+
+    it('logs audit persistence failures without failing the mutation response', async () => {
+      setupTestConfig(tmpDir);
+      invalidateConfigCache();
+      const config = loadHydraConfig();
+      const revision = computeConfigRevision(config);
+      let logged = '';
+      const appendFileMock = mock.method(fs, 'appendFileSync', () => {
+        throw new Error('disk-full');
+      });
+      const stderrWriteMock = mock.method(process.stderr, 'write', (chunk: string | Uint8Array) => {
+        logged += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+        return true;
+      });
+
+      try {
+        const req = fakeReq(
+          'POST',
+          '/config/routing/mode',
+          { mode: 'economy', expectedRevision: revision },
+          { 'x-hydra-operator-id': 'operator-1' },
+        );
+        const { res, getResult } = fakeRes();
+        const handled = await handleMutationRoute(
+          req,
+          res,
+          new URL('http://localhost:4173/config/routing/mode'),
+        );
+        assert.equal(handled, true);
+        assert.equal(getResult().status, 200);
+        assert.match(logged, /failed to persist mutation audit record/i);
+      } finally {
+        appendFileMock.mock.restore();
+        stderrWriteMock.mock.restore();
+      }
     });
 
     it('returns next page of records with no overlap', async () => {

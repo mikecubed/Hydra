@@ -17,7 +17,9 @@ import {
   activeConfigPath,
 } from '../hydra-config.ts';
 import { configMutex } from './mutation-lock.ts';
-import { readState } from './state.ts';
+import { readState, writeState } from './state.ts';
+import { nextId } from './task-helpers.ts';
+import type { HydraStateShape, TaskEntry } from '../types.ts';
 // Type-only imports from @hydra/web-contracts — erased at compile time so the
 // daemon tarball stays self-contained (no runtime dep on the private workspace pkg).
 import type {
@@ -138,8 +140,15 @@ function appendAuditRecord(record: MutationAuditRecord): void {
   auditRecords.push(record);
   try {
     fs.appendFileSync(activeAuditPath(), `${JSON.stringify(record)}\n`, 'utf8');
-  } catch {
-    /* audit failure must not suppress 200 — R-2 */
+  } catch (err: unknown) {
+    process.stderr.write(
+      `${JSON.stringify({
+        level: 'error',
+        msg: 'failed to persist mutation audit record',
+        filePath: activeAuditPath(),
+        err: err instanceof Error ? err.message : String(err),
+      })}\n`,
+    );
   }
 }
 
@@ -164,6 +173,15 @@ let workflowTaskStatusResolver: (taskId: string) => string | null = (taskId: str
     return null;
   }
 };
+let workflowStateAccessors: {
+  read: () => HydraStateShape;
+  write: (state: HydraStateShape) => void;
+} = {
+  read: readState,
+  write: (state) => {
+    writeState(state);
+  },
+};
 
 const DESTRUCTIVE_WORKFLOWS = new Set(['evolve', 'nightly']);
 
@@ -181,16 +199,50 @@ function buildSafeView(config: {
   }) as SafeConfigViewType;
 }
 
+function readMutationProvenance(
+  req: IncomingMessage,
+): Pick<MutationAuditRecord, 'operatorId' | 'sessionId' | 'sourceIp'> {
+  const operatorId = req.headers['x-hydra-operator-id'];
+  const sessionId = req.headers['x-hydra-session-id'];
+  const sourceIp = req.headers['x-hydra-source-ip'];
+
+  return {
+    operatorId: typeof operatorId === 'string' && operatorId !== '' ? operatorId : null,
+    sessionId: typeof sessionId === 'string' && sessionId !== '' ? sessionId : null,
+    sourceIp: typeof sourceIp === 'string' ? sourceIp : '',
+  };
+}
+
 function buildAuditRecord(
+  provenance: Pick<MutationAuditRecord, 'operatorId' | 'sessionId' | 'sourceIp'>,
   partial: Omit<MutationAuditRecord, 'id' | 'timestamp' | 'operatorId' | 'sessionId' | 'sourceIp'>,
 ): MutationAuditRecord {
   return {
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
-    operatorId: null,
-    sessionId: null,
-    sourceIp: '',
+    operatorId: provenance.operatorId,
+    sessionId: provenance.sessionId,
+    sourceIp: provenance.sourceIp,
     ...partial,
+  };
+}
+
+function createWorkflowTaskEntry(
+  state: HydraStateShape,
+  workflow: 'evolve' | 'tasks' | 'nightly',
+  label: string | null | undefined,
+): TaskEntry {
+  const suffix = label == null || label.trim() === '' ? '' : ` — ${label.trim()}`;
+  return {
+    id: nextId('T', state.tasks),
+    title: `Workflow: ${workflow}${suffix}`,
+    owner: 'codex',
+    status: 'in_progress',
+    type: 'workflow',
+    files: [],
+    notes: 'Launched via controlled mutation endpoint.',
+    blockedBy: [],
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -314,6 +366,7 @@ function handleGetConfigSafe(_req: IncomingMessage, res: ServerResponse): void {
 }
 
 async function handlePostRoutingMode(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const provenance = readMutationProvenance(req);
   const body = await readJsonBody(req);
   const parsed = routingModeMutationSchema.safeParse(body);
   if (!parsed.success) {
@@ -337,7 +390,7 @@ async function handlePostRoutingMode(req: IncomingMessage, res: ServerResponse):
     });
     try {
       appendAuditRecord(
-        buildAuditRecord({
+        buildAuditRecord(provenance, {
           eventType: 'config.routing.mode.changed',
           targetField: 'config.routing.mode',
           beforeValue,
@@ -364,6 +417,7 @@ async function handlePostModelActive(
   res: ServerResponse,
   agent: string,
 ): Promise<void> {
+  const provenance = readMutationProvenance(req);
   const body = await readJsonBody(req);
   const parsed = modelTierMutationSchema.safeParse(body);
   if (!parsed.success) {
@@ -392,7 +446,7 @@ async function handlePostModelActive(
     const updated = saveHydraConfig({ ...config, models: updatedModels });
     try {
       appendAuditRecord(
-        buildAuditRecord({
+        buildAuditRecord(provenance, {
           eventType: 'config.models.active.changed',
           targetField: `config.models.${agent}.active`,
           beforeValue,
@@ -447,6 +501,7 @@ function applyBudgetLimits(
 }
 
 async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const provenance = readMutationProvenance(req);
   const body = await readJsonBody(req);
   const parsed = budgetMutationSchema.safeParse(body);
   if (!parsed.success) {
@@ -483,7 +538,7 @@ async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse):
     const updated = saveHydraConfig({ ...config, usage: updatedUsage });
     try {
       appendAuditRecord(
-        buildAuditRecord({
+        buildAuditRecord(provenance, {
           eventType: 'config.usage.budget.changed',
           targetField: `config.usage.budget.${modelId}`,
           beforeValue: { daily: beforeDaily, weekly: beforeWeekly },
@@ -506,6 +561,7 @@ async function handlePostUsageBudget(req: IncomingMessage, res: ServerResponse):
 }
 
 async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const provenance = readMutationProvenance(req);
   const body = await readJsonBody(req);
   const parsed = workflowLaunchSchema.safeParse(body);
   if (!parsed.success) {
@@ -555,12 +611,17 @@ async function handlePostWorkflowLaunch(req: IncomingMessage, res: ServerRespons
       return;
     }
 
-    const taskId = crypto.randomUUID();
+    const state = workflowStateAccessors.read();
+    const task = createWorkflowTaskEntry(state, workflow, label);
+    state.tasks.push(task);
+    workflowStateAccessors.write(state);
+
+    const taskId = task.id;
     const launchedAt = new Date().toISOString();
     workflowLaunches.push({ taskId, workflow, idempotencyKey, launchedAt, status: 'pending' });
     try {
       appendAuditRecord(
-        buildAuditRecord({
+        buildAuditRecord(provenance, {
           eventType: 'workflow.launched',
           targetField: `workflow.${workflow}`,
           beforeValue: null,
@@ -679,6 +740,21 @@ export function _setWorkflowTaskStatusResolverForTest(
         return null;
       }
     });
+}
+
+/** Override workflow state accessors for tests. */
+export function _setWorkflowStateAccessorsForTest(
+  accessors: {
+    read: () => HydraStateShape;
+    write: (state: HydraStateShape) => void;
+  } | null,
+): void {
+  workflowStateAccessors = accessors ?? {
+    read: readState,
+    write: (state) => {
+      writeState(state);
+    },
+  };
 }
 
 /** Expose hasForbiddenKey for unit testing. Not part of the public API. */

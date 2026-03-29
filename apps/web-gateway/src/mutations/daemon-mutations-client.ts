@@ -29,6 +29,12 @@ export interface DaemonMutationsClientOptions {
   readonly timeoutMs?: number;
 }
 
+export interface DaemonMutationProvenance {
+  readonly operatorId: string;
+  readonly sessionId: string;
+  readonly sourceIp: string;
+}
+
 function categoryFromStatus(status: number, payload: unknown): ErrorCategory {
   if (status === 503) return 'daemon-unavailable';
   if (status === 409) {
@@ -91,25 +97,31 @@ export class DaemonMutationsClient {
 
   postRoutingMode(
     body: PatchRoutingModeRequest,
+    provenance?: DaemonMutationProvenance,
   ): Promise<DaemonMutationsResult<PatchRoutingModeResponse>> {
-    return this.post('/config/routing/mode', body);
+    return this.post('/config/routing/mode', body, provenance);
   }
 
   postModelTier(
     agent: string,
     body: Omit<PatchModelTierRequest, 'agent'>,
+    provenance?: DaemonMutationProvenance,
   ): Promise<DaemonMutationsResult<PatchModelTierResponse>> {
-    return this.post(`/config/models/${encodeURIComponent(agent)}/active`, body);
+    return this.post(`/config/models/${encodeURIComponent(agent)}/active`, body, provenance);
   }
 
-  postBudget(body: PatchBudgetRequest): Promise<DaemonMutationsResult<PatchBudgetResponse>> {
-    return this.post('/config/usage/budget', body);
+  postBudget(
+    body: PatchBudgetRequest,
+    provenance?: DaemonMutationProvenance,
+  ): Promise<DaemonMutationsResult<PatchBudgetResponse>> {
+    return this.post('/config/usage/budget', body, provenance);
   }
 
   postWorkflowLaunch(
     body: PostWorkflowLaunchRequest,
+    provenance?: DaemonMutationProvenance,
   ): Promise<DaemonMutationsResult<PostWorkflowLaunchResponse>> {
-    return this.post('/workflows/launch', body);
+    return this.post('/workflows/launch', body, provenance);
   }
 
   getAudit(params?: GetAuditRequest): Promise<DaemonMutationsResult<GetAuditResponse>> {
@@ -130,12 +142,23 @@ export class DaemonMutationsClient {
     return this.request<T>(url.toString(), { method: 'GET' });
   }
 
-  private post<T>(path: string, body: unknown): Promise<DaemonMutationsResult<T>> {
+  private post<T>(
+    path: string,
+    body: unknown,
+    provenance?: DaemonMutationProvenance,
+  ): Promise<DaemonMutationsResult<T>> {
     return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        ...(provenance === undefined
+          ? {}
+          : {
+              'x-hydra-operator-id': provenance.operatorId,
+              'x-hydra-session-id': provenance.sessionId,
+              'x-hydra-source-ip': provenance.sourceIp,
+            }),
       },
       body: JSON.stringify(body),
     });

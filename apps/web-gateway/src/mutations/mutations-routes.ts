@@ -23,6 +23,14 @@ import { translateMutationError } from './response-translator.ts';
 import type { ValidationResult } from './request-validator.ts';
 import type { DaemonMutationsResult } from './daemon-mutations-client.ts';
 
+function getMutationProvenance(c: Context<GatewayEnv>) {
+  return {
+    operatorId: c.get('operatorId'),
+    sessionId: c.get('sessionId'),
+    sourceIp: c.get('sourceKey'),
+  };
+}
+
 async function tryAudit(
   auditService: AuditService | undefined,
   eventType: string,
@@ -43,7 +51,10 @@ interface PostMutationOpts<TData, TResult> {
   c: Context<GatewayEnv>;
   auditService: AuditService | undefined;
   validated: ValidationResult<TData>;
-  execute: (data: TData) => Promise<DaemonMutationsResult<TResult>>;
+  execute: (
+    data: TData,
+    provenance: ReturnType<typeof getMutationProvenance>,
+  ) => Promise<DaemonMutationsResult<TResult>>;
   successEvent: string;
   successDetail: (data: TData) => Record<string, unknown>;
   failureContext?: Record<string, unknown>;
@@ -63,6 +74,7 @@ async function handlePostMutation<TData, TResult>(
   } = opts;
   const operatorId = c.get('operatorId');
   const sessionId = c.get('sessionId');
+  const provenance = getMutationProvenance(c);
   if (!validated.ok) {
     await tryAudit(
       auditService,
@@ -85,7 +97,7 @@ async function handlePostMutation<TData, TResult>(
       400,
     );
   }
-  const result = await execute(validated.data);
+  const result = await execute(validated.data, provenance);
   if ('error' in result) {
     const { status, message, code } = translateMutationError(result.error.category);
     await tryAudit(
@@ -150,7 +162,7 @@ function createConfigMutationsRouter(
       c,
       auditService,
       validated: validateRoutingModeBody(body),
-      execute: (data) => daemonClient.postRoutingMode(data),
+      execute: (data, provenance) => daemonClient.postRoutingMode(data, provenance),
       successEvent: 'config.routing.mode.changed',
       successDetail: (data) => ({ mode: data.mode }),
     });
@@ -163,11 +175,15 @@ function createConfigMutationsRouter(
       c,
       auditService,
       validated: validateModelTierBody(agent, body),
-      execute: (data) =>
-        daemonClient.postModelTier(agent, {
-          tier: data.tier,
-          expectedRevision: data.expectedRevision,
-        }),
+      execute: (data, provenance) =>
+        daemonClient.postModelTier(
+          agent,
+          {
+            tier: data.tier,
+            expectedRevision: data.expectedRevision,
+          },
+          provenance,
+        ),
       successEvent: 'config.models.active.changed',
       successDetail: (data) => ({ agent, tier: data.tier }),
       failureContext: { agent },
@@ -180,7 +196,7 @@ function createConfigMutationsRouter(
       c,
       auditService,
       validated: validateBudgetBody(body),
-      execute: (data) => daemonClient.postBudget(data),
+      execute: (data, provenance) => daemonClient.postBudget(data, provenance),
       successEvent: 'config.usage.budget.changed',
       successDetail: (data) => ({ modelId: data.modelId }),
     });
@@ -198,6 +214,7 @@ async function handleWorkflowLaunch(
   const validated = validateWorkflowLaunchBody(body);
   const operatorId = c.get('operatorId');
   const sessionId = c.get('sessionId');
+  const provenance = getMutationProvenance(c);
   if (!validated.ok) {
     await tryAudit(
       auditService,
@@ -216,7 +233,7 @@ async function handleWorkflowLaunch(
       400,
     );
   }
-  const result = await daemonClient.postWorkflowLaunch(validated.data);
+  const result = await daemonClient.postWorkflowLaunch(validated.data, provenance);
   if ('error' in result) {
     const { status, message, code } = translateMutationError(result.error.category);
     await tryAudit(

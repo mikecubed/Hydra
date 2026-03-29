@@ -71,6 +71,25 @@ describe('DaemonMutationsClient', () => {
       assert.ok('data' in result);
       assert.deepStrictEqual(result.data, responseData);
     });
+
+    it('forwards internal provenance headers when provided', async () => {
+      fetchMock.mock.mockImplementation(() => Promise.resolve(okResponse({ ok: true })));
+
+      await client.postRoutingMode(
+        { mode: 'balanced', expectedRevision: 'rev-1' },
+        {
+          operatorId: 'operator-17',
+          sessionId: 'session-22',
+          sourceIp: '10.0.0.8',
+        },
+      );
+
+      const [, opts] = fetchMock.mock.calls[0].arguments;
+      const headers = opts?.headers as Record<string, string>;
+      assert.equal(headers['x-hydra-operator-id'], 'operator-17');
+      assert.equal(headers['x-hydra-session-id'], 'session-22');
+      assert.equal(headers['x-hydra-source-ip'], '10.0.0.8');
+    });
   });
 
   describe('postModelTier', () => {
