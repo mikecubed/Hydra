@@ -188,9 +188,11 @@ most expensive (manual profiling):
      blocking `web-responsiveness` CI job because the broader Phase 4 responsiveness work is still in
      progress.
 
-3. **Existing quality gate** (`npm run quality`). Already enforced in the `lint` and `typecheck`
-   jobs. Validates formatting, linting, type-checking, and cycle detection across the full repo
-   including web workspaces.
+3. **Existing repository quality checks** (`.github/workflows/quality.yml`). Separate jobs already
+   enforce repo formatting/linting, TypeScript verification for the checked packages, and circular
+   import detection via `npm run lint:cycles`. Those checks remain complementary to
+   `web-responsiveness`; T021 does not add `npm run quality` or the web workspace's
+   `typecheck:workspace` command as new blocking CI steps.
 
 4. **Manual / future instrumentation** (review-only until real-browser tooling lands):
    - TTI, FMP, and memory profiling for the 🔮 rows in the runtime table above.
