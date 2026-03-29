@@ -259,7 +259,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     },
     async refresh() {
       const info = await deps.getSessionInfo();
-      if (ctx.destroyed) return;
+      if (ctx.destroyed) return null;
       setState(ctx, { session: info });
       return info;
     },
