@@ -16,6 +16,7 @@ function makeMockContext(overrides: Partial<UseSessionResult> = {}): UseSessionR
   return {
     session: null,
     isLoading: false,
+    pollErrorCount: 0,
     extend: vi.fn(),
     logout: vi.fn(),
     refresh: vi.fn(),
@@ -110,7 +111,7 @@ describe('DaemonUnreachable', () => {
   it('retry button is disabled while refresh() is in flight', async () => {
     const user = userEvent.setup();
 
-    let resolveRefresh!: () => void;
+    let resolveRefresh!: (value: UseSessionResult['session']) => void;
     const refreshFn = vi.fn<() => Promise<UseSessionResult['session']>>(
       () =>
         new Promise<UseSessionResult['session']>((r) => {

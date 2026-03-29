@@ -38,8 +38,9 @@ export function SessionProvider({
 
     const lostSessionAfterAuth =
       session.session == null && !session.isLoading && hadAuthenticatedSession.current;
+    const shouldRedirect = (state != null && REDIRECT_STATES.has(state)) || lostSessionAfterAuth;
 
-    if ((state != null && REDIRECT_STATES.has(state)) || lostSessionAfterAuth) {
+    if (shouldRedirect) {
       if (redirectScheduled.current) {
         return;
       }
@@ -56,9 +57,7 @@ export function SessionProvider({
         clearTimeout(timer);
       };
     }
-    if (session.session != null && !REDIRECT_STATES.has(state)) {
-      redirectScheduled.current = false;
-    }
+    redirectScheduled.current = false;
   }, [session.isLoading, session.session, session.session?.state, loginPath, onRedirect]);
 
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
