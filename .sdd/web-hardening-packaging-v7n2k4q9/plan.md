@@ -176,6 +176,80 @@ expressed through current surfaces.
 - If packaged execution cannot support the web surface in one artifact form, the resulting runtime
   must surface that limitation explicitly and the docs must state the supported path.
 
+## T004 Audit: Current Packaged Web Launch Path
+
+> Completed by T004. This section establishes the concrete baseline that downstream tasks
+> T005–T010 build on.
+
+### Artifacts Examined
+
+| File | Role in packaging |
+| --- | --- |
+| `scripts/build-pack.ts` | npm tarball prepack — compiles `lib/` and `bin/` TS → JS, patches `package.json` |
+| `scripts/clean-pack.ts` | Postpack — removes generated JS, restores `package.json` |
+| `scripts/build-exe.ts` | Standalone exe — esbuild bundles `bin/hydra-cli.ts` → CJS, then `@yao-pkg/pkg` |
+| `tsconfig.build.json` | Build config for prepack — `include: lib/, bin/`; **excludes** `apps/`, `packages/`, `scripts/`, `test/` |
+| `package.json` (`files`) | Tarball contents — `bin/`, `lib/`, `docs/*.md`, `hydra.config.json`, `README.md`, `CLAUDE.md` |
+| `apps/web-gateway/src/server.ts` | Gateway entry — starts HTTP server, delegates static serving to `server-runtime.ts` |
+| `apps/web-gateway/src/server-runtime.ts` | Static asset resolution — defaults to `apps/web/dist`, configurable via `HYDRA_WEB_STATIC_DIR` |
+
+### What the current packaging path supports
+
+| Capability | npm tarball (`npm pack`) | Standalone exe (`build:exe`) | Source checkout |
+| --- | --- | --- | --- |
+| CLI operator console | ✅ Included (`bin/`, `lib/`) | ✅ Bundled (`bin/hydra-cli.ts` entry) | ✅ |
+| Daemon (`orchestrator-daemon.ts`) | ✅ Included in `lib/` | ✅ Bundled via CLI entry | ✅ |
+| Web gateway (`apps/web-gateway/`) | ❌ Not in `files` or build | ❌ Not in esbuild entry | ✅ Workspace |
+| Browser assets (`apps/web/dist/`) | ❌ Not in `files` or build | ❌ Not in bundle | ✅ After `npm --workspace @hydra/web run build` |
+| Shared contracts (`packages/web-contracts/`) | ❌ Not in `files` or build | ❌ Not in bundle | ✅ Workspace |
+| Explicit "web unsupported" message at startup | ❌ No detection | ❌ No detection | N/A (web works) |
+
+### What the current packaging path does NOT support
+
+1. **No web assets in either artifact.** `tsconfig.build.json` excludes `apps/**` and
+   `packages/**`. The `files` array in `package.json` lists only `bin/` and `lib/`. The exe
+   builder's esbuild entry is `bin/hydra-cli.ts`, which never imports gateway or web code.
+
+2. **No gateway runtime in either artifact.** The gateway (`apps/web-gateway/src/server.ts`) is a
+   separate workspace entry point. Neither packaging path compiles, bundles, or includes it.
+
+3. **No startup-time detection of missing web capability.** When an operator installs from the
+   tarball or runs the exe, nothing in the CLI or daemon startup path checks for or mentions the
+   web experience. The only unsupported-state message exists inside the gateway itself
+   (`server-runtime.ts` returns HTTP 503: "Missing built frontend assets…"), but that code is
+   unreachable from packaged artifacts because the gateway is not included.
+
+4. **No documented packaged web launch path.** `README.md` documents `npm start` (daemon) and
+   `npm run go` (operator console), but there is no guidance for starting the web experience from
+   a packaged install. The gateway is only launchable from a source checkout via its workspace.
+
+### Existing infrastructure that downstream tasks can leverage
+
+- **`server-runtime.ts` already has a 503 fallback** when `index.html` is missing from the static
+  dir. T007 can extend this to cover additional packaged/misconfigured states with richer messaging.
+- **`HYDRA_WEB_STATIC_DIR` env var** allows overriding the default `apps/web/dist` path. T005 can
+  use this to point at a packaged asset location without changing the runtime resolution logic.
+- **`resolveGatewayServerConfig()` is Zod-validated** and already surfaces clear startup errors for
+  bad env values. T008 can add web-readiness checks at this layer.
+- **`tsconfig.build.json` and `build-pack.ts`** are cleanly separated from runtime code. T005 can
+  extend the include/files lists and add a gateway compilation step without disrupting the existing
+  CLI packaging.
+- **The exe pipeline uses esbuild**, which can bundle additional entry points. T005 could add
+  the gateway as a second entry or a combined entry if single-exe web support is a goal.
+- **`clean-pack.ts`** reads a `.packfiles` manifest, so T006 can extend it to clean up any
+  additional web artifacts added by T005.
+
+### Summary for downstream tasks
+
+| Task | What this audit tells it |
+| --- | --- |
+| T005 | Must add `apps/web-gateway/` and `apps/web/dist/` (or a built equivalent) to the tarball `files` list and extend `tsconfig.build.json` or add a gateway build step. |
+| T006 | Must extend `.packfiles` manifest and cleanup to cover any new web artifacts added by T005. |
+| T007 | Can extend the existing `createStaticAssetResponse` 503 path in `server-runtime.ts` with richer "packaged but web-unsupported" messaging. |
+| T008 | Should add a web-readiness check in the gateway startup path (`server.ts`) that logs whether the web experience is available before the server starts listening. |
+| T009 | Must document the supported packaged web launch path (or its absence) in `apps/web/README.md` and `apps/web-gateway/README.md`. |
+| T010 | Must update top-level `README.md` with the packaged web launch story once T005–T009 land. |
+
 ## Implementation Phases
 
 ### Phase 0 — Baseline and Readiness Matrix
