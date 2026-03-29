@@ -22,9 +22,11 @@ import {
 export interface UseSessionResult {
   session: SessionInfoType | null;
   isLoading: boolean;
+  /** Number of consecutive poll errors since last successful poll. */
+  pollErrorCount: number;
   extend: () => Promise<void>;
   logout: () => Promise<void>;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<SessionInfoType | null>;
 }
 
 // ─── Session manager (testable core) ────────────────────────────────────────
@@ -40,6 +42,8 @@ export interface SessionManagerDeps {
 interface SessionManagerState {
   session: SessionInfoType | null;
   isLoading: boolean;
+  /** Number of consecutive poll errors since last successful poll. */
+  pollErrorCount: number;
 }
 
 type Listener = () => void;
@@ -72,7 +76,7 @@ export interface SessionManager {
   subscribe(listener: Listener): () => void;
   extend(): Promise<void>;
   logout(): Promise<void>;
-  refresh(): Promise<void>;
+  refresh(): Promise<SessionInfoType | null>;
   destroy(): void;
 }
 
@@ -129,9 +133,10 @@ async function doPoll(ctx: ManagerInternals, deps: SessionManagerDeps) {
     const info = await deps.getSessionInfo();
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- state may change across await
     if (ctx.destroyed) return;
-    setState(ctx, { session: info });
+    setState(ctx, { session: info, pollErrorCount: 0 });
   } catch {
-    // Swallow poll errors — next poll will retry.
+    // Track consecutive poll errors so the UI can surface degraded feedback.
+    setState(ctx, { pollErrorCount: ctx.state.pollErrorCount + 1 });
   }
   schedulePoll(ctx, deps);
 }
@@ -187,7 +192,7 @@ function connectWs(ctx: ManagerInternals, deps: SessionManagerDeps) {
 
 export function createSessionManager(deps: SessionManagerDeps): SessionManager {
   const ctx: ManagerInternals = {
-    state: { session: null, isLoading: true },
+    state: { session: null, isLoading: true, pollErrorCount: 0 },
     destroyed: false,
     listeners: new Set(),
     pollTimerId: null,
@@ -215,10 +220,10 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     try {
       const info = await deps.getSessionInfo();
       if (ctx.destroyed) return;
-      setState(ctx, { session: info, isLoading: false });
+      setState(ctx, { session: info, isLoading: false, pollErrorCount: 0 });
     } catch {
       if (ctx.destroyed) return;
-      setState(ctx, { session: null, isLoading: false });
+      setState(ctx, { session: null, isLoading: false, pollErrorCount: 1 });
     }
     schedulePoll(ctx, deps);
     if (shouldPoll(ctx.state.session)) connectWs(ctx, deps);
@@ -256,6 +261,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       const info = await deps.getSessionInfo();
       if (ctx.destroyed) return;
       setState(ctx, { session: info });
+      return info;
     },
     destroy() {
       ctx.destroyed = true;
@@ -306,12 +312,17 @@ export function useSession(pollIntervalMs?: number): UseSessionResult {
   }, []);
 
   const refresh = useCallback(async () => {
-    await mgrRef.current?.refresh();
+    const manager = mgrRef.current;
+    if (manager == null) {
+      return null;
+    }
+    return manager.refresh();
   }, []);
 
   return {
     session: state.session,
     isLoading: state.isLoading,
+    pollErrorCount: state.pollErrorCount,
     extend,
     logout: logoutAction,
     refresh,

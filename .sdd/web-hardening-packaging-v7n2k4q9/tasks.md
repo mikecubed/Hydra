@@ -21,7 +21,7 @@
 ## Phase 2 — User Story 2: Safe Recovery During Failures (Priority: P1)
 
 - [x] T011 [US2] Define the failure-drill matrix in docs/web-interface/05-security-and-quality.md
-- [ ] T012 [US2] Tighten session and daemon recovery messaging in apps/web/src/features/auth/ and apps/web/src/features/chat-workspace/components/
+- [x] T012 [US2] Tighten session and daemon recovery messaging in apps/web/src/features/auth/ and apps/web/src/features/chat-workspace/components/
 - [ ] T013 [US2] Harden rejected-mutation and degraded-state handling in apps/web/src/features/mutations/ and apps/web/src/features/operations-panels/
 - [x] T014 [US2] Tighten gateway error classification and runtime failure translation in apps/web-gateway/src/shared/gateway-error-response.ts and apps/web-gateway/src/transport/
 - [x] T015 [P] [US2] Add gateway failure-drill coverage in apps/web-gateway/src/\*_/**tests**/_.test.ts

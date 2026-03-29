@@ -123,4 +123,103 @@ describe('ExpiryBanner', () => {
     render(<ExpiryBanner />);
     expect(screen.getByTestId('expiry-banner')).toBeInTheDocument();
   });
+
+  // ── T012 / FD-1: extend error feedback ─────────────────────────────────
+
+  it('shows error message when extend() rejects', async () => {
+    const user = userEvent.setup();
+    const extend = vi.fn().mockRejectedValue(new Error('Reauth failed'));
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    render(<ExpiryBanner />);
+
+    await user.click(screen.getByTestId('extend-session-button'));
+
+    await waitFor(() => {
+      const error = screen.getByTestId('extend-error');
+      expect(error).toBeInTheDocument();
+      expect(error).toHaveTextContent('Reauth failed');
+    });
+  });
+
+  it('clears extend error on successful retry', async () => {
+    const user = userEvent.setup();
+    const extend = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Reauth failed'))
+      .mockResolvedValue(null);
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    render(<ExpiryBanner />);
+
+    // First click fails
+    await user.click(screen.getByTestId('extend-session-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('extend-error')).toBeInTheDocument();
+    });
+
+    // Second click succeeds
+    await user.click(screen.getByTestId('extend-session-button'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('extend-error')).not.toBeInTheDocument();
+    });
+  });
+
+  it('shows timeout error when extend() hangs beyond timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const extend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>(() => {
+          /* never resolves */
+        }),
+    );
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    render(<ExpiryBanner />);
+
+    await user.click(screen.getByTestId('extend-session-button'));
+
+    // Advance past the 10s timeout
+    vi.advanceTimersByTime(11_000);
+
+    await waitFor(() => {
+      const error = screen.getByTestId('extend-error');
+      expect(error).toBeInTheDocument();
+      expect(error).toHaveTextContent(/timed out/i);
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('clears extend error when session transitions away from expiring-soon', () => {
+    const extend = vi.fn().mockRejectedValue(new Error('Reauth failed'));
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    const { rerender } = render(<ExpiryBanner />);
+
+    // Transition to active — error should clear
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'active', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    rerender(<ExpiryBanner />);
+
+    // Re-enter expiring-soon — no stale error
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    rerender(<ExpiryBanner />);
+
+    expect(screen.queryByTestId('extend-error')).not.toBeInTheDocument();
+  });
 });
