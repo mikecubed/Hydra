@@ -166,8 +166,9 @@ export function hasExhaustedRetries(state: WorkspaceConnectionState): boolean {
 }
 
 /**
- * Estimate the next reconnect wait in seconds based on exponential backoff
- * with the same parameters as stream-client (1–30 s, ±0.5 s jitter).
+ * Estimate the next reconnect wait in seconds based on deterministic
+ * exponential backoff (1–30 s, capped). No jitter is applied — the
+ * returned value is always `min(2^(attempt-1), 30)`.
  * Returns null when not reconnecting.
  */
 export function estimateReconnectWait(state: WorkspaceConnectionState): number | null {

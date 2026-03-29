@@ -529,6 +529,16 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
     assert.equal(result.httpStatus, 503);
   });
 
+  it('maps 504 sendError to daemon-unavailable with retryAfterMs', () => {
+    const result = translateDaemonResponse(504, sendErrorBody('gateway timeout'));
+    assert.equal(result.category, 'daemon-unavailable');
+    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.message, 'Internal daemon error');
+    assert.equal(result.httpStatus, 504);
+    assert.equal(typeof result.retryAfterMs, 'number');
+    assert.ok((result.retryAfterMs ?? 0) > 0, '504 should include retryAfterMs hint');
+  });
+
   it('preserves httpStatus for all pattern-matched sendError bodies', () => {
     const cases: Array<[number, string]> = [
       [404, 'Conversation not found'],

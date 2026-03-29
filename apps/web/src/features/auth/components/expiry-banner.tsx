@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSessionContext } from '../context/session-context.ts';
 
 /** Timeout (ms) for the extend/reauth call before showing a timeout error. */
@@ -42,10 +42,13 @@ const errorStyle: React.CSSProperties = {
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
-    promise,
+    promise.finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }),
     new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timer = setTimeout(() => {
         reject(new Error('Session extension timed out. Please try again.'));
       }, ms);
     }),
@@ -57,26 +60,47 @@ export function ExpiryBanner(): React.JSX.Element | null {
   const [dismissed, setDismissed] = useState(false);
   const [extending, setExtending] = useState(false);
   const [extendError, setExtendError] = useState<string | null>(null);
+  const activeExtendRef = useRef<AbortController | null>(null);
 
   const sessionState = session?.state;
 
+  // Cancel stale extend attempt and reset UI when banner stops being relevant.
   useEffect(() => {
     if (sessionState !== 'expiring-soon') {
       setDismissed(false);
       setExtendError(null);
+      setExtending(false);
+      activeExtendRef.current?.abort();
+      activeExtendRef.current = null;
     }
   }, [sessionState]);
 
+  // Cancel on unmount so a pending timeout cannot write state after teardown.
+  useEffect(
+    () => () => {
+      activeExtendRef.current?.abort();
+      activeExtendRef.current = null;
+    },
+    [],
+  );
+
   const handleExtend = useCallback(async () => {
+    activeExtendRef.current?.abort();
+    const controller = new AbortController();
+    activeExtendRef.current = controller;
+
     setExtending(true);
     setExtendError(null);
     try {
       await withTimeout(extend(), EXTEND_TIMEOUT_MS);
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       const message = err instanceof Error ? err.message : 'Failed to extend session';
       setExtendError(message);
     } finally {
-      setExtending(false);
+      if (!controller.signal.aborted) {
+        setExtending(false);
+      }
     }
   }, [extend]);
 

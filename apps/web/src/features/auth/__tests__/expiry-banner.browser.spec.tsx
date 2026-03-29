@@ -198,6 +198,120 @@ describe('ExpiryBanner', () => {
     vi.useRealTimers();
   });
 
+  it('clears timeout timer when extend() resolves before timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const extend = vi.fn().mockResolvedValue(null);
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    render(<ExpiryBanner />);
+
+    await user.click(screen.getByTestId('extend-session-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('extend-session-button')).not.toBeDisabled();
+    });
+
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+
+    clearTimeoutSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('stale timeout does not set extendError after session leaves and re-enters expiring-soon', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    // extend() never resolves — simulates a hung request
+    const extend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>(() => {
+          /* never resolves */
+        }),
+    );
+
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    const { rerender } = render(<ExpiryBanner />);
+
+    // Click extend — starts the timeout
+    await user.click(screen.getByTestId('extend-session-button'));
+    expect(screen.getByTestId('extend-session-button')).toBeDisabled();
+
+    // Session transitions to active before timeout fires
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'active', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    rerender(<ExpiryBanner />);
+
+    // Banner gone
+    expect(screen.queryByTestId('expiry-banner')).not.toBeInTheDocument();
+
+    // Advance past timeout — the stale timer would fire now
+    vi.advanceTimersByTime(11_000);
+
+    // Session re-enters expiring-soon
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    rerender(<ExpiryBanner />);
+
+    // Banner visible but NO stale error, button not stuck disabled
+    await waitFor(() => {
+      expect(screen.getByTestId('expiry-banner')).toBeInTheDocument();
+      expect(screen.queryByTestId('extend-error')).not.toBeInTheDocument();
+      expect(screen.getByTestId('extend-session-button')).not.toBeDisabled();
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('ignores stale extend rejection after unmount', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    const extend = vi.fn().mockImplementation(
+      () =>
+        new Promise<void>(() => {
+          /* never resolves */
+        }),
+    );
+
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    const { unmount } = render(<ExpiryBanner />);
+
+    await user.click(screen.getByTestId('extend-session-button'));
+
+    // Unmount while extend is in flight
+    unmount();
+
+    // Timeout fires after unmount — should not throw or set state
+    vi.advanceTimersByTime(11_000);
+
+    // Re-mount fresh — no stale error carried over
+    mockUseSessionContext.mockReturnValue({
+      session: { state: 'expiring-soon', expiresAt: '2099-01-01T00:00:00Z' },
+      extend,
+    });
+    render(<ExpiryBanner />);
+
+    expect(screen.getByTestId('expiry-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('extend-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('extend-session-button')).not.toBeDisabled();
+
+    vi.useRealTimers();
+  });
+
   it('clears extend error when session transitions away from expiring-soon', () => {
     const extend = vi.fn().mockRejectedValue(new Error('Reauth failed'));
     mockUseSessionContext.mockReturnValue({
