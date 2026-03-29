@@ -127,6 +127,19 @@ function schedulePoll(ctx: ManagerInternals, deps: SessionManagerDeps) {
   }, jitteredDelay(deps.pollIntervalMs));
 }
 
+function syncBackgroundMonitoring(ctx: ManagerInternals, deps: SessionManagerDeps) {
+  if (ctx.destroyed) return;
+  if (!shouldPoll(ctx.state.session)) {
+    stopPoll(ctx);
+    closeWs(ctx);
+    return;
+  }
+  schedulePoll(ctx, deps);
+  if (ctx.ws === null && ctx.wsReconnectTimerId === null) {
+    connectWs(ctx, deps);
+  }
+}
+
 async function doPoll(ctx: ManagerInternals, deps: SessionManagerDeps) {
   if (ctx.destroyed) return;
   try {
@@ -138,10 +151,10 @@ async function doPoll(ctx: ManagerInternals, deps: SessionManagerDeps) {
     // Track consecutive poll errors so the UI can surface degraded feedback.
     setState(ctx, { pollErrorCount: ctx.state.pollErrorCount + 1 });
   }
-  schedulePoll(ctx, deps);
+  syncBackgroundMonitoring(ctx, deps);
 }
 
-function handleWsMessage(ctx: ManagerInternals, ev: MessageEvent) {
+function handleWsMessage(ctx: ManagerInternals, deps: SessionManagerDeps, ev: MessageEvent) {
   if (ctx.destroyed) return;
   try {
     const event = SessionEvent.parse(JSON.parse(ev.data as string));
@@ -150,6 +163,7 @@ function handleWsMessage(ctx: ManagerInternals, ev: MessageEvent) {
       stopPoll(ctx);
     }
     setState(ctx, { session: { ...ctx.state.session, state: event.newState } });
+    syncBackgroundMonitoring(ctx, deps);
   } catch {
     // Ignore parse errors.
   }
@@ -173,7 +187,7 @@ function connectWs(ctx: ManagerInternals, deps: SessionManagerDeps) {
     const socket = new deps.WebSocketCtor('/ws');
     ctx.ws = socket;
     socket.onmessage = (ev: MessageEvent) => {
-      handleWsMessage(ctx, ev);
+      handleWsMessage(ctx, deps, ev);
     };
     socket.onclose = () => {
       if (ctx.destroyed) return;
@@ -225,8 +239,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       if (ctx.destroyed) return;
       setState(ctx, { session: null, isLoading: false, pollErrorCount: 1 });
     }
-    schedulePoll(ctx, deps);
-    if (shouldPoll(ctx.state.session)) connectWs(ctx, deps);
+    syncBackgroundMonitoring(ctx, deps);
   })();
 
   return {
@@ -261,6 +274,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
       const info = await deps.getSessionInfo();
       if (ctx.destroyed) return null;
       setState(ctx, { session: info });
+      syncBackgroundMonitoring(ctx, deps);
       return info;
     },
     destroy() {

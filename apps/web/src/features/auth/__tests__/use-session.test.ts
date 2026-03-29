@@ -455,6 +455,41 @@ describe('useSession', () => {
     assert.equal(pendingTimers.length, 0, 'polling timers should be cleared');
   });
 
+  it('refresh() re-arms polling and WebSocket monitoring after daemon-unreachable recovery', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        return callCount === 1
+          ? makeSession({ state: 'daemon-unreachable' })
+          : makeSession({ state: 'active' });
+      },
+      WebSocketCtor: makeWsCtor(),
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+
+    assert.equal(mgr.getState().session?.state, 'daemon-unreachable');
+    assert.equal(pendingTimers.length, 0, 'daemon-unreachable should pause polling');
+    assert.equal(lastCreatedWs, null, 'daemon-unreachable should not hold a live WebSocket');
+
+    const refreshed = await mgr.refresh();
+
+    assert.equal(refreshed?.state, 'active');
+    assert.ok(lastCreatedWs !== null, 'refresh recovery should recreate WebSocket monitoring');
+    assert.ok(pendingTimers.length > 0, 'refresh recovery should re-schedule polling');
+
+    flushTimers();
+    await tick();
+    await tick();
+
+    assert.equal(callCount, 3, 'resumed polling should fetch session info again');
+
+    mgr.destroy();
+  });
+
   // ── Poll error tracking (T012 / FD-1) ──────────────────────────────────
 
   it('pollErrorCount starts at 0 after successful initial fetch', async () => {

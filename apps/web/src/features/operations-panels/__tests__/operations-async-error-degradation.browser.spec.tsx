@@ -8,14 +8,38 @@
  */
 
 import type { JSX } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/react';
+import type {
+  GetOperationsSnapshotResponse,
+  GetWorkItemCheckpointsResponse,
+  GetWorkItemControlsResponse,
+  GetWorkItemDetailResponse,
+  GetWorkItemExecutionResponse,
+  OperationalControlView,
+  SubmitControlActionResponse,
+  WorkQueueItemView,
+} from '@hydra/web-contracts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+const { createOperationsClientMock } = vi.hoisted(() => ({
+  createOperationsClientMock: vi.fn(),
+}));
+
+vi.mock('../api/operations-client.ts', () => ({
+  createOperationsClient: createOperationsClientMock,
+}));
+
+import type { OperationsClient } from '../api/operations-client.ts';
 import { OperationsDegradedBanner } from '../components/operations-degraded-banner.tsx';
 import { OperationsErrorBoundary } from '../components/operations-error-boundary.tsx';
+import { WorkspaceOperationsPanel } from '../components/workspace-operations-panel.tsx';
 
 afterEach(() => {
   cleanup();
+});
+
+beforeEach(() => {
+  createOperationsClientMock.mockReset();
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -33,6 +57,132 @@ function suppressConsoleError(): () => void {
   console.error = () => {};
   return () => {
     console.error = original;
+  };
+}
+
+function makeQueueItem(overrides: Partial<WorkQueueItemView> = {}): WorkQueueItemView {
+  return {
+    id: 'wi-42',
+    title: 'Inspect recovery candidate',
+    status: 'active',
+    position: 0,
+    relatedConversationId: null,
+    relatedSessionId: null,
+    ownerLabel: 'codex',
+    lastCheckpointSummary: null,
+    updatedAt: '2026-07-01T00:00:00.000Z',
+    riskSignals: [],
+    detailAvailability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeSnapshot(
+  overrides: Partial<GetOperationsSnapshotResponse> = {},
+): GetOperationsSnapshotResponse {
+  return {
+    queue: [makeQueueItem()],
+    health: null,
+    budget: null,
+    availability: 'ready',
+    lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+    nextCursor: null,
+    ...overrides,
+  };
+}
+
+function makeDetail(overrides: Partial<GetWorkItemDetailResponse> = {}): GetWorkItemDetailResponse {
+  const item = overrides.item ?? makeQueueItem();
+  return {
+    item,
+    checkpoints: [],
+    routing: {
+      currentRoute: 'codex',
+      currentMode: 'balanced',
+      changedAt: '2026-07-01T00:01:00.000Z',
+      history: [],
+    },
+    assignments: [],
+    council: null,
+    controls: [],
+    itemBudget: null,
+    availability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeControl(overrides: Partial<OperationalControlView> = {}): OperationalControlView {
+  return {
+    controlId: 'ctrl-1',
+    kind: 'routing',
+    label: 'Route override',
+    availability: 'actionable',
+    authority: 'granted',
+    reason: null,
+    options: [],
+    expectedRevision: 'rev-1',
+    lastResolvedAt: null,
+    ...overrides,
+  };
+}
+
+function makeCheckpointsResponse(
+  overrides: Partial<GetWorkItemCheckpointsResponse> = {},
+): GetWorkItemCheckpointsResponse {
+  return {
+    workItemId: 'wi-42',
+    checkpoints: [],
+    availability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeExecutionResponse(
+  overrides: Partial<GetWorkItemExecutionResponse> = {},
+): GetWorkItemExecutionResponse {
+  return {
+    workItemId: 'wi-42',
+    routing: null,
+    assignments: [],
+    council: null,
+    availability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeControlsResponse(
+  overrides: Partial<GetWorkItemControlsResponse> = {},
+): GetWorkItemControlsResponse {
+  return {
+    workItemId: 'wi-42',
+    controls: [],
+    availability: 'ready',
+    ...overrides,
+  };
+}
+
+function makeSubmitResponse(
+  overrides: Partial<SubmitControlActionResponse> = {},
+): SubmitControlActionResponse {
+  return {
+    outcome: 'accepted',
+    control: makeControl({ availability: 'accepted', expectedRevision: 'rev-2' }),
+    workItemId: 'wi-42',
+    resolvedAt: '2026-07-01T00:02:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeOperationsClient(overrides: Partial<OperationsClient> = {}): OperationsClient {
+  return {
+    getSnapshot: vi.fn(async () => makeSnapshot()),
+    getWorkItemDetail: vi.fn(async () => makeDetail()),
+    getWorkItemCheckpoints: vi.fn(async () => makeCheckpointsResponse()),
+    getWorkItemExecution: vi.fn(async () => makeExecutionResponse()),
+    getWorkItemControls: vi.fn(async () => makeControlsResponse()),
+    submitControlAction: vi.fn(async () => makeSubmitResponse()),
+    discoverControls: vi.fn(async () => ({ items: [] })),
+    ...overrides,
   };
 }
 
@@ -74,6 +224,54 @@ describe('FD-5: async error → degraded panel path', () => {
 
     // Sibling still healthy after retry
     expect(screen.getByTestId('panel-queue')).toHaveTextContent('Panel queue OK');
+  });
+
+  it('real panel snapshot failure shows degraded banner and retry reloads the queue', async () => {
+    const getSnapshot = vi
+      .fn<OperationsClient['getSnapshot']>()
+      .mockRejectedValueOnce(new Error('Snapshot fetch failed for queue panel'))
+      .mockResolvedValueOnce(makeSnapshot());
+    createOperationsClientMock.mockReturnValue(makeOperationsClient({ getSnapshot }));
+
+    render(<WorkspaceOperationsPanel />);
+
+    expect(await screen.findByTestId('operations-degraded-banner')).toHaveTextContent(
+      'Snapshot fetch failed for queue panel',
+    );
+    expect(screen.getByTestId('operations-retry-button')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('operations-retry-button'));
+
+    expect(await screen.findByText('Inspect recovery candidate')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId('operations-degraded-banner')).not.toBeInTheDocument();
+    });
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it('real panel detail failure is surfaced by panel state and recovers on reselect retry', async () => {
+    const getWorkItemDetail = vi
+      .fn<OperationsClient['getWorkItemDetail']>()
+      .mockRejectedValueOnce(new Error('detail fetch failed'))
+      .mockResolvedValueOnce(makeDetail());
+    createOperationsClientMock.mockReturnValue(makeOperationsClient({ getWorkItemDetail }));
+
+    render(<WorkspaceOperationsPanel />);
+
+    const queueItem = await screen.findByRole('button', { name: /inspect recovery candidate/i });
+    fireEvent.click(queueItem);
+
+    expect(await screen.findByText('Failed to load routing data.')).toBeInTheDocument();
+    expect(screen.getByText('Failed to load execution data.')).toBeInTheDocument();
+    expect(screen.getByText('Failed to load checkpoint data.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /inspect recovery candidate/i }));
+
+    expect(await screen.findByTestId('routing-current-route')).toHaveTextContent('codex');
+    await waitFor(() => {
+      expect(screen.queryByText('Failed to load routing data.')).not.toBeInTheDocument();
+    });
+    expect(getWorkItemDetail).toHaveBeenCalledTimes(2);
   });
 
   it('error boundary catches sync render crash while sibling degraded banner is separate', () => {
