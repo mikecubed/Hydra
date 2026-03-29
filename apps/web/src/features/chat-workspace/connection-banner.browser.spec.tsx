@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import { ConnectionBanner, type ConnectionBannerProps } from './components/connection-banner.tsx';
@@ -304,5 +304,72 @@ describe('ConnectionBanner convergence hint', () => {
     render(<ConnectionBanner {...props} />);
     const el = screen.getByRole('status');
     expect(el).toHaveAttribute('aria-live', 'polite');
+  });
+});
+
+// ─── T012 / FD-3: exhausted retries manual recovery affordance ──────────
+
+describe('ConnectionBanner reload action (T012)', () => {
+  it('shows "Reload page" button when reconnect retries are exhausted', () => {
+    renderBanner({
+      transportStatus: 'disconnected',
+      reconnectAttempt: 5,
+    });
+    const btn = screen.getByTestId('connection-reload-button');
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveTextContent('Reload page');
+  });
+
+  it('does not show reload button during active reconnect attempts', () => {
+    renderBanner({
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 3,
+    });
+    expect(screen.queryByTestId('connection-reload-button')).not.toBeInTheDocument();
+  });
+
+  it('shows reload button for terminal session states', () => {
+    renderBanner({
+      transportStatus: 'live',
+      sessionStatus: 'expired',
+    });
+    const btn = screen.getByTestId('connection-reload-button');
+    expect(btn).toBeInTheDocument();
+  });
+
+  it('calls onReload callback when reload button is clicked', async () => {
+    const { userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    const onReload = vi.fn();
+    render(
+      <ConnectionBanner
+        connection={connectionState({
+          transportStatus: 'disconnected',
+          reconnectAttempt: 5,
+        })}
+        onReload={onReload}
+      />,
+    );
+    await user.click(screen.getByTestId('connection-reload-button'));
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+
+  it('exhausted-state message includes reload guidance', () => {
+    renderBanner({
+      transportStatus: 'disconnected',
+      reconnectAttempt: 5,
+    });
+    const el = screen.getByRole('alert');
+    expect(el).toHaveTextContent(/reload the page/i);
+  });
+
+  it('reconnecting message includes estimated wait time', () => {
+    renderBanner({
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 4,
+    });
+    const el = screen.getByRole('status');
+    expect(el).toHaveTextContent(/attempt 4/);
+    expect(el).toHaveTextContent(/~\d+s/);
   });
 });

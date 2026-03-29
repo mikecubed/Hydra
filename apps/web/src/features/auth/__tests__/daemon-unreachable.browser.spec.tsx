@@ -195,4 +195,108 @@ describe('DaemonUnreachable', () => {
     expect(screen.getByTestId('daemon-unreachable')).toBeInTheDocument();
     expect(window.location.href).toBe(originalHref);
   });
+
+  // ── T012 / FD-2: retry error feedback ──────────────────────────────────
+
+  it('shows error message when retry fails', async () => {
+    const user = userEvent.setup();
+    const refreshFn = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValue(new Error('Connection refused'));
+
+    mockUseSessionContext.mockReturnValue(
+      makeMockContext({
+        session: {
+          operatorId: 'op-1',
+          state: 'daemon-unreachable',
+          expiresAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        refresh: refreshFn,
+      }),
+    );
+
+    render(<DaemonUnreachable />);
+    await user.click(screen.getByTestId('daemon-unreachable-retry'));
+
+    await waitFor(() => {
+      const error = screen.getByTestId('daemon-retry-error');
+      expect(error).toBeInTheDocument();
+      expect(error).toHaveTextContent('Connection refused');
+    });
+  });
+
+  it('shows retry attempt count after failed retries', async () => {
+    const user = userEvent.setup();
+    const refreshFn = vi.fn<() => Promise<void>>().mockRejectedValue(new Error('fail'));
+
+    mockUseSessionContext.mockReturnValue(
+      makeMockContext({
+        session: {
+          operatorId: 'op-1',
+          state: 'daemon-unreachable',
+          expiresAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+        refresh: refreshFn,
+      }),
+    );
+
+    render(<DaemonUnreachable />);
+
+    // No retry count initially
+    expect(screen.queryByTestId('daemon-retry-count')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('daemon-unreachable-retry'));
+    await waitFor(() => {
+      expect(screen.getByTestId('daemon-retry-count')).toHaveTextContent('1 failed attempt');
+    });
+
+    await user.click(screen.getByTestId('daemon-unreachable-retry'));
+    await waitFor(() => {
+      expect(screen.getByTestId('daemon-retry-count')).toHaveTextContent('2 failed attempts');
+    });
+  });
+
+  it('clears error message on successful retry after failure', async () => {
+    const user = userEvent.setup();
+    const refreshFn = vi.fn<() => Promise<void>>();
+
+    const daemonSession = {
+      operatorId: 'op-1',
+      state: 'daemon-unreachable' as const,
+      expiresAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    const activeSession = { ...daemonSession, state: 'active' as const };
+
+    // First retry fails, second succeeds
+    refreshFn.mockRejectedValueOnce(new Error('fail')).mockImplementation(async () => {
+      mockUseSessionContext.mockReturnValue(
+        makeMockContext({ session: activeSession, refresh: refreshFn }),
+      );
+    });
+
+    mockUseSessionContext.mockReturnValue(
+      makeMockContext({ session: daemonSession, refresh: refreshFn }),
+    );
+
+    render(<DaemonUnreachable />);
+
+    // First click fails — error shown
+    await user.click(screen.getByTestId('daemon-unreachable-retry'));
+    await waitFor(() => {
+      expect(screen.getByTestId('daemon-retry-error')).toBeInTheDocument();
+    });
+
+    // Second click succeeds — component hides
+    await user.click(screen.getByTestId('daemon-unreachable-retry'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('daemon-unreachable')).not.toBeInTheDocument();
+    });
+  });
 });

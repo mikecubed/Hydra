@@ -21,6 +21,7 @@ import {
   isRecovering,
   hasExhaustedRetries,
   describeConnectionState,
+  estimateReconnectWait,
 } from '../session-state.ts';
 
 // ─── Constant arrays ────────────────────────────────────────────────────────
@@ -417,5 +418,105 @@ describe('hasExhaustedRetries', () => {
       reconnectAttempt: 0,
     };
     assert.ok(!hasExhaustedRetries(state));
+  });
+});
+
+// ─── estimateReconnectWait (T012) ───────────────────────────────────────────
+
+describe('estimateReconnectWait', () => {
+  it('returns null when not reconnecting', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'live',
+      reconnectAttempt: 0,
+    };
+    assert.equal(estimateReconnectWait(state), null);
+  });
+
+  it('returns null when reconnecting but attempt is 0', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 0,
+    };
+    assert.equal(estimateReconnectWait(state), null);
+  });
+
+  it('returns 1 for first reconnect attempt', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 1,
+    };
+    assert.equal(estimateReconnectWait(state), 1);
+  });
+
+  it('returns exponential backoff for increasing attempts', () => {
+    for (const [attempt, expected] of [
+      [2, 2],
+      [3, 4],
+      [4, 8],
+      [5, 16],
+    ] as const) {
+      const state: WorkspaceConnectionState = {
+        ...initialConnectionState(),
+        transportStatus: 'reconnecting',
+        reconnectAttempt: attempt,
+      };
+      assert.equal(estimateReconnectWait(state), expected, `attempt ${String(attempt)}`);
+    }
+  });
+
+  it('caps at 30 seconds', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 10,
+    };
+    assert.equal(estimateReconnectWait(state), 30);
+  });
+
+  it('returns null when transport is disconnected', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'disconnected',
+      reconnectAttempt: 5,
+    };
+    assert.equal(estimateReconnectWait(state), null);
+  });
+});
+
+// ─── describeConnectionState — T012 enhancements ───────────────────────────
+
+describe('describeConnectionState T012 messaging', () => {
+  it('exhausted retries message includes reload guidance', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'disconnected',
+      reconnectAttempt: 5,
+    };
+    const msg = describeConnectionState(state);
+    assert.ok(msg.includes('Reload the page'), `expected reload guidance in: ${msg}`);
+    assert.ok(msg.includes('exhausted'), `expected "exhausted" in: ${msg}`);
+  });
+
+  it('reconnecting message includes estimated wait', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      transportStatus: 'reconnecting',
+      reconnectAttempt: 3,
+    };
+    const msg = describeConnectionState(state);
+    assert.ok(msg.includes('attempt 3'), `expected attempt count in: ${msg}`);
+    assert.ok(msg.includes('~4s'), `expected ~4s wait estimate in: ${msg}`);
+  });
+
+  it('terminal session message includes sign-in guidance', () => {
+    const state: WorkspaceConnectionState = {
+      ...initialConnectionState(),
+      sessionStatus: 'expired',
+    };
+    const msg = describeConnectionState(state);
+    assert.ok(msg.includes('sign in again'), `expected sign-in guidance in: ${msg}`);
   });
 });

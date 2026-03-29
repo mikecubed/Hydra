@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSessionContext } from '../context/session-context.ts';
 
+/** Timeout (ms) for the extend/reauth call before showing a timeout error. */
+const EXTEND_TIMEOUT_MS = 10_000;
+
 const bannerStyle: React.CSSProperties = {
   background: '#78350f',
   color: '#fef3c7',
@@ -33,23 +36,45 @@ const dismissButtonStyle: React.CSSProperties = {
   padding: '4px 8px',
 };
 
+const errorStyle: React.CSSProperties = {
+  color: '#fca5a5',
+  fontSize: '0.8125rem',
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('Session extension timed out. Please try again.'));
+      }, ms);
+    }),
+  ]);
+}
+
 export function ExpiryBanner(): React.JSX.Element | null {
   const { session, extend } = useSessionContext();
   const [dismissed, setDismissed] = useState(false);
   const [extending, setExtending] = useState(false);
+  const [extendError, setExtendError] = useState<string | null>(null);
 
   const sessionState = session?.state;
 
   useEffect(() => {
     if (sessionState !== 'expiring-soon') {
       setDismissed(false);
+      setExtendError(null);
     }
   }, [sessionState]);
 
   const handleExtend = useCallback(async () => {
     setExtending(true);
+    setExtendError(null);
     try {
-      await extend();
+      await withTimeout(extend(), EXTEND_TIMEOUT_MS);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to extend session';
+      setExtendError(message);
     } finally {
       setExtending(false);
     }
@@ -61,7 +86,14 @@ export function ExpiryBanner(): React.JSX.Element | null {
 
   return (
     <div role="alert" data-testid="expiry-banner" style={bannerStyle}>
-      <span>Your session is about to expire.</span>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <span>Your session is about to expire.</span>
+        {extendError != null && (
+          <span data-testid="extend-error" style={errorStyle}>
+            {extendError}
+          </span>
+        )}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <button
           data-testid="extend-session-button"

@@ -454,4 +454,93 @@ describe('useSession', () => {
     assert.equal(lastCreatedWs.closeCalled, true, 'WebSocket should be closed');
     assert.equal(pendingTimers.length, 0, 'polling timers should be cleared');
   });
+
+  // ── Poll error tracking (T012 / FD-1) ──────────────────────────────────
+
+  it('pollErrorCount starts at 0 after successful initial fetch', async () => {
+    const deps = makeDeps();
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+
+    assert.equal(mgr.getState().pollErrorCount, 0);
+    mgr.destroy();
+  });
+
+  it('pollErrorCount increments on consecutive poll failures', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        if (callCount === 1) return makeSession();
+        throw new Error('network error');
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0, 'initial fetch succeeds');
+
+    // First poll failure
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 1, 'first poll error');
+
+    // Second poll failure
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 2, 'second poll error');
+
+    mgr.destroy();
+  });
+
+  it('pollErrorCount resets to 0 on successful poll after errors', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        if (callCount === 1) return makeSession();
+        if (callCount === 2) throw new Error('network error');
+        return makeSession(); // third call succeeds
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0);
+
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 1, 'error incremented');
+
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0, 'reset after success');
+
+    mgr.destroy();
+  });
+
+  it('pollErrorCount is 1 when initial fetch fails', async () => {
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        throw new Error('initial fetch failed');
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+
+    assert.equal(mgr.getState().pollErrorCount, 1);
+    assert.equal(mgr.getState().session, null);
+    assert.equal(mgr.getState().isLoading, false);
+
+    mgr.destroy();
+  });
 });
