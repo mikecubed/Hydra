@@ -32,6 +32,7 @@ export function SessionProvider({
 
   useEffect(() => {
     const state = session.session?.state;
+    let cleanup: (() => void) | undefined;
     if (session.session != null) {
       hadAuthenticatedSession.current = true;
     }
@@ -53,11 +54,14 @@ export function SessionProvider({
       const timer = setTimeout(() => {
         redirect(loginPath);
       }, REDIRECT_DELAY_MS);
-      return () => {
+      cleanup = () => {
         clearTimeout(timer);
       };
     }
-    redirectScheduled.current = false;
+    if (!shouldRedirect) {
+      redirectScheduled.current = false;
+    }
+    return cleanup;
   }, [session.isLoading, session.session, session.session?.state, loginPath, onRedirect]);
 
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;

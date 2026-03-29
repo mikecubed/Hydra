@@ -139,7 +139,7 @@ describe('DaemonUnreachable', () => {
 
     expect(btn).toBeDisabled();
 
-    resolveRefresh();
+    resolveRefresh(null);
 
     await waitFor(() => {
       expect(screen.getByTestId('daemon-unreachable-retry')).not.toBeDisabled();
