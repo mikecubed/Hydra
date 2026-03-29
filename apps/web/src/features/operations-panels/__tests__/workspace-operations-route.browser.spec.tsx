@@ -632,22 +632,40 @@ describe('T024 refresh-cycle regressions', () => {
   });
 
   it('does not flash stale badge during normal snapshot loading cycle', async () => {
-    installBaseOperationsStub({
-      queue: [],
-      health: null,
-      budget: null,
-      availability: 'empty',
-      lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
-      nextCursor: null,
+    let resolveSnapshot!: (response: Response) => void;
+    const snapshotPromise = new Promise<Response>((resolve) => {
+      resolveSnapshot = resolve;
     });
 
-    render(<AppProviders />);
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({ conversations: [], totalCount: 0 });
+      }
+      if (url === '/operations/snapshot') {
+        return snapshotPromise;
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
 
-    // Wait for snapshot to resolve
-    expect(await screen.findByText('live')).toBeInTheDocument();
+    render(<WorkspaceOperationsPanel refreshNonce={0} />);
 
-    // After snapshot resolves, the badge should show "live", never "stale"
     const refreshStatus = screen.getByRole('status', { name: 'Operations refresh status' });
+    expect(refreshStatus).toHaveTextContent('Refreshing…');
+    expect(refreshStatus).toHaveTextContent('refreshing');
+    expect(refreshStatus).not.toHaveTextContent('stale');
+
+    resolveSnapshot(
+      jsonResponse({
+        queue: [],
+        health: null,
+        budget: null,
+        availability: 'empty',
+        lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+        nextCursor: null,
+      }),
+    );
+
+    expect(await screen.findByText('live')).toBeInTheDocument();
     expect(refreshStatus).toHaveTextContent('live');
     expect(refreshStatus).not.toHaveTextContent('stale');
   });

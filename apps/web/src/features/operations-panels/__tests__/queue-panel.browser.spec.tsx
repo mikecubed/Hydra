@@ -433,6 +433,18 @@ describe('T024 QueueItemCard dense metadata regressions', () => {
   });
 
   it('applies correct status colours for every work item status', () => {
+    const expectedColors: Record<
+      'waiting' | 'active' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled',
+      string
+    > = {
+      waiting: 'rgb(251, 191, 36)',
+      active: 'rgb(56, 189, 248)',
+      paused: 'rgb(251, 146, 60)',
+      blocked: 'rgb(248, 113, 113)',
+      completed: 'rgb(74, 222, 128)',
+      failed: 'rgb(239, 68, 68)',
+      cancelled: 'rgb(148, 163, 184)',
+    };
     const statuses: Array<
       'waiting' | 'active' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled'
     > = ['waiting', 'active', 'paused', 'blocked', 'completed', 'failed', 'cancelled'];
@@ -447,7 +459,9 @@ describe('T024 QueueItemCard dense metadata regressions', () => {
           onSelect={vi.fn()}
         />,
       );
-      expect(screen.getByText(status)).toBeInTheDocument();
+      const badge = screen.getByText(status);
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveStyle({ color: expectedColors[status] });
       expect(screen.getByRole('button')).toBeInTheDocument();
     }
   });
