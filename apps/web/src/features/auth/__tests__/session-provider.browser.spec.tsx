@@ -343,4 +343,37 @@ describe('SessionProvider redirect on expiry (T012)', () => {
 
     vi.useRealTimers();
   });
+
+  it('still redirects under React StrictMode replay for expired sessions', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession.mockReturnValue(
+      makeSessionResult({
+        session: {
+          operatorId: 'op-1',
+          state: 'expired',
+          expiresAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      }),
+    );
+
+    render(
+      <React.StrictMode>
+        <SessionProvider onRedirect={onRedirect}>
+          <SessionConsumer />
+        </SessionProvider>
+      </React.StrictMode>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledTimes(1);
+    expect(onRedirect).toHaveBeenCalledWith('/login');
+
+    vi.useRealTimers();
+  });
 });

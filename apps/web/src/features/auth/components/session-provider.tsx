@@ -27,12 +27,11 @@ export function SessionProvider({
   children,
 }: SessionProviderProps): React.JSX.Element {
   const session = useSession(pollInterval);
-  const redirectScheduled = useRef(false);
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hadAuthenticatedSession = useRef(false);
 
   useEffect(() => {
     const state = session.session?.state;
-    let cleanup: (() => void) | undefined;
     if (session.session != null) {
       hadAuthenticatedSession.current = true;
     }
@@ -40,28 +39,35 @@ export function SessionProvider({
     const lostSessionAfterAuth =
       session.session == null && !session.isLoading && hadAuthenticatedSession.current;
     const shouldRedirect = (state != null && REDIRECT_STATES.has(state)) || lostSessionAfterAuth;
+    const redirect =
+      onRedirect ??
+      ((path: string) => {
+        globalThis.location.assign(path);
+      });
 
-    if (shouldRedirect) {
-      if (redirectScheduled.current) {
-        return;
-      }
-      redirectScheduled.current = true;
-      const redirect =
-        onRedirect ??
-        ((path: string) => {
-          globalThis.location.assign(path);
-        });
-      const timer = setTimeout(() => {
-        redirect(loginPath);
-      }, REDIRECT_DELAY_MS);
-      cleanup = () => {
-        clearTimeout(timer);
-      };
-    }
     if (!shouldRedirect) {
-      redirectScheduled.current = false;
+      if (redirectTimerRef.current != null) {
+        clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = null;
+      }
+      return;
     }
-    return cleanup;
+
+    if (redirectTimerRef.current != null) {
+      clearTimeout(redirectTimerRef.current);
+    }
+
+    redirectTimerRef.current = setTimeout(() => {
+      redirectTimerRef.current = null;
+      redirect(loginPath);
+    }, REDIRECT_DELAY_MS);
+
+    return () => {
+      if (redirectTimerRef.current != null) {
+        clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = null;
+      }
+    };
   }, [session.isLoading, session.session, session.session?.state, loginPath, onRedirect]);
 
   return <SessionContext.Provider value={session}>{children}</SessionContext.Provider>;
