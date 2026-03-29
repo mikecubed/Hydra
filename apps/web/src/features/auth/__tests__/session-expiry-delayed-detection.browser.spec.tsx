@@ -8,9 +8,9 @@
  * and that intermediate poll errors do not prematurely trigger redirect.
  */
 
-import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import type { SessionInfo } from '@hydra/web-contracts';
 
 vi.mock('../hooks/use-session.ts', () => ({
   useSession: vi.fn(),
@@ -40,7 +40,7 @@ function makeSessionResult(overrides: Partial<UseSessionResult> = {}): UseSessio
   };
 }
 
-function makeSession(state: string) {
+function makeSession(state: SessionInfo['state']): SessionInfo {
   return {
     operatorId: 'op-1',
     state,
