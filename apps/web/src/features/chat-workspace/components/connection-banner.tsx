@@ -217,7 +217,7 @@ export function ConnectionBanner({
             if (onReload) {
               onReload();
             } else {
-              globalThis.location?.reload();
+              globalThis.location.reload();
             }
           }}
         >

@@ -4,7 +4,7 @@
  * Catches render errors thrown by any operations panel component and renders
  * a contained fallback so errors in the operations surface never propagate
  * to the chat workspace. Chat ownership is preserved regardless of operations
- * panel health.
+ * panel health. Includes a "Try again" recovery action (T013, FD-5).
  */
 import { Component, type JSX, type ReactNode } from 'react';
 
@@ -31,6 +31,17 @@ const textStyle = {
   lineHeight: 1.5,
 } as const;
 
+const retryButtonStyle = {
+  marginTop: '0.5rem',
+  fontSize: '0.75rem',
+  padding: '0.25rem 0.5rem',
+  borderRadius: '0.25rem',
+  border: '1px solid rgba(248, 113, 113, 0.4)',
+  background: 'rgba(248, 113, 113, 0.1)',
+  color: '#f87171',
+  cursor: 'pointer',
+} as const;
+
 export class OperationsErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -54,6 +65,10 @@ export class OperationsErrorBoundary extends Component<Props, State> {
     );
   }
 
+  private readonly handleRetry = (): void => {
+    this.setState({ hasError: false, errorMessage: null });
+  };
+
   override render(): JSX.Element {
     if (this.state.hasError) {
       return (
@@ -72,6 +87,14 @@ export class OperationsErrorBoundary extends Component<Props, State> {
               {this.state.errorMessage}
             </p>
           )}
+          <button
+            type="button"
+            data-testid="operations-error-retry"
+            style={retryButtonStyle}
+            onClick={this.handleRetry}
+          >
+            Try again
+          </button>
         </div>
       );
     }

@@ -37,6 +37,8 @@ export interface OperationsControlState {
 export interface OperationsWorkspaceState {
   readonly snapshotStatus: SnapshotStatus;
   readonly snapshot: GetOperationsSnapshotResponse | null;
+  /** Error message from the most recent snapshot fetch failure (FD-5 async degraded state). */
+  readonly snapshotErrorMessage: string | null;
   readonly freshness: WorkspaceFreshness;
   readonly availability: WorkspaceAvailability;
   readonly lastSynchronizedAt: string | null;

@@ -125,4 +125,23 @@ describe('WorkflowLaunchPanel', () => {
     });
     expect(screen.getByText(/task-abc-123/i)).toBeDefined();
   });
+
+  it('shows rate-limit retry guidance from the live workflow panel', async () => {
+    const body: GatewayErrorBody = {
+      ok: false,
+      code: 'RATE_LIMITED',
+      category: 'rate-limit',
+      message: 'Too many launch attempts',
+      httpStatus: 429,
+      retryAfterMs: 5000,
+    };
+    const postWorkflowLaunch = vi.fn().mockRejectedValue(new MutationsRequestError(429, body));
+    const client = makeMockClient({ postWorkflowLaunch });
+    render(<WorkflowLaunchPanel revision="rev-1" client={client} />);
+    fireEvent.click(screen.getByText('Launch'));
+    await act(async () => {
+      fireEvent.click(screen.getByText('Confirm'));
+    });
+    expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent('try again in 5 seconds');
+  });
 });

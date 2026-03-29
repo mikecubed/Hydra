@@ -728,6 +728,27 @@ describe('createSyncController', () => {
       assert.equal(dispatched[1].type, 'snapshot/failure');
     });
 
+    it('includes errorMessage in snapshot/failure when error has a message (T013)', async () => {
+      const { client } = createSnapshotMockClient(() =>
+        Promise.reject(new Error('Gateway 503: daemon unreachable')),
+      );
+      const dispatched: OperationsAction[] = [];
+
+      const controller = createSyncController({
+        client,
+        dispatch: (action) => dispatched.push(action),
+      });
+
+      controller.fetchSnapshot();
+      await new Promise<void>((r) => {
+        setTimeout(r, 0);
+      });
+
+      assert.equal(dispatched[1].type, 'snapshot/failure');
+      const failureAction = dispatched[1];
+      assert.equal(failureAction.errorMessage, 'Gateway 503: daemon unreachable');
+    });
+
     it('does not trigger control discovery as a side effect of snapshot success', async () => {
       const snapshot = makeSnapshotResponse({
         queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],

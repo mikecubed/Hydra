@@ -194,7 +194,7 @@ export function describeConnectionState(state: WorkspaceConnectionState): string
   if (state.transportStatus === 'reconnecting') {
     if (state.reconnectAttempt > 0) {
       const wait = estimateReconnectWait(state);
-      const waitSuffix = wait !== null ? ` · next attempt in ~${String(wait)}s` : '';
+      const waitSuffix = wait === null ? '' : ` · next attempt in ~${String(wait)}s`;
       return `Reconnecting to gateway… (attempt ${String(state.reconnectAttempt)})${waitSuffix}`;
     }
     return 'Reconnecting to gateway…';

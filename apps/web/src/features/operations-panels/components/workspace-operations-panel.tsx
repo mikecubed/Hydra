@@ -21,6 +21,7 @@ import {
   selectSelectedCouncil,
   selectSelectedRouting,
   selectSelectedWorkItemId,
+  selectSnapshotErrorMessage,
   selectSnapshotStatus,
 } from '../model/selectors.ts';
 import { createSyncController } from '../model/sync-controller.ts';
@@ -28,6 +29,7 @@ import { CheckpointPanel } from './checkpoint-panel.tsx';
 import { ControlStrip } from './control-strip.tsx';
 import { ExecutionPanel } from './execution-panel.tsx';
 import { HealthBudgetPanel } from './health-budget-panel.tsx';
+import { OperationsDegradedBanner } from './operations-degraded-banner.tsx';
 import { OperationsPanelShell } from './operations-panel-shell.tsx';
 import { QueuePanel } from './queue-panel.tsx';
 import { RoutingPanel } from './routing-panel.tsx';
@@ -117,7 +119,11 @@ function useOperationsPanelState(options: UseOperationsPanelStateOptions = {}) {
     [operationsClient, selectedWorkItemId],
   );
 
-  return { state, dispatch, handleSelectItem, handleSubmitControl };
+  const handleRetrySnapshot = useCallback(() => {
+    syncControllerRef.current?.fetchSnapshot();
+  }, []);
+
+  return { state, dispatch, handleSelectItem, handleSubmitControl, handleRetrySnapshot };
 }
 
 export interface WorkspaceOperationsPanelProps {
@@ -127,10 +133,13 @@ export interface WorkspaceOperationsPanelProps {
 export function WorkspaceOperationsPanel({
   refreshNonce = 0,
 }: WorkspaceOperationsPanelProps): JSX.Element {
-  const { state, handleSelectItem, handleSubmitControl } = useOperationsPanelState({
-    refreshNonce,
-  });
+  const { state, handleSelectItem, handleSubmitControl, handleRetrySnapshot } =
+    useOperationsPanelState({
+      refreshNonce,
+    });
 
+  const snapshotStatus = selectSnapshotStatus(state);
+  const snapshotErrorMessage = selectSnapshotErrorMessage(state);
   const selectedWorkItemId = selectSelectedWorkItemId(state);
   const checkpoints = selectSelectedCheckpoints(state);
   const routing = selectSelectedRouting(state);
@@ -180,14 +189,20 @@ export function WorkspaceOperationsPanel({
       <HealthBudgetPanel health={health} budget={budget} />
     );
 
+  const degradedBanner =
+    snapshotStatus === 'error' && snapshotErrorMessage !== null ? (
+      <OperationsDegradedBanner message={snapshotErrorMessage} onRetry={handleRetrySnapshot} />
+    ) : undefined;
+
   return (
     <OperationsPanelShell
-      snapshotStatus={selectSnapshotStatus(state)}
+      snapshotStatus={snapshotStatus}
       freshness={selectFreshness(state)}
       detailPanel={detailPanel}
       healthBudgetPanel={healthBudgetPanel}
       controlStripSlot={controlStripSlot}
     >
+      {degradedBanner}
       <QueuePanel
         items={selectFilteredQueueItems(state)}
         snapshotStatus={selectSnapshotStatus(state)}

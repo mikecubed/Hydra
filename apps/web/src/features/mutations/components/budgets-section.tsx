@@ -8,6 +8,7 @@ import { useState, useCallback, useMemo, type JSX } from 'react';
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
+import type { ErrorCategory } from '../../../shared/gateway-errors.ts';
 import { ConfirmDialog } from './confirm-dialog.tsx';
 import { MutationErrorBanner } from './mutation-error-banner.tsx';
 
@@ -19,6 +20,8 @@ interface BudgetRowState {
   isDialogOpen: boolean;
   isLoading: boolean;
   error: string | null;
+  errorCategory: ErrorCategory | null;
+  retryAfterMs: number | null;
 }
 
 export interface BudgetsSectionProps {
@@ -118,7 +121,12 @@ function BudgetRow({
         Apply
       </button>
       {validationError !== null && hasInput && <span role="alert">{validationError}</span>}
-      <MutationErrorBanner message={row.error} onDismiss={onDismissError} />
+      <MutationErrorBanner
+        message={row.error}
+        category={row.errorCategory}
+        retryAfterMs={row.retryAfterMs}
+        onDismiss={onDismissError}
+      />
       <ConfirmDialog
         isOpen={row.isDialogOpen}
         title={`Update ${id} budget`}
@@ -165,7 +173,7 @@ function renderBudgetRows({
         handleConfirm(id);
       }}
       onDismissError={() => {
-        updateRow(id, { error: null });
+        updateRow(id, { error: null, errorCategory: null, retryAfterMs: null });
       }}
     />
   ));
@@ -187,6 +195,8 @@ function buildInitialRows(
         isDialogOpen: false,
         isLoading: false,
         error: null,
+        errorCategory: null,
+        retryAfterMs: null,
       },
     ]),
   );
@@ -207,6 +217,8 @@ function buildBudgetBaseline(
     isDialogOpen: false,
     isLoading: false,
     error: null,
+    errorCategory: null,
+    retryAfterMs: null,
   };
 }
 
@@ -232,10 +244,10 @@ async function applyBudget({
   const row = rows[id];
   const validationError = validateRow(row);
   if (validationError !== null) {
-    updateRow(id, { error: validationError });
+    updateRow(id, { error: validationError, errorCategory: null, retryAfterMs: null });
     return;
   }
-  updateRow(id, { isLoading: true, error: null });
+  updateRow(id, { isLoading: true, error: null, errorCategory: null, retryAfterMs: null });
   try {
     await client.postBudget({
       modelId: id,
@@ -248,9 +260,14 @@ async function applyBudget({
     onBudgetMutated();
   } catch (err: unknown) {
     updateRow(id, {
+      dailyInput: row.serverDailyInput,
+      weeklyInput: row.serverWeeklyInput,
       isLoading: false,
       isDialogOpen: false,
       error: err instanceof MutationsRequestError ? err.gatewayError.message : 'Unexpected error',
+      errorCategory: err instanceof MutationsRequestError ? err.gatewayError.category : null,
+      retryAfterMs:
+        err instanceof MutationsRequestError ? (err.gatewayError.retryAfterMs ?? null) : null,
     });
   }
 }

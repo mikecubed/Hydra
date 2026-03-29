@@ -11,6 +11,7 @@ import {
   createInitialOperationsState,
   reduceOperationsState,
 } from '../model/operations-reducer.ts';
+import type { OperationsWorkspaceState } from '../model/operations-types.ts';
 import {
   selectAvailability,
   selectControlsForSelectedItem,
@@ -21,6 +22,7 @@ import {
   selectQueueItems,
   selectSelectedDetail,
   selectSelectedWorkItemId,
+  selectSnapshotErrorMessage,
   selectSnapshotStatus,
   selectStatusFilter,
 } from '../model/selectors.ts';
@@ -101,6 +103,21 @@ function makeDetailResponse(
 describe('selectSnapshotStatus', () => {
   it('returns the current snapshot status', () => {
     assert.equal(selectSnapshotStatus(createInitialOperationsState()), 'idle');
+  });
+});
+
+describe('selectSnapshotErrorMessage', () => {
+  it('returns null for initial state', () => {
+    assert.equal(selectSnapshotErrorMessage(createInitialOperationsState()), null);
+  });
+
+  it('returns the error message when set', () => {
+    const state: OperationsWorkspaceState = {
+      ...createInitialOperationsState(),
+      snapshotStatus: 'error',
+      snapshotErrorMessage: 'Daemon unreachable',
+    };
+    assert.equal(selectSnapshotErrorMessage(state), 'Daemon unreachable');
   });
 });
 

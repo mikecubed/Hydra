@@ -44,7 +44,11 @@ export function SessionProvider({
         return;
       }
       redirectScheduled.current = true;
-      const redirect = onRedirect ?? ((path: string) => globalThis.location?.assign(path));
+      const redirect =
+        onRedirect ??
+        ((path: string) => {
+          globalThis.location.assign(path);
+        });
       const timer = setTimeout(() => {
         redirect(loginPath);
       }, REDIRECT_DELAY_MS);
