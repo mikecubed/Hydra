@@ -349,6 +349,9 @@ T030 final verification.
 - [ ] `node_modules/hydra/dist/web-runtime/server.js` starts and automatically resolves static
       assets from `node_modules/hydra/dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override
       needed.
+  ```bash
+  node node_modules/hydra/dist/web-runtime/server.js
+  ```
 - [ ] Login and session lifecycle behave identically to the source-checkout path.
 
 ### Standalone executable (CLI-only)
