@@ -1,6 +1,6 @@
 # Hydra Web Interface
 
-> **Status:** Active — specs 1–7 delivered; `web-hardening-and-packaging` pending
+> **Status:** Active — specs 1–7 delivered; Phase 4 complete; contributor release-readiness in progress
 > **Scope:** Browser-native Hydra workspace with full REPL-grade capabilities, strict quality gates, and SDD-driven delivery
 
 This document is the entry point for Hydra's web-interface design set.
@@ -48,16 +48,16 @@ To keep the work easier to reason about, the design has been split into smaller 
 
 ## SDD Execution Progress
 
-| #   | Spec                                 | Status                                   |
-| --- | ------------------------------------ | ---------------------------------------- |
-| 1   | `web-repl-foundation`                | ✅ Delivered                             |
-| 2   | `web-session-auth`                   | ✅ Delivered (PRs #210, #212)            |
-| 3   | `web-conversation-protocol`          | ✅ Delivered                             |
-| 4   | `web-gateway-conversation-transport` | ✅ Delivered                             |
-| 5   | `web-chat-workspace`                 | ✅ Delivered (phases 1–8, PRs #173–#185) |
-| 6   | `web-hydra-operations-panels`        | ✅ Delivered (US1–US6, PRs #201–#209)    |
-| 7   | **`web-controlled-mutations`**       | ✅ Delivered (PR #221)                   |
-| 8   | `web-hardening-and-packaging`        | ⬜ Pending                               |
+| #   | Spec                                 | Status                                                                       |
+| --- | ------------------------------------ | ---------------------------------------------------------------------------- |
+| 1   | `web-repl-foundation`                | ✅ Delivered                                                                 |
+| 2   | `web-session-auth`                   | ✅ Delivered (PRs #210, #212)                                                |
+| 3   | `web-conversation-protocol`          | ✅ Delivered                                                                 |
+| 4   | `web-gateway-conversation-transport` | ✅ Delivered                                                                 |
+| 5   | `web-chat-workspace`                 | ✅ Delivered (phases 1–8, PRs #173–#185)                                     |
+| 6   | `web-hydra-operations-panels`        | ✅ Delivered (US1–US6, PRs #201–#209)                                        |
+| 7   | **`web-controlled-mutations`**       | ✅ Delivered (PR #221)                                                       |
+| 8   | `web-hardening-and-packaging`        | 🔧 In progress — packaging delivered; contributor release-readiness underway |
 
 ## Supported Packaging Targets
 
@@ -97,10 +97,16 @@ HTTP/WebSocket routing, authentication, CSRF protection, and session management.
 - **Standalone executable** stays focused on CLI orchestration and does not include the packaged web
   runtime.
 
-## Next Step
+## Current Focus
 
-**`web-hardening-and-packaging`** — packaging integration, accessibility and performance hardening,
-security review and failure-mode drills, contributor and documentation updates.
+**`web-hardening-and-packaging`** — packaging integration is delivered (npm tarball ships
+`dist/web-runtime/` with bundled gateway and browser assets). Current work focuses on contributor
+release-readiness: verification guidance, troubleshooting documentation, and ensuring the quality
+gates cover the full web stack.
+
+Standalone executables remain CLI-only — web support is available via source checkout and npm
+package.
 
 See [`docs/web-interface/06-phases-and-sdd.md`](./web-interface/06-phases-and-sdd.md) for full phase
-and spec breakdown details.
+and spec breakdown details, and [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the web-interface
+verification sequence.
