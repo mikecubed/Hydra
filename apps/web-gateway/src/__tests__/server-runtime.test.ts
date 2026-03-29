@@ -1,12 +1,15 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   createStaticAssetResponse,
+  describeStaticDirSource,
   isGatewayRoute,
+  missingAssetsMessage,
   resolveGatewayServerConfig,
+  resolveStaticDirWithSource,
 } from '../server-runtime.ts';
 
 describe('resolveGatewayServerConfig', () => {
@@ -67,6 +70,93 @@ describe('resolveGatewayServerConfig', () => {
         }),
       /HYDRA_WEB_OPERATOR_SECRET must not be empty when set/,
     );
+  });
+
+  it('includes staticDirSource in resolved config', () => {
+    const config = resolveGatewayServerConfig({});
+    assert.ok(
+      ['source-checkout', 'packaged', 'env-override'].includes(config.staticDirSource),
+      `Expected a valid staticDirSource, got "${config.staticDirSource}"`,
+    );
+  });
+
+  it('reports env-override when HYDRA_WEB_STATIC_DIR is set', () => {
+    const config = resolveGatewayServerConfig({
+      HYDRA_WEB_STATIC_DIR: '/custom/static/path',
+    });
+    assert.equal(config.staticDirSource, 'env-override');
+    assert.equal(config.staticDir, resolve('/custom/static/path'));
+  });
+});
+
+describe('resolveStaticDirWithSource', () => {
+  let tempDir: string | null = null;
+
+  afterEach(async () => {
+    const cleanupDir = tempDir;
+    tempDir = null;
+    if (cleanupDir != null) {
+      await rm(cleanupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns env-override when explicit path is provided', () => {
+    const result = resolveStaticDirWithSource('/some/explicit/path');
+    assert.equal(result.staticDirSource, 'env-override');
+    assert.equal(result.staticDir, resolve('/some/explicit/path'));
+  });
+
+  it('detects packaged mode when web/ subdirectory exists under moduleDir', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-packaged-'));
+    await mkdir(join(tempDir, 'web'));
+
+    const result = resolveStaticDirWithSource(undefined, tempDir);
+    assert.equal(result.staticDirSource, 'packaged');
+    assert.equal(result.staticDir, join(tempDir, 'web'));
+  });
+
+  it('falls back to source-checkout when no packaged dir exists', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-source-'));
+
+    const result = resolveStaticDirWithSource(undefined, tempDir);
+    assert.equal(result.staticDirSource, 'source-checkout');
+    assert.match(result.staticDir, /web[/\\]dist$/);
+  });
+
+  it('ignores empty env override string', () => {
+    const result = resolveStaticDirWithSource('');
+    assert.notEqual(result.staticDirSource, 'env-override');
+  });
+});
+
+describe('describeStaticDirSource', () => {
+  it('returns human-readable labels for all source types', () => {
+    assert.equal(describeStaticDirSource('source-checkout'), 'source checkout');
+    assert.equal(describeStaticDirSource('packaged'), 'packaged');
+    assert.equal(describeStaticDirSource('env-override'), 'env override');
+  });
+});
+
+describe('missingAssetsMessage', () => {
+  it('provides build command for source-checkout mode', () => {
+    const msg = missingAssetsMessage('source-checkout');
+    assert.match(msg, /npm --workspace @hydra\/web run build/);
+  });
+
+  it('references packaged asset path for packaged mode', () => {
+    const msg = missingAssetsMessage('packaged');
+    assert.match(msg, /dist\/web-runtime\/web/);
+    assert.match(msg, /build-pack/);
+  });
+
+  it('references env var for env-override mode', () => {
+    const msg = missingAssetsMessage('env-override');
+    assert.match(msg, /HYDRA_WEB_STATIC_DIR/);
+  });
+
+  it('defaults to source-checkout guidance when source is undefined', () => {
+    const msg = missingAssetsMessage(undefined);
+    assert.match(msg, /npm --workspace @hydra\/web run build/);
   });
 });
 
@@ -147,5 +237,30 @@ describe('createStaticAssetResponse', () => {
       () => createStaticAssetResponse(staticDir, '/workspace'),
       /EISDIR|illegal operation on a directory/i,
     );
+  });
+
+  it('tailors 503 message for packaged mode', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+
+    const response = await createStaticAssetResponse(tempDir, '/workspace', {
+      staticDirSource: 'packaged',
+    });
+    assert.ok(response);
+    assert.equal(response.status, 503);
+    const text = await response.text();
+    assert.match(text, /dist\/web-runtime\/web/);
+    assert.match(text, /build-pack/);
+  });
+
+  it('tailors 503 message for env-override mode', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-static-'));
+
+    const response = await createStaticAssetResponse(tempDir, '/workspace', {
+      staticDirSource: 'env-override',
+    });
+    assert.ok(response);
+    assert.equal(response.status, 503);
+    const text = await response.text();
+    assert.match(text, /HYDRA_WEB_STATIC_DIR/);
   });
 });

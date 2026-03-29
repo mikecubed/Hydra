@@ -4,7 +4,7 @@ import { AuditStore } from './audit/audit-store.ts';
 import { OperatorStore } from './auth/operator-store.ts';
 import { createGatewayApp } from './index.ts';
 import { SessionStore } from './session/session-store.ts';
-import { createStaticAssetResponse, resolveGatewayServerConfig } from './server-runtime.ts';
+import { createStaticAssetResponse, formatStartupLines, resolveGatewayServerConfig } from './server-runtime.ts';
 
 async function seedOperatorIfConfigured(
   operatorStore: OperatorStore,
@@ -62,7 +62,10 @@ function attachRequestHandler(
           const staticResponse = await createStaticAssetResponse(
             config.staticDir,
             requestUrl.pathname,
-            { tlsActive: requestUrl.protocol === 'https:' },
+            {
+              tlsActive: requestUrl.protocol === 'https:',
+              staticDirSource: config.staticDirSource,
+            },
           );
           if (staticResponse != null) {
             await writeResponse(staticResponse, response, request.method);
@@ -97,15 +100,8 @@ async function listen(
 }
 
 function logStartup(config: ReturnType<typeof resolveGatewayServerConfig>): void {
-  console.log(`Hydra web gateway listening on ${config.publicOrigin}`);
-  console.log(`Daemon upstream: ${config.daemonUrl}`);
-  console.log(`Static assets: ${config.staticDir}`);
-  if (config.operatorId == null) {
-    console.log(
-      'No operator seed configured. Existing session or stored operator data is required.',
-    );
-  } else {
-    console.log(`Seeded operator: ${config.operatorId}`);
+  for (const line of formatStartupLines(config)) {
+    console.log(line);
   }
 }
 

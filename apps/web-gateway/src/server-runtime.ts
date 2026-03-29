@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname, extname, relative, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,7 @@ import { z } from 'zod';
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_STATIC_DIR = resolve(MODULE_DIR, '../../web/dist');
+const PACKAGED_STATIC_DIR = resolve(MODULE_DIR, 'web');
 const DEFAULT_STATE_DIR = resolve(homedir(), '.hydra/web-gateway');
 
 const GATEWAY_ROUTE_PREFIXES = [
@@ -33,12 +35,15 @@ function buildStaticSecurityHeaders(tlsActive: boolean): Record<string, string> 
   };
 }
 
+export type StaticDirSource = 'source-checkout' | 'packaged' | 'env-override';
+
 export interface GatewayServerConfig {
   host: string;
   port: number;
   publicOrigin: string;
   daemonUrl: string;
   staticDir: string;
+  staticDirSource: StaticDirSource;
   stateDir: string;
   operatorsPath: string;
   sessionsPath: string;
@@ -137,6 +142,72 @@ function resolveOrigin(host: string, port: number, explicitOrigin: string | unde
   return parsed.origin;
 }
 
+export function resolveStaticDirWithSource(
+  envOverride: string | undefined,
+  moduleDir: string = MODULE_DIR,
+): { staticDir: string; staticDirSource: StaticDirSource } {
+  if (envOverride != null && envOverride !== '') {
+    return { staticDir: resolve(envOverride), staticDirSource: 'env-override' };
+  }
+
+  const packagedDir = resolve(moduleDir, 'web');
+  if (existsSync(packagedDir)) {
+    return { staticDir: packagedDir, staticDirSource: 'packaged' };
+  }
+
+  return {
+    staticDir: resolve(moduleDir, '../../web/dist'),
+    staticDirSource: 'source-checkout',
+  };
+}
+
+export function describeStaticDirSource(source: StaticDirSource): string {
+  switch (source) {
+    case 'source-checkout':
+      return 'source checkout';
+    case 'packaged':
+      return 'packaged';
+    case 'env-override':
+      return 'env override';
+  }
+}
+
+export function missingAssetsMessage(source: StaticDirSource | undefined): string {
+  switch (source) {
+    case 'packaged':
+      return (
+        'Packaged web assets not found in dist/web-runtime/web/. ' +
+        'Re-run `npm run build-pack` to include web assets in the packaged output.'
+      );
+    case 'env-override':
+      return (
+        'Frontend assets not found at the path specified by HYDRA_WEB_STATIC_DIR. ' +
+        'Verify the directory contains a built web frontend (index.html).'
+      );
+    default:
+      return 'Missing built frontend assets. Run `npm --workspace @hydra/web run build` first.';
+  }
+}
+
+export function formatStartupLines(config: GatewayServerConfig): string[] {
+  const sourceLabel = describeStaticDirSource(config.staticDirSource);
+  const lines = [
+    `Hydra web gateway listening on ${config.publicOrigin}`,
+    `Daemon upstream: ${config.daemonUrl}`,
+    `Static assets: ${config.staticDir} (${sourceLabel})`,
+  ];
+
+  if (config.operatorId == null) {
+    lines.push(
+      'No operator seed configured. Existing session or stored operator data is required.',
+    );
+  } else {
+    lines.push(`Seeded operator: ${config.operatorId}`);
+  }
+
+  return lines;
+}
+
 export function resolveGatewayServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): GatewayServerConfig {
@@ -150,9 +221,9 @@ export function resolveGatewayServerConfig(
   const port = parsePort(validatedEnv.HYDRA_WEB_GATEWAY_PORT);
   const publicOrigin = resolveOrigin(host, port, validatedEnv.HYDRA_WEB_GATEWAY_ORIGIN);
   const daemonUrl = validatedEnv.HYDRA_DAEMON_URL ?? 'http://127.0.0.1:4173';
-  const staticDirEnv = validatedEnv.HYDRA_WEB_STATIC_DIR;
-  const staticDir =
-    staticDirEnv != null && staticDirEnv !== '' ? resolve(staticDirEnv) : DEFAULT_STATIC_DIR;
+  const { staticDir, staticDirSource } = resolveStaticDirWithSource(
+    validatedEnv.HYDRA_WEB_STATIC_DIR,
+  );
   const stateDirEnv = validatedEnv.HYDRA_WEB_STATE_DIR;
   const stateDir =
     stateDirEnv != null && stateDirEnv !== '' ? resolve(stateDirEnv) : DEFAULT_STATE_DIR;
@@ -170,6 +241,7 @@ export function resolveGatewayServerConfig(
     publicOrigin,
     daemonUrl,
     staticDir,
+    staticDirSource,
     stateDir,
     operatorsPath: resolve(stateDir, 'operators.json'),
     sessionsPath: resolve(stateDir, 'sessions.json'),
@@ -260,7 +332,7 @@ async function readStaticFile(filePath: string, tlsActive: boolean): Promise<Res
 export async function createStaticAssetResponse(
   staticDir: string,
   pathname: string,
-  options: { tlsActive?: boolean } = {},
+  options: { tlsActive?: boolean; staticDirSource?: StaticDirSource } = {},
 ): Promise<Response | null> {
   const tlsActive = options.tlsActive ?? false;
   if (isGatewayRoute(pathname)) {
@@ -287,8 +359,8 @@ export async function createStaticAssetResponse(
     return appShell;
   }
 
-  return new Response(
-    'Missing built frontend assets. Run `npm --workspace @hydra/web run build` first.',
-    { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } },
-  );
+  return new Response(missingAssetsMessage(options.staticDirSource), {
+    status: 503,
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+  });
 }
