@@ -35,6 +35,11 @@ export function selectSnapshotStatus(state: OperationsWorkspaceState): SnapshotS
   return state.snapshotStatus;
 }
 
+/** Error message from the most recent snapshot fetch failure, or null. */
+export function selectSnapshotErrorMessage(state: OperationsWorkspaceState): string | null {
+  return state.snapshotErrorMessage;
+}
+
 /** All queue items from the current snapshot, or empty if no snapshot. */
 export function selectQueueItems(state: OperationsWorkspaceState): readonly WorkQueueItemView[] {
   return state.snapshot?.queue ?? EMPTY_QUEUE;
