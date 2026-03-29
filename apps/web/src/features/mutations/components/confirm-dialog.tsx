@@ -6,6 +6,7 @@
  * Optional children are rendered between the from/to summary and the buttons
  * (e.g., advisory warnings from BudgetsSection).
  */
+import { useId } from 'react';
 import type { JSX, ReactNode } from 'react';
 
 export interface ConfirmDialogProps {
@@ -29,11 +30,13 @@ export function ConfirmDialog({
   isLoading,
   children,
 }: ConfirmDialogProps): JSX.Element | null {
+  const titleId = useId();
+
   if (!isOpen) return null;
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
-      <h2 id="confirm-dialog-title">{title}</h2>
+    <div role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <h2 id={titleId}>{title}</h2>
       <p>
         Change from <strong>{from}</strong> to <strong>{to}</strong>
       </p>

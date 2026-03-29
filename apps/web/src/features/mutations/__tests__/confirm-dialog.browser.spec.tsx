@@ -78,4 +78,44 @@ describe('ConfirmDialog (confirm-dialog.browser.spec)', () => {
     expect(screen.getByText('source-val')).toBeDefined();
     expect(screen.getByText('dest-val')).toBeDefined();
   });
+
+  it('multiple dialogs produce unique title IDs and valid aria-labelledby', () => {
+    const { container } = render(
+      <>
+        <ConfirmDialog
+          isOpen={true}
+          title="Dialog A"
+          from="a1"
+          to="a2"
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+          isLoading={false}
+        />
+        <ConfirmDialog
+          isOpen={true}
+          title="Dialog B"
+          from="b1"
+          to="b2"
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+          isLoading={false}
+        />
+      </>,
+    );
+
+    const dialogs = container.querySelectorAll('[role="dialog"]');
+    expect(dialogs.length).toBe(2);
+
+    const ids = [...dialogs].map((d) => {
+      const labelledBy = d.getAttribute('aria-labelledby');
+      expect(labelledBy).toBeTruthy();
+      const heading = d.querySelector('h2');
+      expect(heading).toBeTruthy();
+      expect(heading!.id).toBe(labelledBy);
+      return labelledBy;
+    });
+
+    // IDs must be distinct across instances
+    expect(ids[0]).not.toBe(ids[1]);
+  });
 });
