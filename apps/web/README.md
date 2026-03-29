@@ -382,15 +382,15 @@ T030 final verification.
   ```bash
   npm run package:evidence
   ```
-- [ ] Manual packaged-runtime smoke tests run from an installed package or unpacked tarball (the
-      source checkout is cleaned after `npm pack`).
-- [ ] Extracted package contains `dist/web-runtime/server.js`, the `web/` directory, and the
+- [ ] Manual packaged-runtime smoke tests run from an installed package (for example a temporary
+      `npm install` of the generated tarball; the source checkout is cleaned after `npm pack`).
+- [ ] Installed package contains `dist/web-runtime/server.js`, the `web/` directory, and the
       `.packaged` sentinel.
-- [ ] Packaged gateway starts and serves the workspace from the extracted package contents:
+- [ ] Packaged gateway starts and serves the workspace from the installed package contents:
   ```bash
   HYDRA_WEB_OPERATOR_ID=admin \
   HYDRA_WEB_OPERATOR_SECRET=password123 \
-  node package/dist/web-runtime/server.js
+  node node_modules/hydra/dist/web-runtime/server.js
   ```
 - [ ] Login and workspace behave identically to the source-checkout path.
 

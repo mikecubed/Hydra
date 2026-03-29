@@ -339,10 +339,11 @@ T030 final verification.
   ```bash
   npm run package:evidence
   ```
-- [ ] Manual packaged-runtime smoke tests run from an installed package or unpacked tarball (the
-      source checkout is cleaned after `npm pack`).
-- [ ] `package/dist/web-runtime/server.js` starts and automatically resolves static assets from
-      `package/dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override needed.
+- [ ] Manual packaged-runtime smoke tests run from an installed package (for example a temporary
+      `npm install` of the generated tarball; the source checkout is cleaned after `npm pack`).
+- [ ] `node_modules/hydra/dist/web-runtime/server.js` starts and automatically resolves static
+      assets from `node_modules/hydra/dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override
+      needed.
 - [ ] Login and session lifecycle behave identically to the source-checkout path.
 
 ### Standalone executable (CLI-only)
