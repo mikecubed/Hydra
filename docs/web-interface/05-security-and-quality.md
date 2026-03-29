@@ -170,8 +170,9 @@ the ✅ rows, but those behavioral targets are not yet promoted to a blocking re
 Evidence for responsiveness budgets is collected at three layers, ordered from cheapest (CI) to
 most expensive (manual profiling):
 
-1. **CI — `web-responsiveness` job** (`.github/workflows/quality.yml`). Runs on every PR and push.
-   Collects the currently blocking build-side evidence:
+1. **CI — `web-responsiveness` job** (`.github/workflows/quality.yml`). Runs on the workflow's
+   configured trigger set (pushes to `main` / `dev` / `fix/**` / `feat/**` / `feature/**`, plus
+   pull requests targeting `main`). Collects the currently blocking build-side evidence:
    - Build success / failure (exit code).
    - JS and CSS gzipped sizes parsed from Vite build output.
    - Build wall-clock time.
@@ -372,4 +373,5 @@ Target CI additions for later hardening work:
 Remaining target CI gates (to be added by evidence-hook tasks T023–T025):
 
 - responsiveness regression assertions beyond current browser spec coverage;
-- packaging and build evidence checks (T025).
+- packaging evidence checks plus any remaining build-evidence wiring outside the `quality.yml`
+  `web-responsiveness` gate landed by T021 (T025).
