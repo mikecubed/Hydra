@@ -126,7 +126,7 @@ To launch the packaged web runtime from an installed package:
    ```bash
    HYDRA_WEB_OPERATOR_ID=admin \
    HYDRA_WEB_OPERATOR_SECRET=password123 \
-   node dist/web-runtime/server.js
+   node node_modules/hydra/dist/web-runtime/server.js
    ```
 
 3. Open `http://127.0.0.1:4174/login` in your browser, enter your credentials, and the workspace
@@ -166,7 +166,7 @@ HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
 HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
 HYDRA_WEB_OPERATOR_ID=admin \
 HYDRA_WEB_OPERATOR_SECRET=password123 \
-node dist/web-runtime/server.js
+node node_modules/hydra/dist/web-runtime/server.js
 ```
 
 Key differences from a local command:
