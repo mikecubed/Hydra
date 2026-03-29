@@ -25,7 +25,7 @@
 - [x] T013 [US2] Harden rejected-mutation and degraded-state handling in apps/web/src/features/mutations/ and apps/web/src/features/operations-panels/
 - [x] T014 [US2] Tighten gateway error classification and runtime failure translation in apps/web-gateway/src/shared/gateway-error-response.ts and apps/web-gateway/src/transport/
 - [x] T015 [P] [US2] Add gateway failure-drill coverage in apps/web-gateway/src/\*_/**tests**/_.test.ts
-- [ ] T016 [P] [US2] Add browser recovery-flow coverage in apps/web/src/features/\*_/_.browser.spec.tsx
+- [x] T016 [P] [US2] Add browser recovery-flow coverage in apps/web/src/features/\*_/_.browser.spec.tsx
 
 ## Phase 3 — User Story 3: Accessible Core Workflows (Priority: P2)
 
