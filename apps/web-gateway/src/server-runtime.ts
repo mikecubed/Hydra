@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_STATIC_DIR = resolve(MODULE_DIR, '../../web/dist');
-const PACKAGED_STATIC_DIR = resolve(MODULE_DIR, 'web');
 const DEFAULT_STATE_DIR = resolve(homedir(), '.hydra/web-gateway');
 
 /**
