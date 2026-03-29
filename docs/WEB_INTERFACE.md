@@ -68,17 +68,20 @@ executable do not include the web workspace packages.
 | ------------------------- | -------------------- | --------------------------------------------------------------- |
 | **Source checkout**       | ✅ Supported         | Full monorepo; build browser bundle, start gateway + daemon     |
 | **npm package** (tarball) | ❌ Not included      | `apps/` and `packages/` are excluded from the published tarball |
-| **Standalone executable** | ❌ Not included      | Single binary bundles `bin/hydra-cli.ts` only; no web assets    |
+| **Standalone executable** | ❌ Not included      | Single binary; operator mode only (`--full` unsupported)        |
 
 ### What this means for operators
 
 - **Source checkout users** follow the startup commands in
   [apps/web-gateway/README.md](../apps/web-gateway/README.md) to build the browser bundle, start
   the daemon, and launch the same-origin gateway.
-- **npm package and standalone exe users** get full CLI/REPL orchestration (daemon, concierge,
-  council, tasks, evolve, operator console) but cannot start the web interface. If the gateway is
-  somehow started without the browser bundle, it returns an explicit **503** response with a message
-  directing the operator to build the assets from a source checkout.
+- **npm package users** get full CLI/REPL orchestration (daemon, concierge, council, tasks, evolve,
+  operator console) but cannot start the web interface. If the gateway is somehow started without
+  the browser bundle, it returns an explicit **503** response:
+  `Missing built frontend assets. Run npm --workspace @hydra/web run build first.`
+- **Standalone exe users** get operator-mode CLI support (`hydra`, `hydra --prompt`, subcommands)
+  but `hydra --full` is explicitly rejected in standalone `.exe` builds. The web interface is not
+  available.
 
 ### Why the web interface is source-checkout only
 
