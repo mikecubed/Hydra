@@ -61,6 +61,11 @@ describe('createError', () => {
     const err = createError('CSRF_INVALID', 'custom msg');
     assert.equal(err.message, 'custom msg');
   });
+
+  it('adds retryAfterMs for gateway-generated RATE_LIMITED errors', () => {
+    const err = createError('RATE_LIMITED');
+    assert.equal(err.retryAfterMs, 5000);
+  });
 });
 
 describe('ERROR_STATUS_MAP', () => {

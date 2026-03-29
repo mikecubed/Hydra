@@ -233,6 +233,12 @@ describe('FD-7: Rate-limit with retryAfterMs', () => {
     assert.equal(typeof result.retryAfterMs, 'number');
     assert.ok((result.retryAfterMs ?? 0) > 0, 'generic 429 should include retry hint');
   });
+
+  it('gateway-generated RATE_LIMITED errors include retryAfterMs', () => {
+    const result = createError('RATE_LIMITED');
+    assert.equal(typeof result.retryAfterMs, 'number');
+    assert.ok((result.retryAfterMs ?? 0) > 0, 'gateway rate-limit should include retry hint');
+  });
 });
 
 // ─── Cross-cutting: retryable classification ────────────────────────────────

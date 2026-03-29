@@ -94,6 +94,10 @@ export const ERROR_CATEGORY_MAP: Record<ErrorCode, ErrorCategory> = {
   WS_BUFFER_OVERFLOW: 'daemon',
 };
 
+const DEFAULT_RETRY_AFTER_MS: Partial<Record<ErrorCode, number>> = {
+  RATE_LIMITED: 5000,
+};
+
 export function createError(code: ErrorCode, message?: string): GatewayError {
   const defaultMessages: Record<ErrorCode, string> = {
     INVALID_CREDENTIALS: 'Invalid credentials',
@@ -117,5 +121,10 @@ export function createError(code: ErrorCode, message?: string): GatewayError {
     WS_INVALID_MESSAGE: 'Invalid WebSocket message',
     WS_BUFFER_OVERFLOW: 'Event buffer overflow',
   };
-  return new GatewayError(code, message ?? defaultMessages[code], ERROR_STATUS_MAP[code]);
+  return new GatewayError(
+    code,
+    message ?? defaultMessages[code],
+    ERROR_STATUS_MAP[code],
+    DEFAULT_RETRY_AFTER_MS[code],
+  );
 }
