@@ -651,6 +651,9 @@ describe('workspace refresh/reconnect recovery workflows', () => {
           resolveHistory = resolve;
         });
       }
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
       return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     });
     vi.stubGlobal('fetch', fetchSpy);
