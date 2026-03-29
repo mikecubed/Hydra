@@ -239,11 +239,32 @@ expressed through current surfaces.
 - **`clean-pack.ts`** reads a `.packfiles` manifest, so T006 can extend it to clean up any
   additional web artifacts added by T005.
 
+### Package-dependency gap (critical for T005)
+
+Adding `apps/web-gateway/` files and `apps/web/dist/` to the tarball `files` list is **necessary
+but not sufficient** for a working npm-pack web launch. Two additional packaging problems remain:
+
+1. **Gateway runtime dependencies are not shipped.** The gateway (`apps/web-gateway`) depends on
+   Hono and its own `devDependencies`/`dependencies` declared in `apps/web-gateway/package.json`.
+   The root `package.json` that governs `npm pack` does not include these — they are workspace-local.
+   An `npm install` of the published tarball will not install Hono, `@hono/node-server`, or any
+   other gateway runtime dependency, so `import { Hono } from 'hono'` will fail at startup.
+
+2. **`@hydra/web-contracts` is not included.** The shared contracts workspace package
+   (`packages/web-contracts`) is referenced by both the gateway and the browser bundle at build
+   time. It is excluded from the tarball by `tsconfig.build.json` and the `files` array. Without
+   it, gateway code that imports `@hydra/web-contracts` will fail to resolve.
+
+**T005 must solve runtime dependency packaging/bundling, not just asset inclusion.** Options include
+bundling the gateway into a single file (esbuild), hoisting required dependencies into the root
+`package.json`, or producing a self-contained gateway artifact. Simply extending the `files` list
+will produce a tarball that appears to contain the web surface but fails on first `require`/`import`.
+
 ### Summary for downstream tasks
 
 | Task | What this audit tells it |
 | --- | --- |
-| T005 | Must add `apps/web-gateway/` and `apps/web/dist/` (or a built equivalent) to the tarball `files` list and extend `tsconfig.build.json` or add a gateway build step. |
+| T005 | Must add `apps/web-gateway/` and `apps/web/dist/` (or a built equivalent) to the tarball `files` list **and** solve the gateway runtime dependency gap (Hono, `@hono/node-server`, `@hydra/web-contracts` — see section above). Extending `tsconfig.build.json` or adding a gateway build/bundle step is required; file inclusion alone is not enough. |
 | T006 | Must extend `.packfiles` manifest and cleanup to cover any new web artifacts added by T005. |
 | T007 | Can extend the existing `createStaticAssetResponse` 503 path in `server-runtime.ts` with richer "packaged but web-unsupported" messaging. |
 | T008 | Should add a web-readiness check in the gateway startup path (`server.ts`) that logs whether the web experience is available before the server starts listening. |
