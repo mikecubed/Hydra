@@ -7,7 +7,9 @@ import {
   createStaticAssetResponse,
   describeStaticDirSource,
   isGatewayRoute,
+  isPackagedRuntime,
   missingAssetsMessage,
+  PACKAGED_MARKER,
   resolveGatewayServerConfig,
   resolveStaticDirWithSource,
 } from '../server-runtime.ts';
@@ -106,8 +108,9 @@ describe('resolveStaticDirWithSource', () => {
     assert.equal(result.staticDir, resolve('/some/explicit/path'));
   });
 
-  it('detects packaged mode when web/ subdirectory exists under moduleDir', async () => {
+  it('detects packaged mode when marker and web/ both exist', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'hydra-packaged-'));
+    await writeFile(join(tempDir, PACKAGED_MARKER), '');
     await mkdir(join(tempDir, 'web'));
 
     const result = resolveStaticDirWithSource(undefined, tempDir);
@@ -115,7 +118,16 @@ describe('resolveStaticDirWithSource', () => {
     assert.equal(result.staticDir, join(tempDir, 'web'));
   });
 
-  it('falls back to source-checkout when no packaged dir exists', async () => {
+  it('reports packaged mode when marker exists but web/ is missing', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-packaged-noassets-'));
+    await writeFile(join(tempDir, PACKAGED_MARKER), '');
+
+    const result = resolveStaticDirWithSource(undefined, tempDir);
+    assert.equal(result.staticDirSource, 'packaged');
+    assert.equal(result.staticDir, join(tempDir, 'web'));
+  });
+
+  it('falls back to source-checkout when no marker exists', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'hydra-source-'));
 
     const result = resolveStaticDirWithSource(undefined, tempDir);
@@ -123,9 +135,40 @@ describe('resolveStaticDirWithSource', () => {
     assert.match(result.staticDir, /web[/\\]dist$/);
   });
 
+  it('falls back to source-checkout even when web/ exists without marker', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-web-nomarker-'));
+    await mkdir(join(tempDir, 'web'));
+
+    const result = resolveStaticDirWithSource(undefined, tempDir);
+    assert.equal(result.staticDirSource, 'source-checkout');
+  });
+
   it('ignores empty env override string', () => {
     const result = resolveStaticDirWithSource('');
     assert.notEqual(result.staticDirSource, 'env-override');
+  });
+});
+
+describe('isPackagedRuntime', () => {
+  let tempDir: string | null = null;
+
+  afterEach(async () => {
+    const cleanupDir = tempDir;
+    tempDir = null;
+    if (cleanupDir != null) {
+      await rm(cleanupDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns true when marker file exists', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-marker-'));
+    await writeFile(join(tempDir, PACKAGED_MARKER), '');
+    assert.equal(isPackagedRuntime(tempDir), true);
+  });
+
+  it('returns false when marker file is absent', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-nomarker-'));
+    assert.equal(isPackagedRuntime(tempDir), false);
   });
 });
 
@@ -143,10 +186,11 @@ describe('missingAssetsMessage', () => {
     assert.match(msg, /npm --workspace @hydra\/web run build/);
   });
 
-  it('references packaged asset path for packaged mode', () => {
+  it('references packaged artifact and rebuild guidance for packaged mode', () => {
     const msg = missingAssetsMessage('packaged');
     assert.match(msg, /dist\/web-runtime\/web/);
-    assert.match(msg, /build-pack/);
+    assert.match(msg, /rebuilt from a source checkout/);
+    assert.doesNotMatch(msg, /build-pack/);
   });
 
   it('references env var for env-override mode', () => {
@@ -249,7 +293,7 @@ describe('createStaticAssetResponse', () => {
     assert.equal(response.status, 503);
     const text = await response.text();
     assert.match(text, /dist\/web-runtime\/web/);
-    assert.match(text, /build-pack/);
+    assert.match(text, /rebuilt from a source checkout/);
   });
 
   it('tailors 503 message for env-override mode', async () => {

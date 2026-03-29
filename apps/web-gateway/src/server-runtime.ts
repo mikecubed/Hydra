@@ -10,6 +10,24 @@ const DEFAULT_STATIC_DIR = resolve(MODULE_DIR, '../../web/dist');
 const PACKAGED_STATIC_DIR = resolve(MODULE_DIR, 'web');
 const DEFAULT_STATE_DIR = resolve(homedir(), '.hydra/web-gateway');
 
+/**
+ * Sentinel filename written by the packaging step into `dist/web-runtime/`.
+ * Its presence signals that this process is running from a packaged artifact
+ * rather than a source checkout, regardless of whether the sibling `web/`
+ * directory actually exists (assets may have been stripped or lost).
+ */
+export const PACKAGED_MARKER = '.packaged';
+
+/**
+ * Returns `true` when the gateway appears to be running from a packaged
+ * build artifact (e.g. `dist/web-runtime/server.js`) rather than a source
+ * checkout.  Detection is based on a `.packaged` marker file that the
+ * packaging step writes into the output directory.
+ */
+export function isPackagedRuntime(moduleDir: string = MODULE_DIR): boolean {
+  return existsSync(resolve(moduleDir, PACKAGED_MARKER));
+}
+
 const GATEWAY_ROUTE_PREFIXES = [
   '/auth',
   '/session',
@@ -150,9 +168,11 @@ export function resolveStaticDirWithSource(
     return { staticDir: resolve(envOverride), staticDirSource: 'env-override' };
   }
 
-  const packagedDir = resolve(moduleDir, 'web');
-  if (existsSync(packagedDir)) {
-    return { staticDir: packagedDir, staticDirSource: 'packaged' };
+  // Detect packaged runtime via marker file, independent of whether the
+  // sibling web/ directory exists.  This ensures that a packaged build with
+  // missing assets still reports 'packaged' mode (for correct logs/messages).
+  if (isPackagedRuntime(moduleDir)) {
+    return { staticDir: resolve(moduleDir, 'web'), staticDirSource: 'packaged' };
   }
 
   return {
@@ -176,8 +196,9 @@ export function missingAssetsMessage(source: StaticDirSource | undefined): strin
   switch (source) {
     case 'packaged':
       return (
-        'Packaged web assets not found in dist/web-runtime/web/. ' +
-        'Re-run `npm run build-pack` to include web assets in the packaged output.'
+        'Packaged web assets not found (expected in dist/web-runtime/web/). ' +
+        'This packaged artifact is missing bundled frontend files and must be ' +
+        'rebuilt from a source checkout.'
       );
     case 'env-override':
       return (
