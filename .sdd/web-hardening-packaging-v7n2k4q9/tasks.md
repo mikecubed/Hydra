@@ -15,8 +15,8 @@
 - [x] T006 [P] [US1] Align post-pack cleanup for packaged web artifacts in scripts/clean-pack.ts
 - [x] T007 [US1] Harden packaged static asset resolution and unsupported-state messaging in apps/web-gateway/src/server-runtime.ts
 - [x] T008 [US1] Wire packaged launch behavior and startup logging in apps/web-gateway/src/server.ts
-- [ ] T009 [P] [US1] Update supported local and remote launch guidance in apps/web/README.md and apps/web-gateway/README.md
-- [ ] T010 [US1] Update top-level packaged launch guidance in README.md
+- [x] T009 [P] [US1] Update supported local and remote launch guidance in apps/web/README.md and apps/web-gateway/README.md
+- [x] T010 [US1] Update top-level packaged launch guidance in README.md
 
 ## Phase 2 — User Story 2: Safe Recovery During Failures (Priority: P1)
 

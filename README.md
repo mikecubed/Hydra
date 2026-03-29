@@ -308,7 +308,7 @@ Hydra is distributed in three forms. Each form supports a different subset of ca
 | Distribution form   | CLI / REPL orchestration | Web interface   | How to obtain                          |
 | ------------------- | ------------------------ | --------------- | -------------------------------------- |
 | **Source checkout** | ✅ Supported             | ✅ Supported    | `git clone` + `npm install`            |
-| **npm package**     | ✅ Supported             | ❌ Not included | `npm pack` → tarball, or `npm install` |
+| **npm package**     | ✅ Supported             | ✅ Included     | `npm pack` → tarball, or `npm install` |
 | **Standalone exe**  | ✅ Supported             | ❌ Not included | `npm run build:exe` → single binary    |
 
 **Source checkout** is the full-featured distribution. It includes the complete monorepo with all
@@ -316,16 +316,39 @@ workspace packages (`apps/web`, `apps/web-gateway`, `packages/web-contracts`). T
 requires building the browser bundle and starting the same-origin gateway alongside the daemon — see
 [apps/web-gateway/README.md](apps/web-gateway/README.md) for startup commands.
 
-**npm package** ships only `lib/` and `bin/` (compiled to JavaScript by `scripts/build-pack.ts`).
-The web workspace packages (`apps/`, `packages/`) are excluded from the tarball. CLI orchestration,
-daemon, concierge, council, tasks, evolve, and all operator console commands work as expected.
+**npm package** ships `lib/`, `bin/`, and `dist/web-runtime/` (compiled to JavaScript by
+`scripts/build-pack.ts` during `prepack`). The `dist/web-runtime/` directory contains `server.js`
+(a bundled gateway entry point), `web/` (pre-built browser assets), and a `.packaged` sentinel
+marker. Root production dependencies include `@hono/node-server`, `hono`, and `ws` so the packaged
+gateway is runnable without workspace-level installs. CLI orchestration, daemon, concierge, council,
+tasks, evolve, and all operator console commands work as expected. To launch the web interface from
+an installed package:
+
+```bash
+# Terminal 1: start the daemon
+npm start
+
+# Terminal 2: start the packaged web gateway
+HYDRA_WEB_OPERATOR_ID=admin \
+HYDRA_WEB_OPERATOR_SECRET=password123 \
+node dist/web-runtime/server.js
+```
+
+Then open `http://127.0.0.1:4174/login` in your browser. For remote host access, add
+`HYDRA_WEB_GATEWAY_HOST=0.0.0.0` and set `HYDRA_WEB_GATEWAY_ORIGIN` to the exact public URL
+browsers will use. See [apps/web-gateway/README.md](apps/web-gateway/README.md) for full
+remote host guidance.
+
+> If `dist/web-runtime/` is missing from the installed package, the artifact is incomplete.
+> Rebuild from a source checkout with `npm pack` (which runs `prepack` and produces a complete
+> tarball). There is no recovery command inside the installed package itself.
 
 **Standalone executable** bundles `bin/hydra-cli.ts` into a single binary via esbuild and
 `@yao-pkg/pkg` (default target: `node20-win-x64`). The binary provides CLI orchestration only. Web
-workspaces and browser assets are not included.
+runtime assets are not included, and `hydra --full` is not supported for standalone exe builds.
 
 If the gateway starts but the built browser bundle is not present (e.g. because the distribution
-does not include `apps/web/dist`), the runtime returns an explicit **503** response:
+does not include the expected assets directory), the runtime returns an explicit **503** response:
 _"Missing built frontend assets."_
 
 ## Documentation

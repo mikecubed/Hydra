@@ -67,10 +67,9 @@ these all share one origin:
 Standalone `npm run dev` in `apps/web` is still useful for frontend iteration, but API and WebSocket
 behavior will fail unless you provide your own proxy to the gateway.
 
-### Full local stack commands
+### Full local stack commands (source checkout)
 
-To run the browser, gateway, and daemon together in a way that supports a real same-origin browser
-session:
+To run the browser, gateway, and daemon together from a **source checkout**:
 
 1. Start the Hydra daemon from the repo root:
 
@@ -103,12 +102,52 @@ Notes:
 - The seeded `HYDRA_WEB_OPERATOR_ID` / `HYDRA_WEB_OPERATOR_SECRET` values seed a local operator
   record in `~/.hydra/web-gateway/operators.json` at startup. Use those values as your identity
   and secret on the `/login` screen to create a session.
+- If the web bundle is already built you can skip the build step and run
+  `npm --workspace @hydra/web-gateway run start` instead of `start:with-web`.
 - **`Gateway 401: No valid session found`** always means no `__session` cookie. Navigate to
   `/login` to create a session.
 
+### Packaged web runtime (npm package)
+
+Published npm packages include a pre-built web runtime in `dist/web-runtime/`. This directory
+contains `server.js` (bundled gateway entry), `web/` (built browser assets), and a `.packaged`
+sentinel marker. The runtime is built during `prepack` from the source checkout.
+
+To launch the packaged web runtime from an installed package:
+
+1. Start the Hydra daemon:
+
+   ```bash
+   npm start
+   ```
+
+2. In a second terminal, start the packaged gateway:
+
+   ```bash
+   HYDRA_WEB_OPERATOR_ID=admin \
+   HYDRA_WEB_OPERATOR_SECRET=password123 \
+   node dist/web-runtime/server.js
+   ```
+
+3. Open `http://127.0.0.1:4174/login` in your browser, enter your credentials, and the workspace
+   will open automatically.
+
+The bundled gateway entry automatically resolves its static asset directory to
+`dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override is needed.
+
+> **If `dist/web-runtime/` is missing** from the installed package, the package artifact is
+> incomplete. Rebuild from a source checkout with `npm pack` (which runs `prepack` and produces a
+> complete tarball). There is no recovery command available inside the installed package itself.
+
+> **Standalone executable:** The standalone exe build (`npm run build:exe`) does not include web
+> runtime assets. `hydra --full` is not supported for standalone exe builds.
+
 ### Remote host setup
 
-To serve the app from a remote server (e.g., `truenas-2.example.com`):
+To serve the app from a remote server (e.g., `truenas-2.example.com`), add the remote host
+environment variables to whichever launch method you are using (source checkout or packaged):
+
+**Source checkout:**
 
 ```bash
 HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
@@ -119,7 +158,18 @@ HYDRA_WEB_OPERATOR_SECRET=password123 \
 npm --workspace @hydra/web-gateway run start:with-web
 ```
 
-Key differences from the local command:
+**Packaged npm install:**
+
+```bash
+HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
+HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
+HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
+HYDRA_WEB_OPERATOR_ID=admin \
+HYDRA_WEB_OPERATOR_SECRET=password123 \
+node dist/web-runtime/server.js
+```
+
+Key differences from a local command:
 
 - `HYDRA_WEB_GATEWAY_HOST=0.0.0.0` — bind to all network interfaces (default `127.0.0.1` is
   loopback-only and is not reachable from other machines).

@@ -11,7 +11,7 @@ for workspace boundary rules, ownership, and governance.
 
 ## Startup Commands
 
-### Local (same machine)
+### Local — source checkout
 
 Run these from the repo root when you want the browser and gateway up together against the local
 daemon:
@@ -45,6 +45,41 @@ If the web bundle is already built, you can skip the build step and run:
 npm --workspace @hydra/web-gateway run start
 ```
 
+### Local — packaged npm install
+
+Published npm packages include a pre-built web runtime in `dist/web-runtime/`. This directory
+contains `server.js` (bundled gateway entry), `web/` (built browser assets), and a `.packaged`
+sentinel marker. The browser assets are built from `apps/web` during `prepack`.
+
+1. Start the daemon:
+
+   ```bash
+   npm start
+   ```
+
+2. In a second terminal, start the packaged gateway:
+
+   ```bash
+   HYDRA_WEB_OPERATOR_ID=admin \
+   HYDRA_WEB_OPERATOR_SECRET=password123 \
+   node dist/web-runtime/server.js
+   ```
+
+3. Open `http://127.0.0.1:4174/login` in your browser, enter your credentials, and the workspace
+   will open automatically.
+
+The bundled gateway entry automatically resolves its static asset directory to
+`dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override is needed. Root production
+dependencies (`@hono/node-server`, `hono`, `ws`) are included in the published package so the
+gateway entry is runnable without workspace-level installs.
+
+> **If `dist/web-runtime/` is missing** from the installed package, the package artifact is
+> incomplete. Rebuild from a source checkout with `npm pack` (which runs `prepack` and produces a
+> complete tarball). There is no recovery command available inside the installed package itself.
+
+> **Standalone executable:** The standalone exe build (`npm run build:exe`) does not include web
+> runtime assets. `hydra --full` is not supported for standalone exe builds.
+
 ### Remote host
 
 When running on a server (e.g., `truenas-2.example.com`) that other browsers will reach over the
@@ -59,7 +94,7 @@ network:
 
 3. Set `HYDRA_DAEMON_URL` if the Hydra daemon is not on `http://127.0.0.1:4173`.
 
-Example:
+**Source checkout:**
 
 ```bash
 HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
@@ -68,6 +103,17 @@ HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
 HYDRA_WEB_OPERATOR_ID=admin \
 HYDRA_WEB_OPERATOR_SECRET=password123 \
 npm --workspace @hydra/web-gateway run start:with-web
+```
+
+**Packaged npm install:**
+
+```bash
+HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
+HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
+HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
+HYDRA_WEB_OPERATOR_ID=admin \
+HYDRA_WEB_OPERATOR_SECRET=password123 \
+node dist/web-runtime/server.js
 ```
 
 After the gateway starts, log in from any browser on the network:
