@@ -59,6 +59,38 @@ To keep the work easier to reason about, the design has been split into smaller 
 | 7   | **`web-controlled-mutations`**       | ✅ Delivered (PR #221)                   |
 | 8   | `web-hardening-and-packaging`        | ⬜ Pending                               |
 
+## Supported Packaging Targets
+
+The web interface is available only from a **source checkout**. The npm package and standalone
+executable do not include the web workspace packages.
+
+| Distribution form         | Web interface status | Reason                                                          |
+| ------------------------- | -------------------- | --------------------------------------------------------------- |
+| **Source checkout**       | ✅ Supported         | Full monorepo; build browser bundle, start gateway + daemon     |
+| **npm package** (tarball) | ❌ Not included      | `apps/` and `packages/` are excluded from the published tarball |
+| **Standalone executable** | ❌ Not included      | Single binary bundles `bin/hydra-cli.ts` only; no web assets    |
+
+### What this means for operators
+
+- **Source checkout users** follow the startup commands in
+  [apps/web-gateway/README.md](../apps/web-gateway/README.md) to build the browser bundle, start
+  the daemon, and launch the same-origin gateway.
+- **npm package and standalone exe users** get full CLI/REPL orchestration (daemon, concierge,
+  council, tasks, evolve, operator console) but cannot start the web interface. If the gateway is
+  somehow started without the browser bundle, it returns an explicit **503** response with a message
+  directing the operator to build the assets from a source checkout.
+
+### Why the web interface is source-checkout only
+
+The web interface is built around a same-origin gateway that serves the React browser bundle
+(`apps/web/dist`) and owns HTTP/WebSocket routing, authentication, CSRF protection, and session
+management. This architecture relies on the full monorepo workspace structure (`apps/web`,
+`apps/web-gateway`, `packages/web-contracts`) which is intentionally excluded from the npm tarball
+and standalone binary to keep those artifacts focused on CLI orchestration.
+
+Packaging the web runtime into the tarball or executable is a potential future enhancement tracked
+in the [Phase 5 roadmap tasks](../.sdd/web-hardening-packaging-v7n2k4q9/tasks.md) (T004–T010).
+
 ## Next Step
 
 **`web-hardening-and-packaging`** — packaging integration, accessibility and performance hardening,

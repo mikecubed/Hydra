@@ -5,7 +5,7 @@
 ## Phase 0 — Baseline and Scope Matrix
 
 - [ ] T001 Create the Phase 5 readiness matrix in .sdd/web-hardening-packaging-v7n2k4q9/tasks.md
-- [ ] T002 Define the supported packaging target matrix in README.md and docs/WEB_INTERFACE.md
+- [x] T002 Define the supported packaging target matrix in README.md and docs/WEB_INTERFACE.md
 - [ ] T003 Define explicit responsiveness and hardening budgets in docs/web-interface/05-security-and-quality.md
 
 ## Phase 1 — User Story 1: Packaged Web Operator Experience (Priority: P1)
@@ -24,14 +24,14 @@
 - [ ] T012 [US2] Tighten session and daemon recovery messaging in apps/web/src/features/auth/ and apps/web/src/features/chat-workspace/components/
 - [ ] T013 [US2] Harden rejected-mutation and degraded-state handling in apps/web/src/features/mutations/ and apps/web/src/features/operations-panels/
 - [ ] T014 [US2] Tighten gateway error classification and runtime failure translation in apps/web-gateway/src/shared/gateway-error-response.ts and apps/web-gateway/src/transport/
-- [ ] T015 [P] [US2] Add gateway failure-drill coverage in apps/web-gateway/src/**/__tests__/*.test.ts
-- [ ] T016 [P] [US2] Add browser recovery-flow coverage in apps/web/src/features/**/*.browser.spec.tsx
+- [ ] T015 [P] [US2] Add gateway failure-drill coverage in apps/web-gateway/src/\*_/**tests**/_.test.ts
+- [ ] T016 [P] [US2] Add browser recovery-flow coverage in apps/web/src/features/\*_/_.browser.spec.tsx
 
 ## Phase 3 — User Story 3: Accessible Core Workflows (Priority: P2)
 
 - [ ] T017 [US3] Audit focus order, labels, and error semantics in apps/web/src/features/auth/, apps/web/src/features/chat-workspace/, apps/web/src/features/operations-panels/, and apps/web/src/features/mutations/
-- [ ] T018 [US3] Implement keyboard and focus-management fixes across affected apps/web/src/features/**/*.tsx surfaces
-- [ ] T019 [P] [US3] Add accessibility-focused browser specs for login, workspace, operations panels, and mutation dialogs in apps/web/src/features/**/*.browser.spec.tsx
+- [ ] T018 [US3] Implement keyboard and focus-management fixes across affected apps/web/src/features/\*_/_.tsx surfaces
+- [ ] T019 [P] [US3] Add accessibility-focused browser specs for login, workspace, operations panels, and mutation dialogs in apps/web/src/features/\*_/_.browser.spec.tsx
 - [ ] T020 [US3] Document accessibility expectations and supported viewport range in docs/web-interface/05-security-and-quality.md and apps/web/README.md
 
 ## Phase 4 — User Story 4: Responsive and Efficient Operations View (Priority: P2)
@@ -39,7 +39,7 @@
 - [ ] T021 [US4] Define responsiveness budgets and evidence collection points in docs/web-interface/05-security-and-quality.md and .github/workflows/quality.yml
 - [ ] T022 [US4] Audit render, refresh, and reconnect hotspots in apps/web/src/features/chat-workspace/model/ and apps/web/src/features/operations-panels/model/
 - [ ] T023 [US4] Implement targeted responsiveness fixes in apps/web/src/features/chat-workspace/, apps/web/src/features/operations-panels/, and apps/web/src/features/mutations/
-- [ ] T024 [P] [US4] Add regression coverage for narrow viewport and refresh-cycle responsiveness in apps/web/src/features/**/*.browser.spec.tsx
+- [ ] T024 [P] [US4] Add regression coverage for narrow viewport and refresh-cycle responsiveness in apps/web/src/features/\*_/_.browser.spec.tsx
 - [ ] T025 [P] [US4] Add packaging/build evidence checks in package.json and .github/workflows/ci.yml
 
 ## Phase 5 — User Story 5: Contributor Release Readiness (Priority: P3)
@@ -52,13 +52,13 @@
 
 ## Phase 5 Readiness Matrix
 
-| Area | Scope | Supported / Target | Primary evidence | Gaps to close | Tasks |
-| --- | --- | --- | --- | --- | --- |
-| Packaging | Supported launch paths for local + explicit remote operator use | Same-origin gateway serving `apps/web/dist` from source checkout today; packaged tarball should document a supported web-capable path; standalone executable must fail explicitly when bundled web assets/runtime are unavailable | `scripts/build-pack.ts`, `scripts/build-exe.ts`, `apps/web-gateway/src/server.ts`, `apps/web-gateway/src/server-runtime.ts`, README guidance | Package the web runtime intentionally, document the target matrix, and surface explicit unsupported-state guidance | T002, T004-T010 |
-| Hardening | Security posture + failure drills | Same-origin auth/session/CSRF/origin protections remain mandatory; key drills are session expiry, daemon unavailable, rejected mutation, reconnect disruption, and packaged runtime misconfiguration | `docs/web-interface/05-security-and-quality.md`, gateway/browser failure handling, browser + gateway tests | Define drill matrix, tighten failure classification/recovery messaging, and add drill coverage | T003, T011-T016 |
-| Accessibility | Keyboard, focus, labels, error semantics | Login, workspace shell, operations panels, and mutation dialogs must remain keyboard-operable and assistive-technology-friendly across supported states | Browser specs, workspace feature surfaces, quality docs | Audit focus/semantics, land keyboard/focus fixes, and add browser accessibility coverage + docs | T017-T020 |
-| Responsiveness | Interactive budgets for primary web surfaces | Primary login/workspace/operations flows should stay usable under narrow viewports, refresh cycles, reconnects, and live updates with documented budgets and repeatable evidence | `docs/web-interface/05-security-and-quality.md`, browser specs, CI evidence hooks | Define budgets/evidence points, fix hotspots, and add regression/build evidence checks | T021-T025 |
-| Contributor readiness | Contributor docs, CI, and release checklist | Contributors should be able to run, verify, package, and troubleshoot the web interface from published docs without source-diving | `README.md`, `CONTRIBUTING.md`, `docs/WEB_INTERFACE.md`, `docs/web-interface/06-phases-and-sdd.md`, CI workflows | Align docs, tighten release-readiness workflow checks, and publish the final verification command set | T026-T030 |
+| Area                  | Scope                                                           | Supported / Target                                                                                                                                                                                                                | Primary evidence                                                                                                                             | Gaps to close                                                                                                      | Tasks           |
+| --------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------- |
+| Packaging             | Supported launch paths for local + explicit remote operator use | Same-origin gateway serving `apps/web/dist` from source checkout today; packaged tarball should document a supported web-capable path; standalone executable must fail explicitly when bundled web assets/runtime are unavailable | `scripts/build-pack.ts`, `scripts/build-exe.ts`, `apps/web-gateway/src/server.ts`, `apps/web-gateway/src/server-runtime.ts`, README guidance | Package the web runtime intentionally, document the target matrix, and surface explicit unsupported-state guidance | T002, T004-T010 |
+| Hardening             | Security posture + failure drills                               | Same-origin auth/session/CSRF/origin protections remain mandatory; key drills are session expiry, daemon unavailable, rejected mutation, reconnect disruption, and packaged runtime misconfiguration                              | `docs/web-interface/05-security-and-quality.md`, gateway/browser failure handling, browser + gateway tests                                   | Define drill matrix, tighten failure classification/recovery messaging, and add drill coverage                     | T003, T011-T016 |
+| Accessibility         | Keyboard, focus, labels, error semantics                        | Login, workspace shell, operations panels, and mutation dialogs must remain keyboard-operable and assistive-technology-friendly across supported states                                                                           | Browser specs, workspace feature surfaces, quality docs                                                                                      | Audit focus/semantics, land keyboard/focus fixes, and add browser accessibility coverage + docs                    | T017-T020       |
+| Responsiveness        | Interactive budgets for primary web surfaces                    | Primary login/workspace/operations flows should stay usable under narrow viewports, refresh cycles, reconnects, and live updates with documented budgets and repeatable evidence                                                  | `docs/web-interface/05-security-and-quality.md`, browser specs, CI evidence hooks                                                            | Define budgets/evidence points, fix hotspots, and add regression/build evidence checks                             | T021-T025       |
+| Contributor readiness | Contributor docs, CI, and release checklist                     | Contributors should be able to run, verify, package, and troubleshoot the web interface from published docs without source-diving                                                                                                 | `README.md`, `CONTRIBUTING.md`, `docs/WEB_INTERFACE.md`, `docs/web-interface/06-phases-and-sdd.md`, CI workflows                             | Align docs, tighten release-readiness workflow checks, and publish the final verification command set              | T026-T030       |
 
 ## Dependency Graph
 

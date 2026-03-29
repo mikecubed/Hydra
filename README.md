@@ -20,6 +20,7 @@
 - [Essential Commands](#essential-commands)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
+- [Packaging and Distribution](#packaging-and-distribution)
 - [Documentation](#documentation)
 - [Security](#daemon-security)
 - [License](#license)
@@ -299,6 +300,33 @@ flowchart LR
     Queue --> WorkerExec["Worker(s) claim and execute"]
     WorkerExec --> Result["Result + checkpoint"]
 ```
+
+## Packaging and Distribution
+
+Hydra is distributed in three forms. Each form supports a different subset of capabilities:
+
+| Distribution form   | CLI / REPL orchestration | Web interface   | How to obtain                          |
+| ------------------- | ------------------------ | --------------- | -------------------------------------- |
+| **Source checkout** | ✅ Supported             | ✅ Supported    | `git clone` + `npm install`            |
+| **npm package**     | ✅ Supported             | ❌ Not included | `npm pack` → tarball, or `npm install` |
+| **Standalone exe**  | ✅ Supported             | ❌ Not included | `npm run build:exe` → single binary    |
+
+**Source checkout** is the full-featured distribution. It includes the complete monorepo with all
+workspace packages (`apps/web`, `apps/web-gateway`, `packages/web-contracts`). The web interface
+requires building the browser bundle and starting the same-origin gateway alongside the daemon — see
+[apps/web-gateway/README.md](apps/web-gateway/README.md) for startup commands.
+
+**npm package** ships only `lib/` and `bin/` (compiled to JavaScript by `scripts/build-pack.ts`).
+The web workspace packages (`apps/`, `packages/`) are excluded from the tarball. CLI orchestration,
+daemon, concierge, council, tasks, evolve, and all operator console commands work as expected.
+
+**Standalone executable** bundles `bin/hydra-cli.ts` into a single binary via esbuild and
+`@yao-pkg/pkg` (default target: `node20-win-x64`). The binary provides CLI orchestration only. Web
+workspaces and browser assets are not included.
+
+If the gateway starts but the built browser bundle is not present (e.g. because the distribution
+does not include `apps/web/dist`), the runtime returns an explicit **503** response:
+_"Missing built frontend assets."_
 
 ## Documentation
 
