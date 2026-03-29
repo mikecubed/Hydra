@@ -11,8 +11,8 @@
 ## Phase 1 — User Story 1: Packaged Web Operator Experience (Priority: P1)
 
 - [x] T004 [US1] Audit the current packaged web launch path in scripts/build-pack.ts and scripts/build-exe.ts
-- [ ] T005 [US1] Implement packaged web asset/runtime inclusion in package.json and scripts/build-pack.ts
-- [ ] T006 [P] [US1] Align post-pack cleanup for packaged web artifacts in scripts/clean-pack.ts
+- [x] T005 [US1] Implement packaged web asset/runtime inclusion in package.json and scripts/build-pack.ts
+- [x] T006 [P] [US1] Align post-pack cleanup for packaged web artifacts in scripts/clean-pack.ts
 - [x] T007 [US1] Harden packaged static asset resolution and unsupported-state messaging in apps/web-gateway/src/server-runtime.ts
 - [x] T008 [US1] Wire packaged launch behavior and startup logging in apps/web-gateway/src/server.ts
 - [ ] T009 [P] [US1] Update supported local and remote launch guidance in apps/web/README.md and apps/web-gateway/README.md

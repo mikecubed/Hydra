@@ -127,6 +127,16 @@ describe('resolveStaticDirWithSource', () => {
     assert.equal(result.staticDir, join(tempDir, 'web'));
   });
 
+  it('keeps explicit env override precedence even when marker exists', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'hydra-packaged-env-override-'));
+    await writeFile(join(tempDir, PACKAGED_MARKER), '');
+    await mkdir(join(tempDir, 'web'));
+
+    const result = resolveStaticDirWithSource('/custom/override/path', tempDir);
+    assert.equal(result.staticDirSource, 'env-override');
+    assert.equal(result.staticDir, resolve('/custom/override/path'));
+  });
+
   it('falls back to source-checkout when no marker exists', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'hydra-source-'));
 
