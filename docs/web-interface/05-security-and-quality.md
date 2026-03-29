@@ -169,24 +169,33 @@ state and rendering limits above are design targets verified by review.
 
 ## Test and CI Expectations
 
-Required test layers:
+Current required test layers in this repo:
 
 - contract tests for shared schemas;
 - gateway unit and integration tests;
-- frontend unit/component tests;
-- end-to-end browser tests;
-- security-focused tests;
-- accessibility checks.
+- frontend unit/component/browser-spec tests;
+- security-focused tests implemented within those suites;
+- release-readiness doc reviews for accessibility and failure-mode coverage until dedicated tooling lands.
 
-Required CI gates:
+Target test layers for later hardening work:
+
+- accessibility-focused browser checks beyond the current browser-spec coverage;
+- real end-to-end browser tests once dedicated tooling is introduced.
+
+Current CI gates in this repo:
 
 - formatting;
 - strict linting;
 - full type-checking;
-- unit/integration/component/e2e tests;
+- unit/integration/component/browser-spec test execution through the existing repo commands;
 - cycle or boundary verification;
-- dependency and secret scanning;
+- dependency audit;
 - no backsliding on coverage expectations.
+
+Target CI additions for later hardening work:
+
+- secret scanning;
+- explicit accessibility/e2e evidence hooks tied to the Phase 5 target budgets.
 
 Target CI gates (to be added by evidence-hook tasks T021–T025):
 
