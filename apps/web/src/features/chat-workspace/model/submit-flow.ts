@@ -106,11 +106,22 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<Submit
   try {
     const response = await client.submitInstruction(conversationId, { instruction });
 
-    // Single batched dispatch: append turn + clear draft + set idle + reset loadState
     store.dispatch({
-      type: 'submit/continue-success',
+      type: 'conversation/append-submit-turn',
       conversationId,
       entry: turnToTranscriptEntry(response.turn),
+    });
+    store.dispatch({ type: 'draft/set-text', conversationId, draftText: '' });
+    store.dispatch({
+      type: 'draft/set-submit-state',
+      conversationId,
+      submitState: 'idle',
+      validationMessage: null,
+    });
+    store.dispatch({
+      type: 'conversation/set-load-state',
+      conversationId,
+      loadState: 'idle',
     });
     return { ok: true };
   } catch (err: unknown) {
@@ -143,9 +154,8 @@ export async function createAndSubmitDraft(
 
   const created = await client.createConversation({});
 
-  // Single batched dispatch: upsert + select + set draft text
   store.dispatch({
-    type: 'submit/create-init',
+    type: 'conversation/upsert',
     conversation: {
       id: created.id,
       title: created.title,
@@ -155,8 +165,9 @@ export async function createAndSubmitDraft(
       turnCount: created.turnCount,
       pendingInstructionCount: created.pendingInstructionCount,
     },
-    draftText: instruction,
   });
+  store.dispatch({ type: 'conversation/select', conversationId: created.id });
+  store.dispatch({ type: 'draft/set-text', conversationId: created.id, draftText: instruction });
 
   return submitComposerDraft(deps);
 }

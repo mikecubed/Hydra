@@ -818,80 +818,6 @@ function applyPromptAction(state: WorkspaceState, action: PromptAction): Workspa
   }
 }
 
-// ─── Compound action reducers (batch multiple state transitions) ────────────
-
-/**
- * Atomic post-success transition for `submitComposerDraft`: appends the
- * operator turn, clears draft text, resets submit state to idle, and sets
- * conversation loadState to idle — all in one state transition.
- */
-function applyContinueSuccess(
-  state: WorkspaceState,
-  conversationId: string,
-  entry: TranscriptEntryState,
-): WorkspaceState {
-  // 1. Append turn (deduplicate by turnId)
-  const convView = ensureConversation(state.conversations, conversationId);
-  const alreadyPresent =
-    entry.turnId != null && convView.entries.some((e) => e.turnId === entry.turnId);
-  const nextEntries = alreadyPresent ? convView.entries : [...convView.entries, entry];
-
-  const nextConversations = new Map(state.conversations);
-  nextConversations.set(conversationId, {
-    ...convView,
-    entries: nextEntries,
-    loadState: 'idle',
-  });
-
-  // 2. Clear draft text + reset submit state
-  const currentDraft = state.drafts.get(conversationId) ?? createDraftState(conversationId);
-  const nextDrafts = new Map(state.drafts);
-  nextDrafts.set(conversationId, {
-    ...currentDraft,
-    draftText: '',
-    submitState: 'idle',
-    validationMessage: null,
-  });
-
-  return {
-    ...state,
-    conversationOrder: withConversationInOrder(state.conversationOrder, conversationId),
-    conversations: nextConversations,
-    drafts: nextDrafts,
-  };
-}
-
-/**
- * Atomic create-init transition for `createAndSubmitDraft`: upserts the new
- * conversation, selects it, and seeds the draft with the instruction text —
- * all in one state transition.
- */
-function applyCreateInit(
-  state: WorkspaceState,
-  conversation: WorkspaceConversationRecord,
-  draftText: string,
-): WorkspaceState {
-  // 1. Upsert conversation
-  const previous = state.conversations.get(conversation.id);
-  const nextConversations = new Map(state.conversations);
-  nextConversations.set(conversation.id, mergeConversationView(previous, conversation));
-
-  // 2. Select + seed draft
-  const nextDrafts = new Map(state.drafts);
-  const currentDraft = state.drafts.get(conversation.id) ?? createDraftState(conversation.id);
-  nextDrafts.set(conversation.id, { ...currentDraft, draftText });
-
-  return {
-    ...state,
-    activeConversationId: conversation.id,
-    explicitCreateMode: false,
-    conversationOrder: withConversationInOrder(state.conversationOrder, conversation.id),
-    conversations: nextConversations,
-    drafts: nextDrafts,
-    visibleArtifact: null,
-  };
-}
-
 // ─── Top-level reducer ──────────────────────────────────────────────────────
 
 // eslint-disable-next-line complexity
@@ -949,9 +875,5 @@ export function reduceWorkspaceState(
       );
     case 'entry/hydrate-artifacts':
       return applyHydrateArtifacts(state, action.conversationId, action.turnId, action.artifacts);
-    case 'submit/continue-success':
-      return applyContinueSuccess(state, action.conversationId, action.entry);
-    case 'submit/create-init':
-      return applyCreateInit(state, action.conversation, action.draftText);
   }
 }

@@ -274,16 +274,7 @@ export type WorkspaceAction =
       readonly turnId: string;
       readonly artifacts: readonly ArtifactReferenceState[];
     }
-  | {
-      readonly type: 'submit/continue-success';
-      readonly conversationId: string;
-      readonly entry: TranscriptEntryState;
-    }
-  | {
-      readonly type: 'submit/create-init';
-      readonly conversation: WorkspaceConversationRecord;
-      readonly draftText: string;
-    };
+  ;
 
 export type WorkspaceListener = (state: WorkspaceState, action: WorkspaceAction) => void;
 

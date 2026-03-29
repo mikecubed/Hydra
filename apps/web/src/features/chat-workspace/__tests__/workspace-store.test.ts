@@ -2705,17 +2705,15 @@ describe('reducer reference stability', () => {
   });
 });
 
-// ─── T023A: Submit-flow dispatch count regression tests ─────────────────────
+// ─── T023A: submit-flow action contract regression tests ────────────────────
 
-describe('submit-flow dispatch batching', () => {
-  it('submitComposerDraft success path fires at most 2 listener notifications', async () => {
+describe('submit-flow action contract', () => {
+  it('submitComposerDraft success path preserves the primitive action sequence', async () => {
     const store = storeWithActiveDraft('conv-1', 'hello agent');
-    let dispatchCount = 0;
+    const actions: string[] = [];
 
-    // Count only dispatches that happen after the submit starts.
-    // The store already had setup dispatches, so subscribe now.
-    store.subscribe(() => {
-      dispatchCount++;
+    store.subscribe((_state, action) => {
+      actions.push(action.type);
     });
 
     const client = createMockClient({
@@ -2736,23 +2734,23 @@ describe('submit-flow dispatch batching', () => {
 
     await submitComposerDraft({ store, client });
 
-    // Pre-submit 'submitting' dispatch + batched post-success = at most 2 notifications
-    assert.ok(
-      dispatchCount <= 2,
-      `expected ≤2 dispatch notifications on success path, got ${dispatchCount}`,
-    );
-
-    // Behavior is still correct
+    assert.deepStrictEqual(actions, [
+      'draft/set-submit-state',
+      'conversation/append-submit-turn',
+      'draft/set-text',
+      'draft/set-submit-state',
+      'conversation/set-load-state',
+    ]);
     assert.equal(store.getState().drafts.get('conv-1')?.draftText, '');
     assert.equal(store.getState().drafts.get('conv-1')?.submitState, 'idle');
     assert.equal(store.getState().conversations.get('conv-1')?.loadState, 'idle');
   });
 
-  it('createAndSubmitDraft success path fires at most 4 listener notifications', async () => {
+  it('createAndSubmitDraft success path preserves the primitive action sequence', async () => {
     const store = createWorkspaceStore();
-    let dispatchCount = 0;
-    store.subscribe(() => {
-      dispatchCount++;
+    const actions: string[] = [];
+    store.subscribe((_state, action) => {
+      actions.push(action.type);
     });
 
     const client = createMockClient({
@@ -2782,13 +2780,16 @@ describe('submit-flow dispatch batching', () => {
 
     await createAndSubmitDraft({ store, client }, 'start a new thread');
 
-    // create-init batch + submitting + batched post-success = at most 4
-    assert.ok(
-      dispatchCount <= 4,
-      `expected ≤4 dispatch notifications for create+submit, got ${dispatchCount}`,
-    );
-
-    // Behavior is still correct
+    assert.deepStrictEqual(actions, [
+      'conversation/upsert',
+      'conversation/select',
+      'draft/set-text',
+      'draft/set-submit-state',
+      'conversation/append-submit-turn',
+      'draft/set-text',
+      'draft/set-submit-state',
+      'conversation/set-load-state',
+    ]);
     assert.equal(store.getState().activeConversationId, 'new-conv');
     assert.equal(store.getState().drafts.get('new-conv')?.draftText, '');
     assert.equal(store.getState().drafts.get('new-conv')?.submitState, 'idle');
