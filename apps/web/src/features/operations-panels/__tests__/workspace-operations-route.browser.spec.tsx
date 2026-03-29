@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import type {
   GetOperationsSnapshotResponse,
   GetWorkItemDetailResponse,
+  GetSafeConfigResponse,
+  GetAuditResponse,
 } from '@hydra/web-contracts';
 
 import { AppProviders } from '../../../app/providers.tsx';
@@ -48,6 +50,32 @@ function installBaseOperationsStub(snapshot: GetOperationsSnapshotResponse): voi
 
     if (url === '/operations/snapshot') {
       return jsonResponse(snapshot);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+}
+
+function installWorkspaceWithMutationsStub(
+  snapshot: GetOperationsSnapshotResponse,
+  config: GetSafeConfigResponse,
+  audit: GetAuditResponse,
+): void {
+  installFetchStub((url) => {
+    if (url === '/conversations?status=active&limit=20') {
+      return jsonResponse({ conversations: [], totalCount: 0 });
+    }
+
+    if (url === '/operations/snapshot') {
+      return jsonResponse(snapshot);
+    }
+
+    if (url === '/config/safe') {
+      return jsonResponse(config);
+    }
+
+    if (url === '/audit' || url === '/audit?limit=20') {
+      return jsonResponse(audit);
     }
 
     throw new Error(`Unexpected fetch: ${url}`);
@@ -136,6 +164,63 @@ it('loads the operations snapshot and renders queue items from the gateway', asy
   expect(await screen.findByText('Investigate queue hydration')).toBeInTheDocument();
   expect(await screen.findByText('live')).toBeInTheDocument();
   expect(fetchSpy).toHaveBeenCalledWith('/operations/snapshot', expect.any(Object));
+});
+
+it('mounts config and audit mutation panels in the real workspace sidebar', async () => {
+  installWorkspaceWithMutationsStub(
+    {
+      queue: [makeHydrationItem()],
+      health: null,
+      budget: null,
+      availability: 'ready',
+      lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+      nextCursor: null,
+    },
+    {
+      config: {
+        routing: { mode: 'balanced' },
+        models: {
+          claude: {
+            default: 'claude-sonnet-4.6',
+            fast: 'claude-haiku-4.5',
+            cheap: 'claude-haiku-4.5',
+            active: 'default',
+          },
+        },
+        usage: {
+          dailyTokenBudget: { 'claude-sonnet-4.6': 1_000_000 },
+          weeklyTokenBudget: { 'claude-sonnet-4.6': 5_000_000 },
+        },
+      },
+      revision: 'rev-sidebar-1',
+    },
+    {
+      records: [
+        {
+          id: 'audit-1',
+          timestamp: '2026-07-01T00:00:00.000Z',
+          eventType: 'workflow.launched',
+          operatorId: 'operator-7',
+          sessionId: 'session-9',
+          targetField: 'workflow.tasks',
+          beforeValue: null,
+          afterValue: 'T001',
+          outcome: 'success',
+          rejectionReason: null,
+          sourceIp: '127.0.0.1',
+        },
+      ],
+      nextCursor: null,
+    },
+  );
+
+  render(<AppProviders />);
+
+  expect(await screen.findByText('Investigate queue hydration')).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Routing Mode' })).toBeInTheDocument();
+  expect(await screen.findByText('Launch Workflow')).toBeInTheDocument();
+  expect(await screen.findByRole('table')).toBeInTheDocument();
+  expect(screen.getByLabelText('Mutation audit log')).toBeInTheDocument();
 });
 
 it('does not refetch detail when clicking the already-selected work item', async () => {

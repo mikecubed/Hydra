@@ -58,6 +58,7 @@ import { checkUsage } from './hydra-usage.ts';
 import { resolveVerificationPlan } from './hydra-verification.ts';
 import { handleReadRoute } from './daemon/read-routes.ts';
 import { handleWriteRoute } from './daemon/write-routes.ts';
+import { handleMutationRoute } from './daemon/mutation-routes.ts';
 import { handleConversationRoute } from './daemon/conversation-routes.ts';
 import { ConversationStore } from './daemon/conversation-store.ts';
 import { StreamManager } from './daemon/stream-manager.ts';
@@ -619,6 +620,8 @@ async function handleHttpRequest(
     ) {
       return;
     }
+
+    if (await handleMutationRoute(req, res, requestUrl)) return;
 
     sendError(res, 404, `Route not found: ${method} ${route}`);
   } catch (err) {

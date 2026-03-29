@@ -48,6 +48,9 @@ const CATEGORY_STATUS_MAP: Record<ErrorCategory, number> = {
   validation: 400,
   daemon: 503,
   'rate-limit': 429,
+  'stale-revision': 409,
+  'daemon-unavailable': 503,
+  'workflow-conflict': 409,
 };
 
 function sendDaemonError(c: Context<GatewayEnv>, error: GatewayErrorResponse): Response {

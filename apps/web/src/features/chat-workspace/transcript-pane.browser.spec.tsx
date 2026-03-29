@@ -88,6 +88,29 @@ function installFetchStub(handler: (url: string, init: RequestInit | undefined) 
         ),
       );
     }
+    if (url === '/config/safe') {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            config: {
+              routing: { mode: 'balanced' },
+              models: {},
+              usage: { dailyTokenBudget: {}, weeklyTokenBudget: {} },
+            },
+            revision: 'rev-transcript-pane',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+    }
+    if (url === '/audit' || url === '/audit?limit=20') {
+      return Promise.resolve(
+        new Response(JSON.stringify({ records: [], nextCursor: null, totalCount: 0 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    }
     return Promise.resolve(handler(url, init));
   });
   vi.stubGlobal('fetch', fetchSpy);
@@ -714,6 +737,40 @@ describe('TranscriptPane', () => {
         );
       }
 
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ approvals: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url === '/config/safe') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              config: {
+                routing: { mode: 'balanced' },
+                models: {},
+                usage: { dailyTokenBudget: {}, weeklyTokenBudget: {} },
+              },
+              revision: 'rev-transcript-pane-inline',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+
+      if (url === '/audit' || url === '/audit?limit=20') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ records: [], nextCursor: null, totalCount: 0 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
       throw new Error(`Unexpected fetch input: ${url}`);
     });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1000,6 +1057,40 @@ describe('TranscriptPane', () => {
 
         return Promise.resolve(
           new Response(JSON.stringify(history), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url === '/conversations/conv-1/approvals') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ approvals: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        );
+      }
+
+      if (url === '/config/safe') {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              config: {
+                routing: { mode: 'balanced' },
+                models: {},
+                usage: { dailyTokenBudget: {}, weeklyTokenBudget: {} },
+              },
+              revision: 'rev-transcript-pane-inline',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+      }
+
+      if (url === '/audit' || url === '/audit?limit=20') {
+        return Promise.resolve(
+          new Response(JSON.stringify({ records: [], nextCursor: null, totalCount: 0 }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
           }),

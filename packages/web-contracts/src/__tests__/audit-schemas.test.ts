@@ -16,10 +16,16 @@ describe('AuditEventType', () => {
     'session.daemon-restored',
     'session.idle-reauth',
     'session.idle-timeout',
+    'config.routing.mode.changed',
+    'config.models.active.changed',
+    'config.usage.budget.changed',
+    'workflow.launched',
+    'config.mutation.rejected',
+    'workflow.launch.rejected',
   ] as const;
 
-  it('has exactly 12 in-scope types', () => {
-    assert.equal(AuditEventType.options.length, 12);
+  it('has exactly 18 in-scope types', () => {
+    assert.equal(AuditEventType.options.length, 18);
   });
 
   for (const type of allTypes) {

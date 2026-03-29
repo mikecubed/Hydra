@@ -16,6 +16,9 @@ import {
   isValidationError,
   isDaemonError,
   isRateLimitError,
+  isStaleRevision,
+  isDaemonUnavailable,
+  isWorkflowConflict,
   isRetriable,
   requiresReauth,
   humanMessage,
@@ -88,6 +91,27 @@ const archivedConversationError: GatewayErrorBody = {
   message: 'Conversation is archived',
 };
 
+const staleRevisionError: GatewayErrorBody = {
+  ok: false,
+  code: 'STALE_REVISION',
+  category: 'stale-revision',
+  message: 'Config has changed — reload and retry',
+};
+
+const daemonUnavailableError: GatewayErrorBody = {
+  ok: false,
+  code: 'DAEMON_UNAVAILABLE',
+  category: 'daemon-unavailable',
+  message: 'Daemon unreachable',
+};
+
+const workflowConflictError: GatewayErrorBody = {
+  ok: false,
+  code: 'WORKFLOW_CONFLICT',
+  category: 'workflow-conflict',
+  message: 'Workflow already running',
+};
+
 const errorWithContext: GatewayErrorBody = {
   ok: false,
   code: 'CONVERSATION_NOT_FOUND',
@@ -99,13 +123,16 @@ const errorWithContext: GatewayErrorBody = {
 // ─── ERROR_CATEGORIES constant ──────────────────────────────────────────────
 
 describe('ERROR_CATEGORIES', () => {
-  it('contains exactly the five gateway error categories', () => {
+  it('contains exactly the eight gateway error categories', () => {
     assert.deepStrictEqual(ERROR_CATEGORIES, [
       'auth',
       'session',
       'validation',
       'daemon',
       'rate-limit',
+      'stale-revision',
+      'daemon-unavailable',
+      'workflow-conflict',
     ]);
   });
 
@@ -171,7 +198,7 @@ describe('parseGatewayError', () => {
     );
   });
 
-  it('accepts all five categories', () => {
+  it('accepts all eight categories', () => {
     for (const cat of ERROR_CATEGORIES) {
       const result = parseGatewayError({ ok: false, code: 'TEST', category: cat, message: 'M' });
       assert.ok(result !== null, `should accept category '${cat}'`);
@@ -330,6 +357,21 @@ describe('category predicates', () => {
     assert.ok(isRateLimitError(rateLimitError));
     assert.ok(!isRateLimitError(authError));
   });
+
+  it('isStaleRevision returns true only for stale-revision category', () => {
+    assert.ok(isStaleRevision(staleRevisionError));
+    assert.ok(!isStaleRevision(authError));
+  });
+
+  it('isDaemonUnavailable returns true only for daemon-unavailable category', () => {
+    assert.ok(isDaemonUnavailable(daemonUnavailableError));
+    assert.ok(!isDaemonUnavailable(daemonError));
+  });
+
+  it('isWorkflowConflict returns true only for workflow-conflict category', () => {
+    assert.ok(isWorkflowConflict(workflowConflictError));
+    assert.ok(!isWorkflowConflict(authError));
+  });
 });
 
 // ─── isRetriable ────────────────────────────────────────────────────────────
@@ -343,6 +385,10 @@ describe('isRetriable', () => {
     assert.ok(isRetriable(daemonError));
   });
 
+  it('daemon-unavailable errors are retriable', () => {
+    assert.ok(isRetriable(daemonUnavailableError));
+  });
+
   it('auth errors are not retriable', () => {
     assert.ok(!isRetriable(authError));
   });
@@ -353,6 +399,14 @@ describe('isRetriable', () => {
 
   it('validation errors are not retriable', () => {
     assert.ok(!isRetriable(validationError));
+  });
+
+  it('stale-revision errors are not retriable', () => {
+    assert.ok(!isRetriable(staleRevisionError));
+  });
+
+  it('workflow-conflict errors are not retriable', () => {
+    assert.ok(!isRetriable(workflowConflictError));
   });
 });
 

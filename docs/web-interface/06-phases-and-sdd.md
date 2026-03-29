@@ -4,31 +4,37 @@
 
 These phases define the program shape. They are intentionally broader than the eventual SDD specs.
 
-### Phase 0 — Architecture and Contract Foundation
+### Phase 0 — Architecture and Contract Foundation ✅ Delivered
 
-- establish workspaces and package boundaries;
-- create shared contract package and public API surface;
-- define conversation, turn, event, approval, artifact, and snapshot vocabulary;
+Delivered via `web-repl-foundation`.
+
+- establish workspaces and package boundaries: ✅ delivered
+- create shared contract package and public API surface: ✅ delivered
+- define conversation, turn, event, approval, artifact, and snapshot vocabulary: ✅ delivered
 - name the first required daemon contract families for messaging, command execution, council events,
-  task live output, and controlled mutations;
-- define baseline quality gates for the new packages.
+  task live output, and controlled mutations: ✅ delivered
+- define baseline quality gates for the new packages: ✅ delivered
 
-### Phase 1 — Secure Session and Conversation Transport
+### Phase 1 — Secure Session and Conversation Transport ✅ Delivered
 
-- login/logout and browser session management;
-- websocket bootstrap and reconnect behavior;
-- conversation create/open/resume flow;
-- gateway REST + WebSocket mediation layer (daemon→browser event bridge, session binding);
-- daemon transport amendments needed by the gateway (event subscription, sequence numbering);
-- protocol-level validation and replay tests.
+Delivered via `web-session-auth`, `web-conversation-protocol`, and `web-gateway-conversation-transport`.
 
-### Phase 2 — Core Chat Workspace
+- login/logout and browser session management: ✅ delivered (PRs #210, #212)
+- websocket bootstrap and reconnect behavior: ✅ delivered
+- conversation create/open/resume flow: ✅ delivered
+- gateway REST + WebSocket mediation layer (daemon→browser event bridge, session binding): ✅ delivered
+- daemon transport amendments needed by the gateway (event subscription, sequence numbering): ✅ delivered
+- protocol-level validation and replay tests: ✅ delivered
 
-- transcript and composer;
-- streaming rendering;
-- cancel, retry, branch, and follow-up flows;
-- approvals and browser-safe interactive prompts;
-- artifact views.
+### Phase 2 — Core Chat Workspace ✅ Delivered
+
+Delivered via `web-chat-workspace` (phases 1–8, PRs #173–#185).
+
+- transcript and composer: ✅ delivered
+- streaming rendering: ✅ delivered
+- cancel, retry, branch, and follow-up flows: ✅ delivered
+- approvals and browser-safe interactive prompts: ✅ delivered
+- artifact views: ✅ delivered
 
 ### Phase 3 — Hydra-Native Control Surfaces ✅ Delivered
 
@@ -39,7 +45,7 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 - budgets and daemon health: ✅ delivered
 - council and multi-agent execution visualization: ✅ delivered
 
-### Phase 4 — Controlled Mutations and Operational Workflows
+### Phase 4 — Controlled Mutations and Operational Workflows ✅ Complete
 
 - safe config read/write subset through daemon-owned APIs;
 - approved workflow-launch surfaces;
@@ -54,36 +60,16 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 
 ## Recommended SDD Spec Breakdown
 
-After the document set is accepted, break the work into these specs:
-
-1. **`web-repl-foundation`**
-2. **`web-session-auth`**
-3. **`web-conversation-protocol`**
-4. **`web-gateway-conversation-transport`** — gateway REST + WebSocket mediation, session binding, reconnect/resume, and daemon transport amendments
-5. **`web-chat-workspace`**
-6. **`web-hydra-operations-panels`** — Hydra-native operations visibility and daemon-authorized controls (US1–US6, all phases delivered)
-7. **`web-controlled-mutations`**
-8. **`web-hardening-and-packaging`**
-
-### Suggested early execution order
-
-The most important early dependency is getting the protocol and backend contract shape right before
-the richer UI work expands.
-
-1. `web-repl-foundation`
-2. `web-session-auth`
-3. `web-conversation-protocol`
-4. `web-gateway-conversation-transport`
-5. `web-chat-workspace`
-6. `web-hydra-operations-panels`
-7. `web-controlled-mutations`
-8. `web-hardening-and-packaging`
-
-If the daemon needs significant new conversation or command contracts, that work should be planned
-inside or immediately adjacent to `web-conversation-protocol` or
-`web-gateway-conversation-transport` rather than deferred until the UI is already built. The
-transport slice explicitly includes daemon transport amendments (event subscription, sequence
-numbering, replay buffer) as work items rather than assuming they exist.
+| #   | Spec                                     | Status                                                                                                            |
+| --- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 1   | **`web-repl-foundation`**                | ✅ Delivered                                                                                                      |
+| 2   | **`web-session-auth`**                   | ✅ Delivered (PRs #210, #212)                                                                                     |
+| 3   | **`web-conversation-protocol`**          | ✅ Delivered                                                                                                      |
+| 4   | **`web-gateway-conversation-transport`** | ✅ Delivered — gateway REST + WebSocket mediation, session binding, reconnect/resume, daemon transport amendments |
+| 5   | **`web-chat-workspace`**                 | ✅ Delivered (phases 1–8, PRs #173–#185)                                                                          |
+| 6   | **`web-hydra-operations-panels`**        | ✅ Delivered — Hydra-native operations visibility and daemon-authorized controls (US1–US6, PRs #201–#209)         |
+| 7   | **`web-controlled-mutations`**           | ✅ Delivered (PR #221)                                                                                            |
+| 8   | **`web-hardening-and-packaging`**        | ⬜ Pending                                                                                                        |
 
 ## Recommended Workflow
 
@@ -96,13 +82,17 @@ For each spec:
 5. generate dependency-ordered tasks with `sdd.tasks`;
 6. implement one spec at a time with strict validation.
 
-## Open Questions
+## Open Questions (Resolved)
 
-1. Should the daemon own browser-native conversation/session entities directly in phase one, or
-   should the gateway temporarily adapt current task semantics while new daemon contracts land?
-2. How much streamed conversation state should be persisted for reconnect and history replay?
-3. What event structure best represents council and multi-agent deliberation?
-4. Which config and workflow mutations are safe enough for early browser phases?
+1. ~~Should the daemon own browser-native conversation/session entities directly in phase one, or
+   should the gateway temporarily adapt current task semantics while new daemon contracts land?~~
+   **Resolved:** Daemon owns entities; gateway is the bridge layer.
+2. ~~How much streamed conversation state should be persisted for reconnect and history replay?~~
+   **Resolved:** Full turn history with sequence-numbered events and replay buffer.
+3. ~~What event structure best represents council and multi-agent deliberation?~~
+   **Resolved:** `AgentExecutionGroup` with participant snapshots; delivered in `web-hydra-operations-panels`.
+4. ~~Which config and workflow mutations are safe enough for early browser phases?~~
+   **Resolved:** Delivered in `web-controlled-mutations` (PR #221).
 5. When does the repo benefit enough from `turbo` to justify adding it beyond workspaces?
 6. How should browser assets and the gateway runtime be packaged for both npm distribution and the
    existing executable paths?

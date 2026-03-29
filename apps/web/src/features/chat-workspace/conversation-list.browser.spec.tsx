@@ -65,7 +65,26 @@ function installFetchStub(handler: (url: string, init: RequestInit | undefined) 
         ),
       );
     }
-    return Promise.resolve(handler(url, init));
+    try {
+      return Promise.resolve(handler(url, init));
+    } catch (err: unknown) {
+      if (url === '/config/safe') {
+        return Promise.resolve(
+          jsonResponse({
+            config: {
+              routing: { mode: 'balanced' },
+              models: {},
+              usage: { dailyTokenBudget: {}, weeklyTokenBudget: {} },
+            },
+            revision: 'rev-conversation-list',
+          }),
+        );
+      }
+      if (url === '/audit' || url === '/audit?limit=20') {
+        return Promise.resolve(jsonResponse({ records: [], nextCursor: null, totalCount: 0 }));
+      }
+      throw err;
+    }
   });
   vi.stubGlobal('fetch', fetchSpy);
 }

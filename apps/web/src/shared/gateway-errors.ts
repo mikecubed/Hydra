@@ -17,8 +17,16 @@
 
 // ─── Error Categories ───────────────────────────────────────────────────────
 
-/** The five gateway error categories (FR-027). */
-export type ErrorCategory = 'auth' | 'session' | 'validation' | 'daemon' | 'rate-limit';
+/** The eight gateway error categories (FR-027). */
+export type ErrorCategory =
+  | 'auth'
+  | 'session'
+  | 'validation'
+  | 'daemon'
+  | 'rate-limit'
+  | 'stale-revision'
+  | 'daemon-unavailable'
+  | 'workflow-conflict';
 
 /** Ordered, frozen list of all valid error categories. */
 export const ERROR_CATEGORIES: readonly ErrorCategory[] = Object.freeze([
@@ -27,6 +35,9 @@ export const ERROR_CATEGORIES: readonly ErrorCategory[] = Object.freeze([
   'validation',
   'daemon',
   'rate-limit',
+  'stale-revision',
+  'daemon-unavailable',
+  'workflow-conflict',
 ] as const);
 
 const CATEGORY_SET: ReadonlySet<string> = new Set(ERROR_CATEGORIES);
@@ -132,6 +143,18 @@ export function isRateLimitError(err: GatewayErrorBody): boolean {
   return err.category === 'rate-limit';
 }
 
+export function isStaleRevision(err: GatewayErrorBody): boolean {
+  return err.category === 'stale-revision';
+}
+
+export function isDaemonUnavailable(err: GatewayErrorBody): boolean {
+  return err.category === 'daemon-unavailable';
+}
+
+export function isWorkflowConflict(err: GatewayErrorBody): boolean {
+  return err.category === 'workflow-conflict';
+}
+
 // ─── Recovery helpers ───────────────────────────────────────────────────────
 
 /**
@@ -149,7 +172,11 @@ const REAUTH_SESSION_CODES: ReadonlySet<string> = new Set([
 
 /** Whether the error suggests the request may succeed if retried later. */
 export function isRetriable(err: GatewayErrorBody): boolean {
-  return err.category === 'rate-limit' || err.category === 'daemon';
+  return (
+    err.category === 'rate-limit' ||
+    err.category === 'daemon' ||
+    err.category === 'daemon-unavailable'
+  );
 }
 
 /**

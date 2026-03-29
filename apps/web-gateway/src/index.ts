@@ -42,6 +42,11 @@ import {
   type DaemonOperationsClientOptions,
 } from './operations/daemon-operations-client.ts';
 import { createOperationsRoutes } from './operations/operations-routes.ts';
+import {
+  DaemonMutationsClient,
+  type DaemonMutationsClientOptions,
+} from './mutations/daemon-mutations-client.ts';
+import { createMutationsRouter } from './mutations/mutations-routes.ts';
 import { SessionStateBroadcaster } from './session/session-state-broadcaster.ts';
 import { ConnectionRegistry } from './transport/connection-registry.ts';
 import { EventBuffer } from './transport/event-buffer.ts';
@@ -69,6 +74,10 @@ export interface GatewayAppDeps {
   operationsClient?: DaemonOperationsClient;
   /** Daemon operations client options (defaults to daemonClientOptions.baseUrl). */
   operationsClientOptions?: DaemonOperationsClientOptions;
+  /** Pre-built mutations DaemonMutationsClient (for testing). */
+  mutationsClient?: DaemonMutationsClient;
+  /** Daemon mutations client options (defaults to daemonClientOptions.baseUrl). */
+  mutationsClientOptions?: DaemonMutationsClientOptions;
   /** Pre-built mutating rate limiter (for testing). Overrides default limits. */
   mutatingLimiter?: RateLimiter;
   /** Optional narrower daemon client for WebSocket subscribe validation. */
@@ -236,24 +245,36 @@ function applyGatewayMiddleware(
   app.use('*', createMutatingRateLimiter(mutatingLimiter));
 }
 
-function createProtectedRootRoutes(
-  deps: GatewayAppDeps,
-  daemonClient: DaemonClient,
-): Hono<GatewayEnv> {
-  const protectedRootRoutes = new Hono<GatewayEnv>();
-  protectedRootRoutes.route('/', createConversationRoutes(daemonClient));
+type DaemonClientOptionLike = DaemonOperationsClientOptions | DaemonMutationsClientOptions;
 
-  const defaultOpsOptions: DaemonOperationsClientOptions = {
+function resolveDaemonClientOptions(deps: GatewayAppDeps): DaemonClientOptionLike {
+  return {
     baseUrl: deps.daemonClientOptions?.baseUrl ?? 'http://localhost:4173',
     ...(deps.daemonClientOptions?.fetchFn != null && { fetchFn: deps.daemonClientOptions.fetchFn }),
     ...(deps.daemonClientOptions?.timeoutMs != null && {
       timeoutMs: deps.daemonClientOptions.timeoutMs,
     }),
   };
+}
+
+function createProtectedRootRoutes(
+  deps: GatewayAppDeps,
+  daemonClient: DaemonClient,
+  auditService: AuditService,
+): Hono<GatewayEnv> {
+  const protectedRootRoutes = new Hono<GatewayEnv>();
+  protectedRootRoutes.route('/', createConversationRoutes(daemonClient));
+
+  const defaultOptions = resolveDaemonClientOptions(deps);
   const operationsClient =
     deps.operationsClient ??
-    new DaemonOperationsClient(deps.operationsClientOptions ?? defaultOpsOptions);
+    new DaemonOperationsClient(deps.operationsClientOptions ?? defaultOptions);
   protectedRootRoutes.route('/', createOperationsRoutes({ daemonClient: operationsClient }));
+
+  const mutationsClient =
+    deps.mutationsClient ??
+    new DaemonMutationsClient(deps.mutationsClientOptions ?? defaultOptions);
+  protectedRootRoutes.route('/', createMutationsRouter(mutationsClient, auditService));
 
   return protectedRootRoutes;
 }
@@ -278,7 +299,7 @@ function registerGatewayRoutes(
   const daemonClient =
     deps.daemonClient ??
     new DaemonClient(deps.daemonClientOptions ?? { baseUrl: 'http://localhost:4173' });
-  const protectedRootRoutes = createProtectedRootRoutes(deps, daemonClient);
+  const protectedRootRoutes = createProtectedRootRoutes(deps, daemonClient, runtime.auditService);
   app.route(
     '/',
     createProtectedRouteGroup(protectedRootRoutes, runtime.sessionService, runtime.auditService),

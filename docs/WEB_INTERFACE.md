@@ -1,6 +1,6 @@
 # Hydra Web Interface
 
-> **Status:** Proposal / index document
+> **Status:** Active — specs 1–7 delivered; `web-hardening-and-packaging` pending
 > **Scope:** Browser-native Hydra workspace with full REPL-grade capabilities, strict quality gates, and SDD-driven delivery
 
 This document is the entry point for Hydra's web-interface design set.
@@ -46,21 +46,23 @@ To keep the work easier to reason about, the design has been split into smaller 
 - Use **SDD** to break the work into small, reviewable specs and plans before implementation.
 - Hold the web work to strict standards for TDD, security, type safety, architecture, and CI.
 
+## SDD Execution Progress
+
+| #   | Spec                                 | Status                                   |
+| --- | ------------------------------------ | ---------------------------------------- |
+| 1   | `web-repl-foundation`                | ✅ Delivered                             |
+| 2   | `web-session-auth`                   | ✅ Delivered (PRs #210, #212)            |
+| 3   | `web-conversation-protocol`          | ✅ Delivered                             |
+| 4   | `web-gateway-conversation-transport` | ✅ Delivered                             |
+| 5   | `web-chat-workspace`                 | ✅ Delivered (phases 1–8, PRs #173–#185) |
+| 6   | `web-hydra-operations-panels`        | ✅ Delivered (US1–US6, PRs #201–#209)    |
+| 7   | **`web-controlled-mutations`**       | ✅ Delivered (PR #221)                   |
+| 8   | `web-hardening-and-packaging`        | ⬜ Pending                               |
+
 ## Next Step
 
-Use this document set as the source material for `sdd.specify`, starting with the first foundational
-specs rather than attempting the entire web initiative in one implementation pass.
-
-The current SDD execution order is:
-
-1. `web-repl-foundation`
-2. `web-session-auth`
-3. `web-conversation-protocol`
-4. **`web-gateway-conversation-transport`** ← next spec to plan (gateway REST + WebSocket mediation, session binding, reconnect/resume, daemon transport amendments)
-5. `web-chat-workspace`
-6. `web-hydra-operations-panels`
-7. `web-controlled-mutations`
-8. `web-hardening-and-packaging`
+**`web-hardening-and-packaging`** — packaging integration, accessibility and performance hardening,
+security review and failure-mode drills, contributor and documentation updates.
 
 See [`docs/web-interface/06-phases-and-sdd.md`](./web-interface/06-phases-and-sdd.md) for full phase
 and spec breakdown details.

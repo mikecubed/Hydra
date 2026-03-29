@@ -79,6 +79,9 @@ import {
 } from '../features/chat-workspace/model/artifact-hydration.ts';
 import { OperationsErrorBoundary } from '../features/operations-panels/components/operations-error-boundary.tsx';
 import { WorkspaceOperationsPanel } from '../features/operations-panels/components/workspace-operations-panel.tsx';
+import { createMutationsClient } from '../features/mutations/api/mutations-client.ts';
+import { ConfigPanel } from '../features/mutations/components/config-panel.tsx';
+import { AuditPanel } from '../features/mutations/components/audit-panel.tsx';
 
 function useWorkspaceState(store: WorkspaceStore) {
   return useSyncExternalStore(
@@ -1540,6 +1543,8 @@ export function WorkspaceRoute(): JSX.Element {
   const [store] = useState(() => createWorkspaceStore());
   const state = useWorkspaceState(store);
   const client = useMemo(() => createGatewayClient({ baseUrl: '' }), []);
+  const mutationsClient = useMemo(() => createMutationsClient({ baseUrl: '' }), []);
+  const [operationsRefreshNonce, setOperationsRefreshNonce] = useState(0);
 
   const wsStreamClient = useMemo(
     () =>
@@ -1717,7 +1722,16 @@ export function WorkspaceRoute(): JSX.Element {
           }
           operationsPanelSlot={
             <OperationsErrorBoundary>
-              <WorkspaceOperationsPanel />
+              <div style={{ display: 'grid', gap: '1rem' }}>
+                <WorkspaceOperationsPanel refreshNonce={operationsRefreshNonce} />
+                <ConfigPanel
+                  client={mutationsClient}
+                  onBudgetMutated={() => {
+                    setOperationsRefreshNonce((current) => current + 1);
+                  }}
+                />
+                <AuditPanel client={mutationsClient} />
+              </div>
             </OperationsErrorBoundary>
           }
         />

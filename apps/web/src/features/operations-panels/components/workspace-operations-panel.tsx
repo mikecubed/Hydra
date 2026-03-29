@@ -32,7 +32,12 @@ import { OperationsPanelShell } from './operations-panel-shell.tsx';
 import { QueuePanel } from './queue-panel.tsx';
 import { RoutingPanel } from './routing-panel.tsx';
 
-function useOperationsPanelState() {
+interface UseOperationsPanelStateOptions {
+  readonly refreshNonce?: number;
+}
+
+function useOperationsPanelState(options: UseOperationsPanelStateOptions = {}) {
+  const { refreshNonce = 0 } = options;
   const operationsClient = useMemo(() => createOperationsClient({ baseUrl: '' }), []);
   const [state, dispatch] = useReducer(
     reduceOperationsState,
@@ -61,6 +66,12 @@ function useOperationsPanelState() {
       syncControllerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (refreshNonce > 0) {
+      syncControllerRef.current?.fetchSnapshot();
+    }
+  }, [refreshNonce]);
 
   const selectedWorkItemId = state.selection.selectedWorkItemId;
   const selectedDetail = state.selection.detail;
@@ -109,8 +120,16 @@ function useOperationsPanelState() {
   return { state, dispatch, handleSelectItem, handleSubmitControl };
 }
 
-export function WorkspaceOperationsPanel(): JSX.Element {
-  const { state, handleSelectItem, handleSubmitControl } = useOperationsPanelState();
+export interface WorkspaceOperationsPanelProps {
+  readonly refreshNonce?: number;
+}
+
+export function WorkspaceOperationsPanel({
+  refreshNonce = 0,
+}: WorkspaceOperationsPanelProps): JSX.Element {
+  const { state, handleSelectItem, handleSubmitControl } = useOperationsPanelState({
+    refreshNonce,
+  });
 
   const selectedWorkItemId = selectSelectedWorkItemId(state);
   const checkpoints = selectSelectedCheckpoints(state);
