@@ -135,11 +135,12 @@ gateway running locally.
 | Build time                        | ≤ 30 s    | Wall-clock time of build command                            | ✅          |
 | Root CLI package dry-run succeeds | exit 0    | `npm run package:dry-run` (validates root CLI package only) | —           |
 
-The `web-responsiveness` job in `.github/workflows/quality.yml` enforces the first four rows
-automatically on every PR and push. The job builds the web workspace, parses Vite's output for
-gzipped asset sizes, and fails the run if any threshold is exceeded. Build time is measured via
-wall-clock timing of the build step. Root CLI package dry-run is not included because it validates
-packaging scope (T025), not responsiveness.
+The `web-responsiveness` job in `.github/workflows/quality.yml` enforces the first four rows on the
+workflow's currently configured trigger set: pushes to `main` / `dev` / `fix/**` / `feat/**` /
+`feature/**`, plus pull requests targeting `main`. The job builds the web workspace, parses Vite's
+output for gzipped asset sizes, and fails the run if any threshold is exceeded. Build time is
+measured via wall-clock timing of the build step. Root CLI package dry-run is not included because
+it validates packaging scope (T025), not responsiveness.
 
 ### Runtime responsiveness targets
 
@@ -359,7 +360,8 @@ Current CI gates in this repo:
 - dependency audit;
 - no backsliding on coverage expectations;
 - web build and bundle-size budget checks (`web-responsiveness` job — see Responsiveness Budgets);
-- browser spec and gateway/contract test execution for web workspaces (`web-responsiveness` job).
+- targeted browser, gateway, and contract evidence commands are available in the repo, but they are
+  not all yet promoted into the blocking `web-responsiveness` job.
 
 Target CI additions for later hardening work:
 
