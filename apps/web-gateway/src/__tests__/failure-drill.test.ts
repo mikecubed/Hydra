@@ -15,10 +15,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  ERROR_CATEGORIES,
-  isRetryableCategory,
-} from '../shared/gateway-error-response.ts';
+import { ERROR_CATEGORIES, isRetryableCategory } from '../shared/gateway-error-response.ts';
 import {
   ERROR_STATUS_MAP,
   ERROR_CATEGORY_MAP,
