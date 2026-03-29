@@ -318,3 +318,40 @@ describe('selectControlsForSelectedItem', () => {
     assert.equal(controls[0].controlId, 'ctrl-1');
   });
 });
+
+// ─── Reference stability ────────────────────────────────────────────────────
+
+describe('reference stability — selectFilteredQueueItems', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({ id: 'wq-1', status: 'active' }),
+        makeQueueItem({ id: 'wq-2', status: 'completed' }),
+      ],
+    });
+    let state = createInitialOperationsState();
+    state = reduceOperationsState(state, { type: 'snapshot/request' });
+    state = reduceOperationsState(state, { type: 'snapshot/success', snapshot });
+    state = reduceOperationsState(state, {
+      type: 'filters/set-status',
+      statusFilter: ['active'],
+    });
+
+    const first = selectFilteredQueueItems(state);
+    const second = selectFilteredQueueItems(state);
+    assert.equal(first, second, 'expected same array reference on second call');
+  });
+
+  it('returns the same reference when filter is empty and queue unchanged', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],
+    });
+    let state = createInitialOperationsState();
+    state = reduceOperationsState(state, { type: 'snapshot/request' });
+    state = reduceOperationsState(state, { type: 'snapshot/success', snapshot });
+
+    const first = selectFilteredQueueItems(state);
+    const second = selectFilteredQueueItems(state);
+    assert.equal(first, second, 'expected same array reference when filter is empty');
+  });
+});

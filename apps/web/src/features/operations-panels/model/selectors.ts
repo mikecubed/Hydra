@@ -45,6 +45,11 @@ export function selectQueueItems(state: OperationsWorkspaceState): readonly Work
   return state.snapshot?.queue ?? EMPTY_QUEUE;
 }
 
+/** Last-call cache for {@link selectFilteredQueueItems}. */
+let _filteredLastItems: readonly WorkQueueItemView[] | null = null;
+let _filteredLastFilter: readonly WorkItemStatus[] | null = null;
+let _filteredLastResult: readonly WorkQueueItemView[] = EMPTY_QUEUE;
+
 /**
  * Queue items filtered by the current status filter.
  * Returns all items when the filter is empty.
@@ -59,8 +64,17 @@ export function selectFilteredQueueItems(
     return items;
   }
 
+  if (items === _filteredLastItems && statusFilter === _filteredLastFilter) {
+    return _filteredLastResult;
+  }
+
   const allowed = new Set(statusFilter);
-  return items.filter((item) => allowed.has(item.status));
+  const result = items.filter((item) => allowed.has(item.status));
+
+  _filteredLastItems = items;
+  _filteredLastFilter = statusFilter;
+  _filteredLastResult = result;
+  return result;
 }
 
 /** ID of the currently selected work item, or null. */
