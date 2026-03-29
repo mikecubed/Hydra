@@ -14,17 +14,17 @@ so contributors can verify and troubleshoot the web experience without source-di
 
 ## Technical Context
 
-| Dimension | Decision |
-| --- | --- |
-| **Language/Version** | TypeScript 5.x, ESM, Node 24+ |
-| **Primary Dependencies** | React 19 + Vite 8 (`apps/web`), Hono (`apps/web-gateway`), Zod (`packages/web-contracts`) |
-| **Storage** | Browser static bundle in `apps/web/dist`; gateway local state in `~/.hydra/web-gateway`; existing daemon/runtime state remains authoritative |
-| **Testing** | Root `npm test`; Vitest browser specs in `apps/web`; Node `node:test` suites in `apps/web-gateway`, `packages/web-contracts`, and `test/`; repo `npm run quality` |
-| **Target Platform** | Same-origin browser + gateway deployment for local and explicit remote operator use |
-| **Project Type** | Monorepo workspace web app + gateway + shared contracts |
-| **Performance Goals** | Define explicit load/responsiveness budgets for login and primary workspace surfaces, then verify them with repeatable build/test evidence |
-| **Constraints** | Preserve daemon authority; preserve existing auth/CSRF/origin/TLS posture; no boundary erosion between `apps/*`, `packages/*`, and `lib/`; packaged usage must fail explicitly when unsupported |
-| **Scale/Scope** | Operator-oriented Hydra deployment, not multi-tenant public hosting |
+| Dimension                | Decision                                                                                                                                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Language/Version**     | TypeScript 5.x, ESM, Node 24+                                                                                                                                                                   |
+| **Primary Dependencies** | React 19 + Vite 8 (`apps/web`), Hono (`apps/web-gateway`), Zod (`packages/web-contracts`)                                                                                                       |
+| **Storage**              | Browser static bundle in `apps/web/dist`; gateway local state in `~/.hydra/web-gateway`; existing daemon/runtime state remains authoritative                                                    |
+| **Testing**              | Root `npm test`; Vitest browser specs in `apps/web`; Node `node:test` suites in `apps/web-gateway`, `packages/web-contracts`, and `test/`; repo `npm run quality`                               |
+| **Target Platform**      | Same-origin browser + gateway deployment for local and explicit remote operator use                                                                                                             |
+| **Project Type**         | Monorepo workspace web app + gateway + shared contracts                                                                                                                                         |
+| **Performance Goals**    | Define explicit load/responsiveness budgets for login and primary workspace surfaces, then verify them with repeatable build/test evidence                                                      |
+| **Constraints**          | Preserve daemon authority; preserve existing auth/CSRF/origin/TLS posture; no boundary erosion between `apps/*`, `packages/*`, and `lib/`; packaged usage must fail explicitly when unsupported |
+| **Scale/Scope**          | Operator-oriented Hydra deployment, not multi-tenant public hosting                                                                                                                             |
 
 ## Project Structure
 
@@ -183,26 +183,26 @@ expressed through current surfaces.
 
 ### Artifacts Examined
 
-| File | Role in packaging |
-| --- | --- |
-| `scripts/build-pack.ts` | npm tarball prepack — compiles `lib/` and `bin/` TS → JS, patches `package.json` |
-| `scripts/clean-pack.ts` | Postpack — removes generated JS, restores `package.json` |
-| `scripts/build-exe.ts` | Standalone exe — esbuild bundles `bin/hydra-cli.ts` → CJS, then `@yao-pkg/pkg` |
-| `tsconfig.build.json` | Build config for prepack — `include: lib/, bin/`; **excludes** `apps/`, `packages/`, `scripts/`, `test/` |
-| `package.json` (`files`) | Tarball contents — `bin/`, `lib/`, `docs/*.md`, `hydra.config.json`, `README.md`, `CLAUDE.md` |
-| `apps/web-gateway/src/server.ts` | Gateway entry — starts HTTP server, delegates static serving to `server-runtime.ts` |
-| `apps/web-gateway/src/server-runtime.ts` | Static asset resolution — defaults to `apps/web/dist`, configurable via `HYDRA_WEB_STATIC_DIR` |
+| File                                     | Role in packaging                                                                                        |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `scripts/build-pack.ts`                  | npm tarball prepack — compiles `lib/` and `bin/` TS → JS, patches `package.json`                         |
+| `scripts/clean-pack.ts`                  | Postpack — removes generated JS, restores `package.json`                                                 |
+| `scripts/build-exe.ts`                   | Standalone exe — esbuild bundles `bin/hydra-cli.ts` → CJS, then `@yao-pkg/pkg`                           |
+| `tsconfig.build.json`                    | Build config for prepack — `include: lib/, bin/`; **excludes** `apps/`, `packages/`, `scripts/`, `test/` |
+| `package.json` (`files`)                 | Tarball contents — `bin/`, `lib/`, `docs/*.md`, `hydra.config.json`, `README.md`, `CLAUDE.md`            |
+| `apps/web-gateway/src/server.ts`         | Gateway entry — starts HTTP server, delegates static serving to `server-runtime.ts`                      |
+| `apps/web-gateway/src/server-runtime.ts` | Static asset resolution — defaults to `apps/web/dist`, configurable via `HYDRA_WEB_STATIC_DIR`           |
 
 ### What the current packaging path supports
 
-| Capability | npm tarball (`npm pack`) | Standalone exe (`build:exe`) | Source checkout |
-| --- | --- | --- | --- |
-| CLI operator console | ✅ Included (`bin/`, `lib/`) | ✅ Bundled (`bin/hydra-cli.ts` entry) | ✅ |
-| Daemon (`orchestrator-daemon.ts`) | ✅ Included in `lib/` | ✅ Bundled via CLI entry | ✅ |
-| Web gateway (`apps/web-gateway/`) | ❌ Not in `files` or build | ❌ Not in esbuild entry | ✅ Workspace |
-| Browser assets (`apps/web/dist/`) | ❌ Not in `files` or build | ❌ Not in bundle | ✅ After `npm --workspace @hydra/web run build` |
-| Shared contracts (`packages/web-contracts/`) | ❌ Not in `files` or build | ❌ Not in bundle | ✅ Workspace |
-| Explicit "web unsupported" message at startup | ❌ No detection | ❌ No detection | N/A (web works) |
+| Capability                                    | npm tarball (`npm pack`)     | Standalone exe (`build:exe`)          | Source checkout                                 |
+| --------------------------------------------- | ---------------------------- | ------------------------------------- | ----------------------------------------------- |
+| CLI operator console                          | ✅ Included (`bin/`, `lib/`) | ✅ Bundled (`bin/hydra-cli.ts` entry) | ✅                                              |
+| Daemon (`orchestrator-daemon.ts`)             | ✅ Included in `lib/`        | ✅ Bundled via CLI entry              | ✅                                              |
+| Web gateway (`apps/web-gateway/`)             | ❌ Not in `files` or build   | ❌ Not in esbuild entry               | ✅ Workspace                                    |
+| Browser assets (`apps/web/dist/`)             | ❌ Not in `files` or build   | ❌ Not in bundle                      | ✅ After `npm --workspace @hydra/web run build` |
+| Shared contracts (`packages/web-contracts/`)  | ❌ Not in `files` or build   | ❌ Not in bundle                      | ✅ Workspace                                    |
+| Explicit "web unsupported" message at startup | ❌ No detection              | ❌ No detection                       | N/A (web works)                                 |
 
 ### What the current packaging path does NOT support
 
@@ -262,14 +262,14 @@ will produce a tarball that appears to contain the web surface but fails on firs
 
 ### Summary for downstream tasks
 
-| Task | What this audit tells it |
-| --- | --- |
+| Task | What this audit tells it                                                                                                                                                                                                                                                                                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | T005 | Must add `apps/web-gateway/` and `apps/web/dist/` (or a built equivalent) to the tarball `files` list **and** solve the gateway runtime dependency gap (Hono, `@hono/node-server`, `@hydra/web-contracts` — see section above). Extending `tsconfig.build.json` or adding a gateway build/bundle step is required; file inclusion alone is not enough. |
-| T006 | Must extend `.packfiles` manifest and cleanup to cover any new web artifacts added by T005. |
-| T007 | Can extend the existing `createStaticAssetResponse` 503 path in `server-runtime.ts` with richer "packaged but web-unsupported" messaging. |
-| T008 | Should add a web-readiness check in the gateway startup path (`server.ts`) that logs whether the web experience is available before the server starts listening. |
-| T009 | Must document the supported packaged web launch path (or its absence) in `apps/web/README.md` and `apps/web-gateway/README.md`. |
-| T010 | Must update top-level `README.md` with the packaged web launch story once T005–T009 land. |
+| T006 | Must extend `.packfiles` manifest and cleanup to cover any new web artifacts added by T005.                                                                                                                                                                                                                                                            |
+| T007 | Can extend the existing `createStaticAssetResponse` 503 path in `server-runtime.ts` with richer "packaged but web-unsupported" messaging.                                                                                                                                                                                                              |
+| T008 | Should add a web-readiness check in the gateway startup path (`server.ts`) that logs whether the web experience is available before the server starts listening.                                                                                                                                                                                       |
+| T009 | Must document the supported packaged web launch path (or its absence) in `apps/web/README.md` and `apps/web-gateway/README.md`.                                                                                                                                                                                                                        |
+| T010 | Must update top-level `README.md` with the packaged web launch story once T005–T009 land.                                                                                                                                                                                                                                                              |
 
 ## Implementation Phases
 

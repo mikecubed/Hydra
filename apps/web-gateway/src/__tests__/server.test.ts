@@ -2,9 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatStartupLines, type GatewayServerConfig } from '../server-runtime.ts';
 
-function buildTestConfig(
-  overrides: Partial<GatewayServerConfig> = {},
-): GatewayServerConfig {
+function buildTestConfig(overrides: Partial<GatewayServerConfig> = {}): GatewayServerConfig {
   return {
     host: '127.0.0.1',
     port: 4174,

@@ -257,28 +257,34 @@ describe('packaging', { timeout: 120_000 }, () => {
 
     let output = '';
     try {
-      await new Promise((resolve, reject) => {
+      await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
           reject(new Error(`Timed out waiting for startup. Output: ${output}`));
         }, 10_000);
         child.stdout.on('data', (chunk) => {
-          output += chunk.toString();
+          output += String(chunk);
           if (output.includes('Hydra web gateway listening on')) {
             clearTimeout(timer);
-            resolve(undefined);
+            resolve();
           }
         });
         child.stderr.on('data', (chunk) => {
-          output += chunk.toString();
+          output += String(chunk);
         });
         child.once('exit', (code) => {
           clearTimeout(timer);
-          reject(new Error(`Packaged server exited early with code ${String(code)}. Output: ${output}`));
+          reject(
+            new Error(`Packaged server exited early with code ${String(code)}. Output: ${output}`),
+          );
         });
       });
     } finally {
       child.kill('SIGTERM');
-      await new Promise((resolve) => child.once('exit', () => resolve(undefined)));
+      await new Promise<void>((resolve) => {
+        child.once('exit', () => {
+          resolve();
+        });
+      });
       fs.rmSync(stateDir, { recursive: true, force: true });
     }
   });
@@ -398,9 +404,7 @@ describe('packaging', { timeout: 120_000 }, () => {
       );
 
       // package.json should not be mutated (no .ts → .js rewrite persisted)
-      const failPkg = JSON.parse(
-        fs.readFileSync(path.join(failClone, 'package.json'), 'utf8'),
-      );
+      const failPkg = JSON.parse(fs.readFileSync(path.join(failClone, 'package.json'), 'utf8'));
       assert.ok(
         (failPkg.scripts.start as string).includes('.ts'),
         'package.json scripts.start should still reference .ts after failed prepack cleanup',

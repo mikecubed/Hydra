@@ -114,11 +114,6 @@ try {
     fs.mkdirSync(WEB_RUNTIME_DIR, { recursive: true });
 
     const serverOut = path.join(WEB_RUNTIME_DIR, 'server.js');
-    const esbuildBanner = [
-      'import { dirname as __pkgDir } from "node:path";',
-      'import { fileURLToPath as __pkgUrl } from "node:url";',
-      'process.env.HYDRA_WEB_STATIC_DIR ??= __pkgDir(__pkgUrl(import.meta.url)) + "/web";',
-    ].join('\n');
     const { build } = await import('esbuild');
     await build({
       entryPoints: [GATEWAY_ENTRY],
@@ -195,12 +190,12 @@ try {
 
   fs.writeFileSync(PKG_PATH, `${JSON.stringify(pkg, null, 2)}\n`);
   console.log('[prepack] Done.');
-} catch (error) {
+} catch (err) {
   cleanupFailedPrepack();
-  if (error instanceof Error) {
-    console.error(`[prepack] ${error.message}`);
+  if (err instanceof Error) {
+    console.error(`[prepack] ${err.message}`);
   } else {
-    console.error('[prepack] Packaging failed.', error);
+    console.error('[prepack] Packaging failed.', err);
   }
   exit(1);
 }

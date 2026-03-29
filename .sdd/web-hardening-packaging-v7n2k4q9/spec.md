@@ -23,7 +23,7 @@ experience so it can be used and evolved with higher confidence.
 - Contributor-facing guidance is part of scope because the roadmap explicitly includes
   documentation updates and packaging integration.
 
-## User Scenarios & Testing *(mandatory)*
+## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - Packaged Web Operator Experience (Priority: P1)
 
@@ -161,7 +161,7 @@ complete the documented verification and packaging path without source-diving fo
 - How is operator guidance presented when a packaging artifact exists but the local environment is
   missing a runtime prerequisite?
 
-## Requirements *(mandatory)*
+## Requirements _(mandatory)_
 
 ### Functional Requirements
 
@@ -189,7 +189,7 @@ complete the documented verification and packaging path without source-diving fo
 - **FR-012**: The system MUST keep the web phase aligned with the established web-interface security
   posture during packaging and hardening work.
 
-### Key Entities *(include if feature involves data)*
+### Key Entities _(include if feature involves data)_
 
 - **Packaged Web Experience**: A supported distribution path that allows an operator to start and
   reach the web interface with documented steps and stated prerequisites.
@@ -202,7 +202,7 @@ complete the documented verification and packaging path without source-diving fo
 - **Contributor Readiness Guide**: The documentation set that explains how to run, verify, package,
   and troubleshoot the web interface.
 
-## Success Criteria *(mandatory)*
+## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 

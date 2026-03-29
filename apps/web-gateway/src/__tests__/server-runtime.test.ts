@@ -209,7 +209,7 @@ describe('missingAssetsMessage', () => {
   });
 
   it('defaults to source-checkout guidance when source is undefined', () => {
-    const msg = missingAssetsMessage(undefined);
+    const msg = missingAssetsMessage();
     assert.match(msg, /npm --workspace @hydra\/web run build/);
   });
 });

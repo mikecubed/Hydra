@@ -4,7 +4,11 @@ import { AuditStore } from './audit/audit-store.ts';
 import { OperatorStore } from './auth/operator-store.ts';
 import { createGatewayApp } from './index.ts';
 import { SessionStore } from './session/session-store.ts';
-import { createStaticAssetResponse, formatStartupLines, resolveGatewayServerConfig } from './server-runtime.ts';
+import {
+  createStaticAssetResponse,
+  formatStartupLines,
+  resolveGatewayServerConfig,
+} from './server-runtime.ts';
 
 async function seedOperatorIfConfigured(
   operatorStore: OperatorStore,

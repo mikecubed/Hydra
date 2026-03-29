@@ -190,7 +190,7 @@ export function describeStaticDirSource(source: StaticDirSource): string {
   }
 }
 
-export function missingAssetsMessage(source: StaticDirSource | undefined): string {
+export function missingAssetsMessage(source?: StaticDirSource): string {
   switch (source) {
     case 'packaged':
       return (
@@ -203,6 +203,8 @@ export function missingAssetsMessage(source: StaticDirSource | undefined): strin
         'Frontend assets not found at the path specified by HYDRA_WEB_STATIC_DIR. ' +
         'Verify the directory contains a built web frontend (index.html).'
       );
+    case 'source-checkout':
+    case undefined:
     default:
       return 'Missing built frontend assets. Run `npm --workspace @hydra/web run build` first.';
   }

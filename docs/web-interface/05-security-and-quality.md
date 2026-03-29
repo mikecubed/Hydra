@@ -81,13 +81,13 @@ gateway running locally.
 These are Phase 0 target budgets. Enforcement via CI is planned for the evidence-hook tasks
 (T021–T025).
 
-| Metric                        | Threshold     | Evidence command                                  |
-| ----------------------------- | ------------- | ------------------------------------------------- |
-| Production build succeeds     | exit 0        | `npm --workspace @hydra/web run build`            |
-| JS bundle size (gzipped)      | ≤ 250 KB      | Vite build output — check total gzip column       |
-| CSS bundle size (gzipped)     | ≤ 50 KB       | Vite build output — check total gzip column       |
-| Build time                    | ≤ 30 s        | Wall-clock time of build command                  |
-| Root CLI package dry-run succeeds | exit 0     | `npm run package:dry-run` (validates root CLI package only) |
+| Metric                            | Threshold | Evidence command                                            |
+| --------------------------------- | --------- | ----------------------------------------------------------- |
+| Production build succeeds         | exit 0    | `npm --workspace @hydra/web run build`                      |
+| JS bundle size (gzipped)          | ≤ 250 KB  | Vite build output — check total gzip column                 |
+| CSS bundle size (gzipped)         | ≤ 50 KB   | Vite build output — check total gzip column                 |
+| Build time                        | ≤ 30 s    | Wall-clock time of build command                            |
+| Root CLI package dry-run succeeds | exit 0    | `npm run package:dry-run` (validates root CLI package only) |
 
 ### Runtime responsiveness targets
 
@@ -97,19 +97,19 @@ integration tests. Timing and profiling targets (marked 🔮) require real-brows
 that is not yet in place — they are recorded here as design intent and will become enforceable once
 evidence-hook work lands (see T021–T025 in the task graph).
 
-| Surface                       | Metric                          | Target    | Verifiable now |
-| ----------------------------- | ------------------------------- | --------- | -------------- |
-| Login page                    | Mounts without error            | yes       | ✅              |
-| Authenticated workspace       | Mounts without error            | yes       | ✅              |
-| Operations panels             | Renders initial content          | yes       | ✅              |
-| Mutation dialogs              | Open-to-interactive             | ≤ 500 ms  | 🔮              |
-| Live update cycle             | Input-to-render latency         | ≤ 200 ms  | 🔮              |
-| Repeated refresh (10 cycles)  | No unreclaimed subscriptions    | 0 leaks   | ✅              |
-| WebSocket reconnect           | Reconnect attempt initiated     | ≤ 3 s     | ✅              |
-| Login page                    | Time to interactive (TTI)       | ≤ 2 s     | 🔮              |
-| Authenticated workspace       | Time to interactive (TTI)       | ≤ 3 s     | 🔮              |
-| Operations panels             | First meaningful paint (FMP)    | ≤ 2 s     | 🔮              |
-| Repeated refresh (10 cycles)  | Cumulative memory growth        | < 5 %     | 🔮              |
+| Surface                      | Metric                       | Target   | Verifiable now |
+| ---------------------------- | ---------------------------- | -------- | -------------- |
+| Login page                   | Mounts without error         | yes      | ✅             |
+| Authenticated workspace      | Mounts without error         | yes      | ✅             |
+| Operations panels            | Renders initial content      | yes      | ✅             |
+| Mutation dialogs             | Open-to-interactive          | ≤ 500 ms | 🔮             |
+| Live update cycle            | Input-to-render latency      | ≤ 200 ms | 🔮             |
+| Repeated refresh (10 cycles) | No unreclaimed subscriptions | 0 leaks  | ✅             |
+| WebSocket reconnect          | Reconnect attempt initiated  | ≤ 3 s    | ✅             |
+| Login page                   | Time to interactive (TTI)    | ≤ 2 s    | 🔮             |
+| Authenticated workspace      | Time to interactive (TTI)    | ≤ 3 s    | 🔮             |
+| Operations panels            | First meaningful paint (FMP) | ≤ 2 s    | 🔮             |
+| Repeated refresh (10 cycles) | Cumulative memory growth     | < 5 %    | 🔮             |
 
 ### Evidence expectations
 
@@ -135,22 +135,22 @@ regressions from going unnoticed between phases.
 
 ### State and rendering limits
 
-| Concern                           | Budget                                        | Verification (target)                           |
-| --------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| Unnecessary rerenders per update  | ≤ 3 render cycles per single state change     | Browser spec profiling assertions (🔮 T021–T025) |
-| Visible DOM node count            | ≤ 2 000 nodes on any primary surface          | Browser spec DOM measurement (🔮 T021–T025)      |
-| Daemon replay concurrency         | ≤ 8 concurrent replay fetches per connection  | Gateway transport defaults + tests (✅)          |
-| Error retry storms                | Capped per subsystem: stream reconnect ≤ 10 attempts (1–30 s backoff), approval hydration ≤ 3 retries; all surface failure on exhaustion | Gateway and browser spec assertions (✅) |
+| Concern                          | Budget                                                                                                                                   | Verification (target)                            |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Unnecessary rerenders per update | ≤ 3 render cycles per single state change                                                                                                | Browser spec profiling assertions (🔮 T021–T025) |
+| Visible DOM node count           | ≤ 2 000 nodes on any primary surface                                                                                                     | Browser spec DOM measurement (🔮 T021–T025)      |
+| Daemon replay concurrency        | ≤ 8 concurrent replay fetches per connection                                                                                             | Gateway transport defaults + tests (✅)          |
+| Error retry storms               | Capped per subsystem: stream reconnect ≤ 10 attempts (1–30 s backoff), approval hydration ≤ 3 retries; all surface failure on exhaustion | Gateway and browser spec assertions (✅)         |
 
 ### Failure-mode guardrails
 
-| Scenario                       | Required behavior                                          |
-| ------------------------------ | ---------------------------------------------------------- |
-| Daemon unreachable             | Visible degraded banner within 5 s; no silent retry loop   |
-| Session expired                | Redirect to login within 2 s; no stale-state flash         |
-| Mutation rejected              | Error shown in-place; no false success indication          |
+| Scenario                       | Required behavior                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------ |
+| Daemon unreachable             | Visible degraded banner within 5 s; no silent retry loop                             |
+| Session expired                | Redirect to login within 2 s; no stale-state flash                                   |
+| Mutation rejected              | Error shown in-place; no false success indication                                    |
 | WebSocket dropped              | ≤ 10 reconnect attempts; exponential backoff 1–30 s, then surface disconnected state |
-| Gateway startup without assets | Clear unsupported-state message; no blank page              |
+| Gateway startup without assets | Clear unsupported-state message; no blank page                                       |
 
 ### Evidence expectations
 
