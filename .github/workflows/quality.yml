@@ -413,7 +413,7 @@ jobs:
             if [ -z "$gzip_kb" ]; then
               continue
             fi
-            # Convert to integer bytes for comparison (multiply by 1000, truncate)
+            # Convert to integer bytes for comparison (multiply by 1024, truncate)
             gzip_bytes=$(echo "$gzip_kb" | awk '{printf "%d", $1 * 1024}')
             if echo "$line" | grep -qE '\.js(\s|$)'; then
               js_total=$((js_total + gzip_bytes))
