@@ -73,13 +73,17 @@ function getBudgetRowFeedback(id: string, row: BudgetRowState): BudgetRowFeedbac
   const dailyLimit = parsePositiveInt(row.dailyInput);
   const weeklyLimit = parsePositiveInt(row.weeklyInput);
   const validationError = validateRow(row);
+  const hasInput = row.dailyInput !== '' || row.weeklyInput !== '';
+  const errorVisible = validationError !== null && hasInput;
   return {
     validationError,
     showAdvisory: dailyLimit !== null && weeklyLimit !== null && dailyLimit > weeklyLimit,
-    hasInput: row.dailyInput !== '' || row.weeklyInput !== '',
+    hasInput,
     errorId: `budget-error-${id}`,
-    isDailyInvalid: validationError?.field === 'daily' || validationError?.field === 'row',
-    isWeeklyInvalid: validationError?.field === 'weekly' || validationError?.field === 'row',
+    isDailyInvalid:
+      errorVisible && (validationError.field === 'daily' || validationError.field === 'row'),
+    isWeeklyInvalid:
+      errorVisible && (validationError.field === 'weekly' || validationError.field === 'row'),
   };
 }
 

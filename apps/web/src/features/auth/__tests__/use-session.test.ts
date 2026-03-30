@@ -578,4 +578,35 @@ describe('useSession', () => {
 
     mgr.destroy();
   });
+
+  it('manual refresh() resets pollErrorCount to 0 after poll errors', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        // First call succeeds (initial fetch), second fails (poll), third succeeds (refresh)
+        if (callCount === 1) return makeSession();
+        if (callCount === 2) throw new Error('network error');
+        return makeSession();
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0, 'initial fetch succeeds');
+
+    // Trigger a poll failure
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 1, 'poll error incremented');
+
+    // Manual refresh should reset pollErrorCount
+    const info = await mgr.refresh();
+    assert.ok(info !== null, 'refresh returns session info');
+    assert.equal(mgr.getState().pollErrorCount, 0, 'refresh resets pollErrorCount');
+
+    mgr.destroy();
+  });
 });
