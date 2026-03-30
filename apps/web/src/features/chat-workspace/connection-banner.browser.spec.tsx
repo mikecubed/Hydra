@@ -318,6 +318,7 @@ describe('ConnectionBanner reload action (T012)', () => {
     const btn = screen.getByTestId('connection-reload-button');
     expect(btn).toBeInTheDocument();
     expect(btn).toHaveTextContent('Reload page');
+    expect(btn).toHaveAttribute('type', 'button');
   });
 
   it('does not show reload button during active reconnect attempts', () => {

@@ -211,6 +211,7 @@ export function ConnectionBanner({
       <span>{message}</span>
       {showReload && (
         <button
+          type="button"
           data-testid="connection-reload-button"
           style={reloadButtonStyle}
           onClick={() => {
