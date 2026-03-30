@@ -12,7 +12,7 @@
  *                        expiring-soon, daemon recovering
  */
 
-import { createContext, type JSX } from 'react';
+import { createContext, type CSSProperties, type JSX } from 'react';
 import type { WorkspaceConnectionState } from '../../../shared/session-state.ts';
 import {
   describeConnectionState,
@@ -39,6 +39,8 @@ export interface ConnectionBannerProps {
   readonly staleControlReason?: string | null;
   /** General convergence hint for informational display (info severity). */
   readonly convergenceHint?: string | null;
+  /** Callback invoked when the operator clicks the "Reload page" action. Defaults to `location.reload()`. */
+  readonly onReload?: () => void;
 }
 
 type BannerSeverity = 'info' | 'warning' | 'error';
@@ -144,6 +146,18 @@ function resolveExtraMessage(
   return null;
 }
 
+const reloadButtonStyle: CSSProperties = {
+  background: 'rgba(248, 113, 113, 0.25)',
+  color: '#fca5a5',
+  border: '1px solid rgba(248, 113, 113, 0.4)',
+  borderRadius: '4px',
+  padding: '4px 12px',
+  fontSize: '0.8125rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+  marginLeft: 'auto',
+};
+
 /**
  * Displays a connection status banner when the workspace is not fully
  * operational. Returns `null` when everything is healthy.
@@ -152,11 +166,15 @@ function resolveExtraMessage(
  * session), a warning-severity banner is shown even on a fully operational
  * connection. Connection-level issues take precedence over stale-control
  * messaging. `convergenceHint` provides lighter informational messaging.
+ *
+ * When reconnect retries are exhausted, a "Reload page" action is shown
+ * so the operator has a clear manual recovery path.
  */
 export function ConnectionBanner({
   connection,
   staleControlReason,
   convergenceHint,
+  onReload,
 }: ConnectionBannerProps): JSX.Element | null {
   const hasStale = hasBannerText(staleControlReason);
   const extraMessage = resolveExtraMessage(staleControlReason, convergenceHint);
@@ -169,6 +187,7 @@ export function ConnectionBanner({
   const severity = resolveBannerSeverity(quiet, connectionSeverity, hasStale);
   const message = resolveBannerMessage(connection, quiet, extraMessage);
   const isAlert = severity === 'error';
+  const showReload = hasExhaustedRetries(connection) || isSessionTerminal(connection);
 
   const severityStyle = SEVERITY_STYLES[severity];
 
@@ -190,6 +209,22 @@ export function ConnectionBanner({
     >
       <span aria-hidden="true">{isAlert ? '⚠' : '◌'}</span>
       <span>{message}</span>
+      {showReload && (
+        <button
+          type="button"
+          data-testid="connection-reload-button"
+          style={reloadButtonStyle}
+          onClick={() => {
+            if (onReload) {
+              onReload();
+            } else {
+              globalThis.location.reload();
+            }
+          }}
+        >
+          Reload page
+        </button>
+      )}
     </div>
   );
 }

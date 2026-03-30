@@ -454,4 +454,159 @@ describe('useSession', () => {
     assert.equal(lastCreatedWs.closeCalled, true, 'WebSocket should be closed');
     assert.equal(pendingTimers.length, 0, 'polling timers should be cleared');
   });
+
+  it('refresh() re-arms polling and WebSocket monitoring after daemon-unreachable recovery', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        return callCount === 1
+          ? makeSession({ state: 'daemon-unreachable' })
+          : makeSession({ state: 'active' });
+      },
+      WebSocketCtor: makeWsCtor(),
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+
+    assert.equal(mgr.getState().session?.state, 'daemon-unreachable');
+    assert.equal(pendingTimers.length, 0, 'daemon-unreachable should pause polling');
+    assert.equal(lastCreatedWs, null, 'daemon-unreachable should not hold a live WebSocket');
+
+    const refreshed = await mgr.refresh();
+
+    assert.equal(refreshed?.state, 'active');
+    assert.ok(lastCreatedWs !== null, 'refresh recovery should recreate WebSocket monitoring');
+    assert.ok(pendingTimers.length > 0, 'refresh recovery should re-schedule polling');
+
+    flushTimers();
+    await tick();
+    await tick();
+
+    assert.equal(callCount, 3, 'resumed polling should fetch session info again');
+
+    mgr.destroy();
+  });
+
+  // ── Poll error tracking (T012 / FD-1) ──────────────────────────────────
+
+  it('pollErrorCount starts at 0 after successful initial fetch', async () => {
+    const deps = makeDeps();
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+
+    assert.equal(mgr.getState().pollErrorCount, 0);
+    mgr.destroy();
+  });
+
+  it('pollErrorCount increments on consecutive poll failures', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        if (callCount === 1) return makeSession();
+        throw new Error('network error');
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0, 'initial fetch succeeds');
+
+    // First poll failure
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 1, 'first poll error');
+
+    // Second poll failure
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 2, 'second poll error');
+
+    mgr.destroy();
+  });
+
+  it('pollErrorCount resets to 0 on successful poll after errors', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        if (callCount === 1) return makeSession();
+        if (callCount === 2) throw new Error('network error');
+        return makeSession(); // third call succeeds
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0);
+
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 1, 'error incremented');
+
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0, 'reset after success');
+
+    mgr.destroy();
+  });
+
+  it('pollErrorCount is 1 when initial fetch fails', async () => {
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        throw new Error('initial fetch failed');
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+
+    assert.equal(mgr.getState().pollErrorCount, 1);
+    assert.equal(mgr.getState().session, null);
+    assert.equal(mgr.getState().isLoading, false);
+
+    mgr.destroy();
+  });
+
+  it('manual refresh() resets pollErrorCount to 0 after poll errors', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      getSessionInfo: async () => {
+        callCount++;
+        // First call succeeds (initial fetch), second fails (poll), third succeeds (refresh)
+        if (callCount === 1) return makeSession();
+        if (callCount === 2) throw new Error('network error');
+        return makeSession();
+      },
+    });
+
+    const mgr = createSessionManager(deps);
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 0, 'initial fetch succeeds');
+
+    // Trigger a poll failure
+    flushTimers();
+    await tick();
+    await tick();
+    assert.equal(mgr.getState().pollErrorCount, 1, 'poll error incremented');
+
+    // Manual refresh should reset pollErrorCount
+    const info = await mgr.refresh();
+    assert.ok(info !== null, 'refresh returns session info');
+    assert.equal(mgr.getState().pollErrorCount, 0, 'refresh resets pollErrorCount');
+
+    mgr.destroy();
+  });
 });

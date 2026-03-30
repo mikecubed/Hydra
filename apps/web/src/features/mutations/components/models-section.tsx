@@ -67,14 +67,18 @@ function ModelRow({
   onConfirm,
 }: ModelRowProps): JSX.Element {
   const isUnchanged = row.selectedTier === currentTier;
+  const currentTierId = `model-tier-current-${agent}`;
   return (
     <div aria-label={`Model config for ${agent}`}>
       <span>{agent}</span>
-      <span aria-label={`Current tier: ${currentTier}`}>{currentTier}</span>
+      <span id={currentTierId} aria-label={`Current tier: ${currentTier}`}>
+        {currentTier}
+      </span>
       <label htmlFor={`tier-select-${agent}`}>Tier</label>
       <select
         id={`tier-select-${agent}`}
         value={row.selectedTier}
+        aria-describedby={currentTierId}
         onChange={(e) => {
           onTierChange(e.target.value as ModelTier);
         }}

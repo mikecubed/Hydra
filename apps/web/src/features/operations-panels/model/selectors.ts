@@ -2,8 +2,15 @@
  * Derived selectors for the operations panels workspace.
  *
  * Each selector extracts a commonly-needed slice of OperationsWorkspaceState
- * so UI components never duplicate map-lookup / filter plumbing. All functions
- * are pure — no hidden state, no side effects.
+ * so UI components never duplicate map-lookup / filter plumbing. Most
+ * selectors are pure functions with no hidden state.
+ *
+ * **Exception:** {@link selectFilteredQueueItems} uses module-level
+ * last-call memoization for reference stability (avoiding unnecessary
+ * re-renders). The cache is keyed on the `items` array reference and
+ * the `statusFilter` array reference, so it is automatically invalidated
+ * whenever the underlying state changes and never leaks stale results
+ * across different state instances.
  */
 
 import type {
@@ -35,10 +42,24 @@ export function selectSnapshotStatus(state: OperationsWorkspaceState): SnapshotS
   return state.snapshotStatus;
 }
 
+/** Error message from the most recent snapshot fetch failure, or null. */
+export function selectSnapshotErrorMessage(state: OperationsWorkspaceState): string | null {
+  return state.snapshotErrorMessage;
+}
+
 /** All queue items from the current snapshot, or empty if no snapshot. */
 export function selectQueueItems(state: OperationsWorkspaceState): readonly WorkQueueItemView[] {
   return state.snapshot?.queue ?? EMPTY_QUEUE;
 }
+
+/**
+ * Last-call memoization cache for {@link selectFilteredQueueItems}.
+ * Keyed on object identity of the items array and statusFilter array
+ * so the cache is invalidated whenever state changes.
+ */
+let _filteredLastItems: readonly WorkQueueItemView[] | null = null;
+let _filteredLastFilter: readonly WorkItemStatus[] | null = null;
+let _filteredLastResult: readonly WorkQueueItemView[] = EMPTY_QUEUE;
 
 /**
  * Queue items filtered by the current status filter.
@@ -54,8 +75,17 @@ export function selectFilteredQueueItems(
     return items;
   }
 
+  if (items === _filteredLastItems && statusFilter === _filteredLastFilter) {
+    return _filteredLastResult;
+  }
+
   const allowed = new Set(statusFilter);
-  return items.filter((item) => allowed.has(item.status));
+  const result = items.filter((item) => allowed.has(item.status));
+
+  _filteredLastItems = items;
+  _filteredLastFilter = statusFilter;
+  _filteredLastResult = result;
+  return result;
 }
 
 /** ID of the currently selected work item, or null. */

@@ -70,23 +70,314 @@ The web initiative should use the strictest practical engineering discipline.
 - no unchecked `any` escape hatches in protocol packages;
 - mandatory tests for new public contracts and stateful workflows.
 
+## Accessibility Expectations
+
+The highest-value operator workflows must remain keyboard-operable and assistive-technology-friendly
+across both nominal and degraded states.
+
+### Required interaction guarantees
+
+- Login, composer submission, mutation confirmation, and operations controls must be completable with
+  keyboard-only interaction.
+- Dialogs and other blocking confirmation surfaces must place initial focus predictably, support
+  `Escape` dismissal when cancellation is available, and keep keyboard focus trapped inside the
+  active dialog until it closes.
+- Inline validation, degraded banners, retry guidance, and other important error states must be
+  exposed through explicit `role="alert"` / `role="status"` semantics or equivalent ARIA wiring —
+  not through color or layout alone.
+- Inputs and selectors that depend on supporting text (policy guidance, current status, validation
+  copy, pending-state explanations) must link that text through `aria-describedby` so the context is
+  available to assistive technology.
+- Async state transitions that materially change operator understanding — for example daemon recovery,
+  operations refresh state, or degraded retry feedback — must be announced in polite or assertive
+  live regions appropriate to their severity.
+
+### Evidence expectations for accessibility
+
+- Browser specs must cover login, workspace composer, operations panels, and mutation dialogs for
+  keyboard/focus/error-state behavior.
+- Dialog primitives and route-level shells should be tested through the real mounted feature path
+  whenever practical, so accessibility regressions are caught in shared components as well as in
+  feature-local wrappers.
+- `npm run quality` remains required for accessibility work because lint, formatting, type-checking,
+  and cycle detection protect the maintainability of these stateful UI flows.
+
+## Supported Viewport Range
+
+The current operator-facing browser surface is supported for **full workflow completion** at viewport
+widths of **1024 px and above**. This range reflects the present two-column workspace and operations
+sidebar layout, including the guarded `minWidth: 0` grid behavior used to prevent the chat column
+from blowing out during operations refreshes.
+
+Additional notes:
+
+- The login screen, session banners, and modal dialogs remain usable below 1024 px, but the full
+  authenticated workspace + operations-sidebar experience is not yet treated as release-ready below
+  that width.
+- Narrower viewport hardening remains a Phase 4 concern (T021–T025). Until that work lands, widths
+  below 1024 px are best-effort for inspection and recovery, not the guaranteed operator target.
+- Documentation and review should treat unexpected overlap, hidden controls, or task-blocking
+  clipping at 1024 px and above as regressions against this supported range.
+
+## Responsiveness Budgets
+
+Every primary web surface must meet explicit responsiveness targets under normal local operating
+conditions. "Normal" means one active operator session on a development machine with the daemon and
+gateway running locally.
+
+### Build and bundle targets
+
+| Metric                         | Threshold | Evidence command                                                    | CI enforced |
+| ------------------------------ | --------- | ------------------------------------------------------------------- | ----------- |
+| Production build succeeds      | exit 0    | `npm --workspace @hydra/web run build`                              | ✅          |
+| JS bundle size (gzipped)       | ≤ 250 KB  | Vite build output — check total gzip column                         | ✅          |
+| CSS bundle size (gzipped)      | ≤ 50 KB   | Vite build output — check total gzip column                         | ✅          |
+| Build time                     | ≤ 30 s    | Wall-clock time of build command                                    | ✅          |
+| Root package evidence succeeds | exit 0    | `npm run package:evidence` (dry-run pack + packaged tarball checks) | ✅          |
+
+The `web-responsiveness` job in `.github/workflows/quality.yml` enforces the first four rows on the
+workflow's currently configured trigger set: pushes to `main` / `dev` / `fix/**` / `feat/**` /
+`feature/**` / `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` /
+`feature/**`. The job builds the web workspace, parses Vite's output for gzipped asset sizes, and
+fails the run if any threshold is exceeded. Build time is measured via wall-clock timing of the
+build step. Packaging scope now has its own evidence wiring in `.github/workflows/ci.yml` via the
+`package-evidence` job (`npm run package:evidence`) plus the Windows `exe-build-evidence` job
+(`npm run build:exe:ci`), so packaging verification is explicit without overloading the
+`web-responsiveness` gate.
+
+### Runtime responsiveness targets
+
+The following targets define the expected user-perceived responsiveness for each primary surface.
+Behavioral targets (marked ✅) can be verified today through jsdom-based browser specs and
+integration tests. Timing and profiling targets (marked 🔮) require real-browser instrumentation
+that is not yet in place — they are recorded here as design intent and will become enforceable once
+evidence-hook work lands (see T023–T025 in the task graph). T021 defines the collection points for
+the ✅ rows, but those behavioral targets are not yet promoted to a blocking repo-wide CI gate.
+
+| Surface                      | Metric                       | Target   | Verifiable now |
+| ---------------------------- | ---------------------------- | -------- | -------------- |
+| Login page                   | Mounts without error         | yes      | ✅             |
+| Authenticated workspace      | Mounts without error         | yes      | ✅             |
+| Operations panels            | Renders initial content      | yes      | ✅             |
+| Mutation dialogs             | Open-to-interactive          | ≤ 500 ms | 🔮             |
+| Live update cycle            | Input-to-render latency      | ≤ 200 ms | 🔮             |
+| Repeated refresh (10 cycles) | No unreclaimed subscriptions | 0 leaks  | ✅             |
+| WebSocket reconnect          | Reconnect attempt initiated  | ≤ 3 s    | ✅             |
+| Login page                   | Time to interactive (TTI)    | ≤ 2 s    | 🔮             |
+| Authenticated workspace      | Time to interactive (TTI)    | ≤ 3 s    | 🔮             |
+| Operations panels            | First meaningful paint (FMP) | ≤ 2 s    | 🔮             |
+| Repeated refresh (10 cycles) | Cumulative memory growth     | < 5 %    | 🔮             |
+
+### Evidence collection points
+
+Evidence for responsiveness budgets is collected at three layers, ordered from cheapest (CI) to
+most expensive (manual profiling):
+
+1. **CI — `web-responsiveness` job** (`.github/workflows/quality.yml`). Runs on the workflow's
+   configured trigger set (pushes to `main` / `dev` / `fix/**` / `feat/**` / `feature/**` /
+   `track/**`, plus pull requests targeting `main` / `fix/**` / `feat/**` / `feature/**`).
+   Collects the currently blocking build-side evidence:
+   - Build success / failure (exit code).
+   - JS and CSS gzipped sizes parsed from Vite build output.
+   - Build wall-clock time.
+
+2. **Existing repository evidence commands** (run directly while the broader responsiveness phase is
+   still landing):
+   - Browser specs for representative workspace and operations flows.
+   - Gateway tests (`npm --workspace @hydra/web-gateway run test`) for reconnect/refresh behavior.
+   - Contract tests (`npm --workspace @hydra/web-contracts run test`) for browser-safe state shapes.
+     These commands are evidence collection points today, but they are not all yet promoted into the
+     blocking `web-responsiveness` CI job because the broader Phase 4 responsiveness work is still in
+     progress.
+
+3. **Existing repository quality checks** (`.github/workflows/quality.yml`). Separate jobs already
+   enforce repo formatting/linting, TypeScript verification for the checked packages, and circular
+   import detection via `npm run lint:cycles`. Those checks remain complementary to
+   `web-responsiveness`; T021 does not add `npm run quality` or the web workspace's
+   `typecheck:workspace` command as new blocking CI steps.
+
+4. **Manual / future instrumentation** (review-only until real-browser tooling lands):
+   - TTI, FMP, and memory profiling for the 🔮 rows in the runtime table above.
+   - Input-to-render latency measurement for live update cycles.
+   - These remain design targets tracked by review. When real-browser instrumentation is introduced
+     in a later phase, the `web-responsiveness` job should be extended to run those checks.
+
+Budget thresholds are intentionally generous for Phase 0. Later phases may tighten them and
+introduce real-browser profiling as instrumentation matures.
+
+## Hardening Budgets
+
+Hardening budgets define the maximum tolerable degradation during adverse conditions. These prevent
+regressions from going unnoticed between phases.
+
+### State and rendering limits
+
+| Concern                          | Budget                                                                                                                                   | Verification (target)                            |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Unnecessary rerenders per update | ≤ 3 render cycles per single state change                                                                                                | Browser spec profiling assertions (🔮 T023–T025) |
+| Visible DOM node count           | ≤ 2 000 nodes on any primary surface                                                                                                     | Browser spec DOM measurement (🔮 T023–T025)      |
+| Daemon replay concurrency        | ≤ 8 concurrent replay fetches per connection                                                                                             | Gateway transport defaults + tests (✅)          |
+| Error retry storms               | Capped per subsystem: stream reconnect ≤ 10 attempts (1–30 s backoff), approval hydration ≤ 3 retries; all surface failure on exhaustion | Gateway and browser spec assertions (✅)         |
+
+### Failure-mode guardrails
+
+| Scenario                       | Required behavior                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------ |
+| Daemon unreachable             | Visible degraded banner within 5 s; no silent retry loop                             |
+| Session expired                | Redirect to login within 2 s; no stale-state flash                                   |
+| Mutation rejected              | Error shown in-place; no false success indication                                    |
+| WebSocket dropped              | ≤ 10 reconnect attempts; exponential backoff 1–30 s, then surface disconnected state |
+| Gateway startup without assets | Clear unsupported-state message; no blank page                                       |
+
+### Failure-drill matrix (US2)
+
+This matrix details the concrete failure scenarios that User Story 2 ("Safe Recovery During
+Failures") requires. Each row names the scenario, the expected operator-visible behavior, current
+evidence (code paths and tests that exist today), and gaps that follow-on tasks T012–T016 must
+close.
+
+**Legend**: ✅ = covered by existing code and tests today; 🔧 = code path exists but test coverage
+or UX polish is incomplete; 🔮 = not yet implemented — future work.
+
+#### FD-1 Session expired during active use
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Session reaches its expiry time or the daemon invalidates it (idle timeout, explicit revocation).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Expected behavior** | Operator sees a clear "session expired" indication within 2 s. No stale-state flash, no false success. Protected actions attempted after expiry must not succeed silently.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Current evidence**  | `useSession` (auth/hooks/use-session.ts) polls `/session/info` on a 60 s cycle and subscribes to WebSocket `SessionEvent` messages. On `expired` or `invalidated` state the hook stops polling. `ExpiryBanner` (auth/components/expiry-banner.tsx) renders an "Extend Session" action when `state === 'expiring-soon'`. Gateway rejects reconnect attempts after expiry with `SESSION_EXPIRED` / `SESSION_INVALIDATED` 401 (transport/ws-server tests, ~1 300 lines). Browser-side `requiresReauth()` (web/src/shared/gateway-errors.ts) classifies these codes. Browser specs cover expiry banner rendering and session-provider wiring. ✅ |
+| **Gaps**              | Poll errors during the expiry window are silently swallowed — a network blip can delay expiry detection beyond the 2 s target. No explicit redirect-to-login on expiry today; session context stops polling but the browser surface may remain mounted with stale state. The `extend()` action has no timeout or user-visible feedback if the reauth call hangs. **T012** should tighten the redirect and surface poll-error feedback; **T015/T016** should add gateway and browser drill coverage for the delayed-detection edge case. 🔧                                                                                                   |
+
+#### FD-2 Daemon unreachable (backend down or network partition)
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Hydra daemon process stops, crashes, or becomes unreachable from the gateway.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Expected behavior** | Visible degraded banner within 5 s. No silent retry loop. "Check again" action available. Session remains valid (operator is not logged out).                                                                                                                                                                                                                                                                                                                                                                        |
+| **Current evidence**  | `DaemonUnreachable` component (auth/components/daemon-unreachable.tsx) renders when `state === 'daemon-unreachable'` with a "Check again" button that calls `refresh()`. Errors from refresh are caught silently (no redirect to login). `WorkspaceConnectionState.daemonStatus` tracks `'healthy'                                                                                                                                                                                                                   | 'unavailable' | 'recovering'`. Connection banner (chat-workspace/components/connection-banner.tsx) escalates to assertive alert severity for daemon-down state. Gateway broadcasts `daemon-unavailable`and`daemon-restored`events over WebSocket via`session-ws-bridge.ts`. Gateway returns `DAEMON_UNREACHABLE`(503) with optional`retryAfterMs`. Browser specs cover daemon-unreachable banner rendering, retry button behavior, and ARIA semantics. ✅ |
+| **Gaps**              | The "Check again" button swallows errors without user feedback — repeated silent failures look identical to the first. No timeout on the refresh call itself. Connection banner does not show how long the daemon has been unavailable or how many retry attempts have occurred. **T012** should add feedback on retry failures; **T014** should tighten the gateway's daemon-unavailable classification to distinguish transient vs. sustained outages; **T015/T016** should cover the sustained-outage UX path. 🔧 |
+
+#### FD-3 WebSocket connection dropped during live updates
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Network interruption, server restart, or load-balancer timeout drops the WebSocket.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Expected behavior** | ≤ 10 reconnect attempts with exponential backoff (1–30 s). During reconnect, operator sees a visible "reconnecting" status. On exhaustion, operator sees a clear "disconnected" state rather than a silent stall. No data loss for in-progress conversations — replay buffer catches up on reconnect.                                                                                                                                                                                                                                                                                                                                                                                |
+| **Current evidence**  | `stream-client.ts` connects to `/ws` and fires `onClose`/`onError`/`onOpen` callbacks. `WorkspaceConnectionState.transportStatus` cycles through `'connecting'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 'live' | 'reconnecting' | 'disconnected'`. Connection banner renders severity-appropriate status for each transport state. Gateway transport implements a replay barrier pattern (ws-message-handler.ts) with sequence tracking (`lastAckSeq`, `lastDeliveredSeq`) and buffer-miss fallback to daemon replay. Backpressure protection (backpressure.ts) closes connections that exceed a 1 MB send buffer with `WS_BUFFER_OVERFLOW`. Browser specs cover banner hierarchy transitions (connecting → live → disconnected), reconnect workflow, and create-reconnect scenarios. Gateway tests (~1 600 lines in ws-message-handler.test.ts) cover replay barrier, buffer miss, and sequence continuity. ✅ |
+| **Gaps**              | Reconnect retry configuration (max attempts, backoff range) is not exposed as a tunable. The connection banner already shows the current reconnect attempt count, but it does not surface estimated wait or a stronger manual-recovery affordance after exhaustion. Browser-side reconnect is owned by the workspace stream subscription, not the session-lifecycle WebSocket, so follow-on work should stay with the workspace transport state. **T012** should improve reconnect-progress and exhausted-state messaging; **T014** should expose tunable retry configuration; **T016** should add browser drill specs for the full reconnect → exhaustion → manual recovery arc. 🔧 |
+
+#### FD-4 Protected mutation rejected
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Gateway or daemon rejects a state-changing request (validation failure, stale revision, authorization failure, rate limit, workflow conflict).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Expected behavior** | Error shown in-place on the originating surface. No false success indication. Visible state remains authoritative (pre-mutation value stays). Operator can retry or dismiss.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Current evidence**  | `useMutation` hook (mutations/model/use-mutation.ts) tracks `isLoading` and `error` state. On `MutationsRequestError` it extracts `gatewayError.message`; on unknown errors it sets `"Unexpected error"`. Concurrency guard prevents double-submit. `MutationErrorBanner` (mutations/components/mutation-error-banner.tsx) renders an inline dismissible alert with `role="alert"` and `aria-live="polite"`. Mutations client (mutations/api/mutations-client.ts) throws `MutationsRequestError` with parsed `GatewayErrorBody` including category, code, and message. Gateway error model provides `stale-revision` and `workflow-conflict` categories with structured codes. Browser specs cover the success path, error extraction, concurrency guard, reset, and unknown-error fallback. ✅ |
+| **Gaps**              | No automatic retry logic — caller must manually retry. No optimistic concurrency rollback (the UI shows the error but does not explicitly restore the pre-mutation display value from server state). The `"Unexpected error"` fallback for non-`MutationsRequestError` throws loses the original error detail. No timeout on mutation HTTP calls. Error messages are passed through from the server without client-side translation or contextual guidance. **T013** should tighten in-place error rendering and add explicit rollback to authoritative state on rejection; **T015** should add gateway drill coverage for stale-revision and workflow-conflict scenarios; **T016** should add browser specs for the reject → dismiss → retry cycle. 🔧                                         |
+
+#### FD-5 Operations panel render or data error
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Trigger**           | An operations panel component throws during render, or an operations API call returns an error or contract-violating response.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **Expected behavior** | Error is contained to the affected panel — chat workspace and other panels remain functional. Operator sees a clear error message in the affected panel with recovery guidance.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Current evidence**  | `OperationsErrorBoundary` (operations-panels/components/operations-error-boundary.tsx) is a React error boundary wrapping operations panels. It catches render-time errors and displays a red alert with `role="alert"`, `aria-live="assertive"`, and `data-testid="operations-panel-error-boundary"`. Operations client (operations-panels/api/operations-client.ts) throws `OperationsRequestError` (HTTP errors) and `OperationsResponseValidationError` (contract mismatch from `safeParse()` failure). Browser specs confirm boundary isolation, fallback rendering, and ARIA semantics. ✅                               |
+| **Gaps**              | The error boundary only catches synchronous render errors — async errors from API calls (e.g., `getOperationsSnapshot()` rejection) are not caught by the boundary and may surface as unhandled promise rejections or silently fail to update panel state. No component-level error UI for individual panels below the boundary. No retry mechanism for failed operations data fetches. **T013** should add per-panel async error handling and degraded-state rendering; **T015** should add gateway tests for operations contract violations; **T016** should add browser specs for the async-error → degraded-panel path. 🔧 |
+
+#### FD-6 Gateway starts without bundled web assets (packaged runtime)
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Standalone executable or packaged tarball is launched but the expected `dist/web-runtime/` directory is missing or incomplete.                                                                                                                                                                                                                                                                                                                                                            |
+| **Expected behavior** | Clear unsupported-state message served to the browser — no blank page, no cryptic 404. Daemon API remains functional for CLI agents.                                                                                                                                                                                                                                                                                                                                                      |
+| **Current evidence**  | `server-runtime.ts` probes for the web runtime directory at startup and sets an availability flag. When assets are unavailable, HTTP requests for web routes receive an explicit unsupported-state response with an explanatory message. `test/packaging.test.ts` asserts that a tarball includes `dist/web-runtime/` and that the bundled gateway starts successfully. README and workspace READMEs document the supported launch paths and expected behavior when assets are absent. ✅ |
+| **Gaps**              | Minimal — this scenario is well-covered after the Phase 1 (US1) packaging work. The only remaining gap is that the unsupported-state response is plain text; a styled HTML fallback page could improve the operator experience. This is low priority and not assigned to a specific follow-on task. ✅                                                                                                                                                                                    |
+
+#### FD-7 Rate-limit rejection
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Operator exceeds request rate on login, mutating endpoints, or WebSocket session creation.                                                                                                                                                                                                                                                           |
+| **Expected behavior** | Gateway returns `RATE_LIMITED` (429) with optional `retryAfterMs`. Browser surfaces the rejection as an in-place error — no silent retry storm.                                                                                                                                                                                                      |
+| **Current evidence**  | Gateway error model defines `RATE_LIMITED` with category `'rate-limit'` and HTTP 429. Browser-side `isRateLimitError()` and `isRetriable()` helpers exist in `web/src/shared/gateway-errors.ts`. `getRetryAfterMs()` extracts the delay hint. The `useMutation` hook and `MutationsRequestError` propagate rate-limit errors to the error banner. ✅ |
+| **Gaps**              | No browser-side backoff logic that uses `retryAfterMs` — the retry delay hint is available but no component consumes it for automatic retry scheduling. **T013** should consider surfacing the retry-after hint in the mutation error banner; **T014** should validate that the gateway consistently provides `retryAfterMs` on 429 responses. 🔧    |
+
+#### FD-8 Stale-revision conflict on mutation
+
+| Aspect                | Detail                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**           | Two operator sessions (or tabs) attempt conflicting mutations; the second receives a `stale-revision` rejection.                                                                                                                                                                                                                                                                                                    |
+| **Expected behavior** | The losing mutation fails visibly with a conflict message. No silent overwrite. Operator can refresh and retry.                                                                                                                                                                                                                                                                                                     |
+| **Current evidence**  | Gateway error model defines the `stale-revision` category and code. Browser-side `isStaleRevision()` helper correctly classifies the error. The `useMutation` error path would surface this as a `MutationsRequestError` with the conflict message. Mutations client includes CSRF token injection for all POST requests. ✅                                                                                        |
+| **Gaps**              | No browser-side conflict-resolution UX — the error is surfaced but there is no "refresh and retry" affordance specific to stale-revision. The mutations client does not distinguish stale-revision from other rejection categories in its error rendering. **T013** should add a stale-revision-specific error message and refresh prompt; **T016** should add a browser spec for the two-tab conflict scenario. 🔧 |
+
+#### Drill-matrix summary
+
+| #    | Scenario                              | Current state                                                                   | Primary follow-on tasks |
+| ---- | ------------------------------------- | ------------------------------------------------------------------------------- | ----------------------- |
+| FD-1 | Session expired during active use     | Code path exists; poll-error silence and missing redirect are gaps              | T012, T015, T016        |
+| FD-2 | Daemon unreachable                    | Banner and retry exist; retry feedback and sustained-outage UX are gaps         | T012, T014, T015, T016  |
+| FD-3 | WebSocket dropped during live updates | Reconnect and replay exist; progress visibility and circuit-breaker are gaps    | T012, T014, T016        |
+| FD-4 | Protected mutation rejected           | Hook and error banner exist; retry, rollback, and error translation are gaps    | T013, T015, T016        |
+| FD-5 | Operations panel error                | Render boundary exists; async error handling and per-panel degradation are gaps | T013, T015, T016        |
+| FD-6 | Gateway starts without assets         | Well-covered after US1                                                          | —                       |
+| FD-7 | Rate-limit rejection                  | Error classification exists; retry-after consumption is a gap                   | T013, T014              |
+| FD-8 | Stale-revision conflict               | Error classification exists; conflict-resolution UX is a gap                    | T013, T016              |
+
+### Evidence expectations
+
+Hardening budgets are target expectations for Phase 0. Evidence should be collected through the
+commands and test layers available today:
+
+1. **Existing test suites** — `npm test` runs all unit, integration, and browser specs. Tests
+   should assert failure-mode behaviors (error banners, redirects, retry limits) where feasible.
+2. **Quality gate** — `npm run quality` catches lint, format, type, and cycle regressions.
+3. **Build verification** — `npm --workspace @hydra/web run build` confirms bundle budgets.
+4. **Root package verification** — `npm run package:dry-run` validates the published root CLI
+   package shape only. Packaged web runtime verification now comes from `test/packaging.test.ts`,
+   which asserts that the tarball includes `dist/web-runtime/` and that the bundled gateway starts
+   successfully. Broader packaging/build evidence automation for CI remains future work for T025.
+
+No new tooling is introduced in Phase 0. Quantitative render-count and DOM-node-count enforcement
+requires instrumentation that will land with the evidence-hook tasks (T023–T025). Until then, the
+state and rendering limits above are design targets verified by review.
+
 ## Test and CI Expectations
 
-Required test layers:
+Current required test layers in this repo:
 
 - contract tests for shared schemas;
 - gateway unit and integration tests;
-- frontend unit/component tests;
-- end-to-end browser tests;
-- security-focused tests;
-- accessibility checks.
+- frontend unit/component/browser-spec tests;
+- security-focused tests implemented within those suites;
+- release-readiness doc reviews for accessibility and failure-mode coverage until dedicated tooling lands.
 
-Required CI gates:
+Target test layers for later hardening work:
+
+- accessibility-focused browser checks beyond the current browser-spec coverage;
+- real end-to-end browser tests once dedicated tooling is introduced.
+
+Current CI gates in this repo:
 
 - formatting;
 - strict linting;
 - full type-checking;
-- unit/integration/component/e2e tests;
+- unit/integration/component/browser-spec test execution through the existing repo commands;
 - cycle or boundary verification;
-- dependency and secret scanning;
-- no backsliding on coverage expectations.
+- dependency audit;
+- no backsliding on coverage expectations;
+- web build and bundle-size budget checks (`web-responsiveness` job — see Responsiveness Budgets);
+- targeted browser, gateway, and contract evidence commands are available in the repo, but they are
+  not all yet promoted into the blocking `web-responsiveness` job.
+
+Target CI additions for later hardening work:
+
+- secret scanning;
+- explicit accessibility/e2e evidence hooks tied to the Phase 5 target budgets;
+- real-browser timing assertions (TTI, FMP, memory profiling) once instrumentation lands.
+
+Remaining target CI gates (to be added by evidence-hook tasks T023–T025):
+
+- responsiveness regression assertions beyond current browser spec coverage;
+- packaging evidence checks plus any remaining build-evidence wiring outside the `quality.yml`
+  `web-responsiveness` gate landed by T021 (T025).

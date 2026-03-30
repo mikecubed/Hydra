@@ -20,6 +20,7 @@ function makeSessionResult(overrides: Partial<UseSessionResult> = {}): UseSessio
   return {
     session: null,
     isLoading: false,
+    pollErrorCount: 0,
     extend: vi.fn(),
     logout: vi.fn(),
     refresh: vi.fn(),
@@ -177,5 +178,202 @@ describe('SessionProvider', () => {
     );
 
     expect(mockUseSession).toHaveBeenCalledWith(5000);
+  });
+});
+
+// ── T012 / FD-1: redirect on session expiry ───────────────────────────────
+
+describe('SessionProvider redirect on expiry (T012)', () => {
+  it('redirects to /login when session state becomes expired', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession.mockReturnValue(
+      makeSessionResult({
+        session: {
+          operatorId: 'op-1',
+          state: 'expired',
+          expiresAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      }),
+    );
+
+    render(
+      <SessionProvider onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledWith('/login');
+
+    vi.useRealTimers();
+  });
+
+  it('redirects to /login when session state becomes invalidated', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession.mockReturnValue(
+      makeSessionResult({
+        session: {
+          operatorId: 'op-1',
+          state: 'invalidated',
+          expiresAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      }),
+    );
+
+    render(
+      <SessionProvider onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledWith('/login');
+
+    vi.useRealTimers();
+  });
+
+  it('does not redirect for active or expiring-soon states', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    for (const state of ['active', 'expiring-soon'] as const) {
+      mockUseSession.mockReturnValue(
+        makeSessionResult({
+          session: {
+            operatorId: 'op-1',
+            state,
+            expiresAt: now,
+            lastActivityAt: now,
+            createdAt: now,
+          },
+        }),
+      );
+
+      const { unmount } = render(
+        <SessionProvider onRedirect={onRedirect}>
+          <SessionConsumer />
+        </SessionProvider>,
+      );
+
+      vi.advanceTimersByTime(2000);
+      expect(onRedirect).not.toHaveBeenCalled();
+      unmount();
+    }
+
+    vi.useRealTimers();
+  });
+
+  it('uses custom loginPath when provided', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession.mockReturnValue(
+      makeSessionResult({
+        session: {
+          operatorId: 'op-1',
+          state: 'expired',
+          expiresAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      }),
+    );
+
+    render(
+      <SessionProvider loginPath="/auth/sign-in" onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledWith('/auth/sign-in');
+
+    vi.useRealTimers();
+  });
+
+  it('redirects to /login when a previously-authenticated session collapses to null', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession
+      .mockReturnValueOnce(
+        makeSessionResult({
+          session: {
+            operatorId: 'op-1',
+            state: 'active',
+            expiresAt: now,
+            lastActivityAt: now,
+            createdAt: now,
+          },
+        }),
+      )
+      .mockReturnValueOnce(makeSessionResult({ session: null, isLoading: false }));
+
+    const { rerender } = render(
+      <SessionProvider onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    rerender(
+      <SessionProvider onRedirect={onRedirect}>
+        <SessionConsumer />
+      </SessionProvider>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledWith('/login');
+
+    vi.useRealTimers();
+  });
+
+  it('still redirects under React StrictMode replay for expired sessions', () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onRedirect = vi.fn();
+
+    const now = new Date().toISOString();
+    mockUseSession.mockReturnValue(
+      makeSessionResult({
+        session: {
+          operatorId: 'op-1',
+          state: 'expired',
+          expiresAt: now,
+          lastActivityAt: now,
+          createdAt: now,
+        },
+      }),
+    );
+
+    render(
+      <React.StrictMode>
+        <SessionProvider onRedirect={onRedirect}>
+          <SessionConsumer />
+        </SessionProvider>
+      </React.StrictMode>,
+    );
+
+    vi.advanceTimersByTime(600);
+
+    expect(onRedirect).toHaveBeenCalledTimes(1);
+    expect(onRedirect).toHaveBeenCalledWith('/login');
+
+    vi.useRealTimers();
   });
 });

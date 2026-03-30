@@ -51,12 +51,15 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 - approved workflow-launch surfaces;
 - audit trails and destructive-action safeguards.
 
-### Phase 5 — Hardening, Packaging, and Polishing
+### Phase 5 — Hardening, Packaging, and Polishing ✅ Complete
 
-- packaging integration;
-- accessibility and performance hardening;
-- security review and failure-mode drills;
-- contributor/documentation updates.
+- packaging integration: ✅ delivered (npm tarball includes `dist/web-runtime/` with bundled
+  gateway entry + browser assets; `prepack`/`postpack` lifecycle scripts; packaging integration
+  tests via `npm run package:evidence`)
+- responsiveness and layout hardening: ✅ delivered (Phase 4 operations panel work)
+- contributor verification and troubleshooting documentation: ✅ delivered
+- accessibility and performance hardening: ✅ delivered
+- security review and failure-mode drills: ✅ delivered
 
 ## Recommended SDD Spec Breakdown
 
@@ -69,7 +72,7 @@ Delivered via the `web-hydra-operations-panels` SDD (US1–US6, all phases).
 | 5   | **`web-chat-workspace`**                 | ✅ Delivered (phases 1–8, PRs #173–#185)                                                                          |
 | 6   | **`web-hydra-operations-panels`**        | ✅ Delivered — Hydra-native operations visibility and daemon-authorized controls (US1–US6, PRs #201–#209)         |
 | 7   | **`web-controlled-mutations`**           | ✅ Delivered (PR #221)                                                                                            |
-| 8   | **`web-hardening-and-packaging`**        | ⬜ Pending                                                                                                        |
+| 8   | **`web-hardening-and-packaging`**        | ✅ Delivered (PR #222)                                                                                            |
 
 ## Recommended Workflow
 
@@ -94,7 +97,10 @@ For each spec:
 4. ~~Which config and workflow mutations are safe enough for early browser phases?~~
    **Resolved:** Delivered in `web-controlled-mutations` (PR #221).
 5. When does the repo benefit enough from `turbo` to justify adding it beyond workspaces?
-6. How should browser assets and the gateway runtime be packaged for both npm distribution and the
-   existing executable paths?
+6. ~~How should browser assets and the gateway runtime be packaged for both npm distribution and the
+   existing executable paths?~~
+   **Resolved:** npm tarball ships `dist/web-runtime/` (bundled gateway + browser assets); standalone
+   exe remains CLI-only. See [`docs/WEB_INTERFACE.md`](../WEB_INTERFACE.md) § Supported Packaging
+   Targets.
 7. Which command families should be exposed through a typed command catalog first so the web UI can
    reach meaningful operator parity without inventing browser-only workflows?

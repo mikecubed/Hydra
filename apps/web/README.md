@@ -67,10 +67,9 @@ these all share one origin:
 Standalone `npm run dev` in `apps/web` is still useful for frontend iteration, but API and WebSocket
 behavior will fail unless you provide your own proxy to the gateway.
 
-### Full local stack commands
+### Full local stack commands (source checkout)
 
-To run the browser, gateway, and daemon together in a way that supports a real same-origin browser
-session:
+To run the browser, gateway, and daemon together from a **source checkout**:
 
 1. Start the Hydra daemon from the repo root:
 
@@ -103,12 +102,52 @@ Notes:
 - The seeded `HYDRA_WEB_OPERATOR_ID` / `HYDRA_WEB_OPERATOR_SECRET` values seed a local operator
   record in `~/.hydra/web-gateway/operators.json` at startup. Use those values as your identity
   and secret on the `/login` screen to create a session.
+- If the web bundle is already built you can skip the build step and run
+  `npm --workspace @hydra/web-gateway run start` instead of `start:with-web`.
 - **`Gateway 401: No valid session found`** always means no `__session` cookie. Navigate to
   `/login` to create a session.
 
+### Packaged web runtime (npm package)
+
+Published npm packages include a pre-built web runtime in `dist/web-runtime/`. This directory
+contains `server.js` (bundled gateway entry), `web/` (built browser assets), and a `.packaged`
+sentinel marker. The runtime is built during `prepack` from the source checkout.
+
+To launch the packaged web runtime from an installed package:
+
+1. Start the Hydra daemon:
+
+   ```bash
+   npm start
+   ```
+
+2. In a second terminal, start the packaged gateway:
+
+   ```bash
+   HYDRA_WEB_OPERATOR_ID=admin \
+   HYDRA_WEB_OPERATOR_SECRET=password123 \
+   node node_modules/hydra/dist/web-runtime/server.js
+   ```
+
+3. Open `http://127.0.0.1:4174/login` in your browser, enter your credentials, and the workspace
+   will open automatically.
+
+The bundled gateway entry automatically resolves its static asset directory to
+`dist/web-runtime/web/` — no `HYDRA_WEB_STATIC_DIR` override is needed.
+
+> **If `dist/web-runtime/` is missing** from the installed package, the package artifact is
+> incomplete. Rebuild from a source checkout with `npm pack` (which runs `prepack` and produces a
+> complete tarball). There is no recovery command available inside the installed package itself.
+
+> **Standalone executable:** The standalone exe build (`npm run build:exe`) does not include web
+> runtime assets. `hydra --full` is not supported for standalone exe builds.
+
 ### Remote host setup
 
-To serve the app from a remote server (e.g., `truenas-2.example.com`):
+To serve the app from a remote server (e.g., `truenas-2.example.com`), add the remote host
+environment variables to whichever launch method you are using (source checkout or packaged):
+
+**Source checkout:**
 
 ```bash
 HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
@@ -119,7 +158,18 @@ HYDRA_WEB_OPERATOR_SECRET=password123 \
 npm --workspace @hydra/web-gateway run start:with-web
 ```
 
-Key differences from the local command:
+**Packaged npm install:**
+
+```bash
+HYDRA_WEB_GATEWAY_HOST=0.0.0.0 \
+HYDRA_WEB_GATEWAY_ORIGIN=http://truenas-2.example.com:4174 \
+HYDRA_DAEMON_URL=http://truenas-2.example.com:4173 \
+HYDRA_WEB_OPERATOR_ID=admin \
+HYDRA_WEB_OPERATOR_SECRET=password123 \
+node node_modules/hydra/dist/web-runtime/server.js
+```
+
+Key differences from a local command:
 
 - `HYDRA_WEB_GATEWAY_HOST=0.0.0.0` — bind to all network interfaces (default `127.0.0.1` is
   loopback-only and is not reachable from other machines).
@@ -159,6 +209,28 @@ open automatically.
   plane.
 - If connection, session, or daemon health degrades, expect the banner state to explain why the UI
   is limited.
+
+### Accessibility expectations
+
+- Core operator workflows are expected to work with keyboard-only interaction: login, composer
+  submission, mutation confirmation, and operations control actions.
+- Important failure or recovery states are surfaced through explicit alerts/status regions rather
+  than color alone. This includes session expiry, daemon unavailability, degraded operations
+  snapshots, and inline mutation validation.
+- Dialogs and confirmation flows are expected to manage focus predictably: initial focus is placed on
+  the first safe action, `Escape` closes cancellable dialogs, and focus stays inside the dialog
+  while it is open.
+- Inputs/selectors with supporting guidance or validation state should expose that context through
+  `aria-describedby` / `aria-invalid`, not just adjacent text.
+
+### Supported viewport range
+
+- **Guaranteed full workspace support:** `1024px` viewport width and above.
+- Below `1024px`, the login route, banners, and dialogs should remain usable, but the combined
+  workspace + operations-sidebar layout is still best-effort rather than a release-ready target.
+- If you are validating accessibility or usability for the main authenticated workspace, use a
+  desktop-class viewport (`>=1024px`) until the narrower viewport hardening work in the next phase
+  lands.
 
 ## Source Layout
 
@@ -270,6 +342,93 @@ invalidates the session cookie server-side) and navigates to `/login`.
 | Schema / DTOs | Zod (via `@hydra/web-contracts`)                              |
 | Testing       | Vitest 4, Testing Library (React + user-event)                |
 | Test env      | jsdom                                                         |
+
+## Verification Checklist
+
+Use this checklist to confirm the browser surface is working end-to-end before a release or after
+significant changes. Every item uses commands that exist today. This section is the reference for
+T030 final verification.
+
+### Build and bundle
+
+- [ ] Production build exits cleanly:
+  ```bash
+  npm --workspace @hydra/web run build
+  ```
+- [ ] Vite output shows JS bundle ≤ 250 KB gzipped and CSS bundle ≤ 50 KB gzipped (check the
+      gzip column in the build summary).
+- [ ] TypeScript workspace check passes:
+  ```bash
+  npm --workspace @hydra/web run typecheck:workspace
+  ```
+
+### Source-checkout startup
+
+- [ ] Start the daemon (`npm start`), then the gateway with web build:
+  ```bash
+  HYDRA_WEB_OPERATOR_ID=admin \
+  HYDRA_WEB_OPERATOR_SECRET=password123 \
+  npm --workspace @hydra/web-gateway run start:with-web
+  ```
+- [ ] `http://127.0.0.1:4174/login` loads without errors, login completes, and the workspace
+      opens.
+- [ ] Conversation list, transcript, and composer are visible and functional at ≥ 1024 px viewport
+      width.
+- [ ] Operations sidebar renders loading/empty/live states without layout blowout.
+
+### Packaged npm runtime
+
+- [ ] Package evidence passes (dry-run pack + tarball checks):
+  ```bash
+  npm run package:evidence
+  ```
+- [ ] Generate an installable tarball for the manual smoke test (the source checkout is cleaned
+      after `npm pack`):
+  ```bash
+  npm pack
+  ```
+- [ ] Manual packaged-runtime smoke tests run from an installed package (for example a temporary
+      `npm install ./hydra-*.tgz` in a scratch directory).
+- [ ] Installed package contains `dist/web-runtime/server.js`, the `web/` directory, and the
+      `.packaged` sentinel.
+- [ ] Packaged gateway starts and serves the workspace from the installed package contents:
+  ```bash
+  HYDRA_WEB_OPERATOR_ID=admin \
+  HYDRA_WEB_OPERATOR_SECRET=password123 \
+  node node_modules/hydra/dist/web-runtime/server.js
+  ```
+- [ ] Login and workspace behave identically to the source-checkout path.
+
+### Standalone executable (CLI-only)
+
+- [ ] Confirm that `npm run build:exe` does **not** bundle web runtime assets — the standalone exe
+      is CLI-only. `hydra --full` is not supported for exe builds.
+
+### Session lifecycle
+
+- [ ] Login sets `__session` (HttpOnly) and `__csrf` (JS-readable) cookies.
+- [ ] Session polling resumes on tab visibility and pauses when hidden.
+- [ ] Expiry warning banner appears when session enters `expiring-soon` state; **Extend Session**
+      resets the clock.
+- [ ] Logout clears cookies and redirects to `/login`.
+- [ ] Daemon-unreachable screen appears (not a login redirect) when the daemon is stopped; **Check
+      again** recovers when the daemon restarts.
+
+### Accessibility smoke checks
+
+- [ ] Login form, composer, and mutation confirmation dialogs are completable with keyboard-only
+      interaction.
+- [ ] Dialogs trap focus, place initial focus on the first safe action, and close on `Escape`.
+- [ ] Degraded-state banners (session expiry, daemon unreachable) use `role="alert"` or
+      `role="status"` semantics.
+- [ ] Inputs with validation or policy guidance expose context via `aria-describedby`.
+
+### Browser specs
+
+- [ ] Browser test suite passes:
+  ```bash
+  npm --workspace @hydra/web run test:browser
+  ```
 
 ## Workspace Boundaries
 

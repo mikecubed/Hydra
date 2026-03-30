@@ -165,6 +165,18 @@ export function hasExhaustedRetries(state: WorkspaceConnectionState): boolean {
   return state.transportStatus === 'disconnected' && state.reconnectAttempt > 0;
 }
 
+/**
+ * Estimate the next reconnect wait in seconds based on deterministic
+ * exponential backoff (1–30 s, capped). No jitter is applied — the
+ * returned value is always `min(2^(attempt-1), 30)`.
+ * Returns null when not reconnecting.
+ */
+export function estimateReconnectWait(state: WorkspaceConnectionState): number | null {
+  if (state.transportStatus !== 'reconnecting' || state.reconnectAttempt <= 0) return null;
+  const base = Math.min(2 ** (state.reconnectAttempt - 1), 30);
+  return base;
+}
+
 // ─── Human-readable description ─────────────────────────────────────────────
 
 /** Produce a concise operator-facing description of the connection state. */
@@ -175,14 +187,16 @@ export function describeConnectionState(state: WorkspaceConnectionState): string
 
   if (state.transportStatus === 'disconnected') {
     if (state.reconnectAttempt > 0) {
-      return 'Disconnected — reconnect attempts exhausted';
+      return 'Disconnected — reconnect attempts exhausted. Reload the page to retry.';
     }
     return 'Disconnected from gateway';
   }
 
   if (state.transportStatus === 'reconnecting') {
     if (state.reconnectAttempt > 0) {
-      return `Reconnecting to gateway… (attempt ${String(state.reconnectAttempt)})`;
+      const wait = estimateReconnectWait(state);
+      const waitSuffix = wait === null ? '' : ` · next attempt in ~${String(wait)}s`;
+      return `Reconnecting to gateway… (attempt ${String(state.reconnectAttempt)})${waitSuffix}`;
     }
     return 'Reconnecting to gateway…';
   }

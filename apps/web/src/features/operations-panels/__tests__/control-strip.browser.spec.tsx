@@ -69,6 +69,12 @@ describe('ControlStrip — discovery rendering', () => {
     expect(screen.getByText('Mode switch')).toBeInTheDocument();
   });
 
+  it('renders each control as a named group for assistive technology', () => {
+    renderStrip({ controls: [makeControl({ label: 'Route override' })] });
+
+    expect(screen.getByRole('group', { name: 'Route override' })).toBeInTheDocument();
+  });
+
   it('shows authority granted badge for actionable controls', () => {
     renderStrip({
       controls: [makeControl({ authority: 'granted', availability: 'actionable' })],
@@ -108,6 +114,25 @@ describe('ControlStrip — discovery rendering', () => {
     });
 
     expect(screen.getByText('Daemon rejected authority')).toBeInTheDocument();
+  });
+
+  it('associates read-only reason text with the control group description', () => {
+    renderStrip({
+      controls: [
+        makeControl({
+          controlId: 'ctrl-reason',
+          authority: 'forbidden',
+          availability: 'read-only',
+          reason: 'Daemon rejected authority',
+          expectedRevision: null,
+        }),
+      ],
+    });
+
+    expect(screen.getByRole('group', { name: 'Route override' })).toHaveAttribute(
+      'aria-describedby',
+      'control-reason-ctrl-reason',
+    );
   });
 
   it('marks the selected option visually', () => {
@@ -158,6 +183,15 @@ describe('ControlStrip — authority and pending', () => {
   it('shows pending indicator when hasPendingControl is true', () => {
     renderStrip({ hasPendingControl: true });
     expect(screen.getByText(/pending/i)).toBeInTheDocument();
+  });
+
+  it('associates pending state messaging with the control group description', () => {
+    renderStrip({ hasPendingControl: true });
+
+    expect(screen.getByRole('group', { name: 'Route override' })).toHaveAttribute(
+      'aria-describedby',
+      'control-pending-ctrl-1',
+    );
   });
 
   it('disables option buttons when hasPendingControl is true', () => {

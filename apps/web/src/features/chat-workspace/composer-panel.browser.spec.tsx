@@ -135,6 +135,30 @@ describe('ComposerPanel submit states', () => {
     expect(screen.getByRole('alert').textContent).toContain('Gateway 502: Bad Gateway');
   });
 
+  it('links the textarea to policy and validation messaging for assistive technology', () => {
+    renderComposer({
+      submitState: 'error',
+      validationMessage: 'Gateway 502: Bad Gateway',
+      policyLabel: 'Ctrl+Enter submits the current instruction',
+      draftText: 'failed text',
+    });
+
+    const textarea: HTMLTextAreaElement = screen.getByRole('textbox', { name: /instruction/i });
+    expect(textarea.getAttribute('aria-invalid')).toBe('true');
+
+    const describedBy = textarea.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(describedBy?.split(' ')).toEqual(['composer-policy', 'composer-error']);
+  });
+
+  it('keeps the policy text wired as supporting description when there is no error', () => {
+    renderComposer({ policyLabel: 'Ctrl+Enter submits the current instruction' });
+
+    const textarea: HTMLTextAreaElement = screen.getByRole('textbox', { name: /instruction/i });
+    expect(textarea.getAttribute('aria-invalid')).toBeNull();
+    expect(textarea.getAttribute('aria-describedby')).toBe('composer-policy');
+  });
+
   it('does not render an error region when there is no validation message', () => {
     renderComposer({ submitState: 'idle', validationMessage: null });
 

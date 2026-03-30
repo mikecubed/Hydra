@@ -184,7 +184,7 @@ describe('translateDaemonResponse', () => {
   it('handles HTTP 5xx without valid error body as daemon error', () => {
     const result = translateDaemonResponse(502, null);
     assert.equal(result.category, 'daemon');
-    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.code, 'INTERNAL_ERROR');
     assert.equal(result.message, 'Internal daemon error');
   });
 
@@ -505,9 +505,9 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
     assert.equal(result.message, 'Something completely unexpected');
   });
 
-  it('falls back to DAEMON_UNREACHABLE for unknown 500 sendError messages', () => {
+  it('falls back to INTERNAL_ERROR for unknown 500 sendError messages', () => {
     const result = translateDaemonResponse(500, sendErrorBody('Internal explosion'));
-    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.code, 'INTERNAL_ERROR');
     assert.equal(result.category, 'daemon');
     assert.equal(result.message, 'Internal daemon error');
     assert.equal(result.httpStatus, 500);
@@ -515,7 +515,7 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
 
   it('sanitizes raw daemon text for 502 sendError bodies', () => {
     const result = translateDaemonResponse(502, sendErrorBody('ECONNREFUSED 127.0.0.1:4173'));
-    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.code, 'INTERNAL_ERROR');
     assert.equal(result.category, 'daemon');
     assert.equal(result.message, 'Internal daemon error');
     assert.equal(result.httpStatus, 502);
@@ -523,8 +523,20 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
 
   it('sanitizes raw daemon text for 503 sendError bodies', () => {
     const result = translateDaemonResponse(503, sendErrorBody('upstream timeout'));
+    assert.equal(result.category, 'daemon-unavailable');
+    assert.equal(result.code, 'DAEMON_UNREACHABLE');
     assert.equal(result.message, 'Internal daemon error');
     assert.equal(result.httpStatus, 503);
+  });
+
+  it('maps 504 sendError to daemon-unavailable with retryAfterMs', () => {
+    const result = translateDaemonResponse(504, sendErrorBody('gateway timeout'));
+    assert.equal(result.category, 'daemon-unavailable');
+    assert.equal(result.code, 'DAEMON_UNREACHABLE');
+    assert.equal(result.message, 'Internal daemon error');
+    assert.equal(result.httpStatus, 504);
+    assert.equal(typeof result.retryAfterMs, 'number');
+    assert.ok((result.retryAfterMs ?? 0) > 0, '504 should include retryAfterMs hint');
   });
 
   it('preserves httpStatus for all pattern-matched sendError bodies', () => {
@@ -551,38 +563,40 @@ describe('translateDaemonResponse — real daemon sendError() regression', () =>
 });
 
 describe('translateFetchFailure', () => {
-  it('translates TypeError (network error) into daemon-unreachable without raw details', () => {
+  it('translates TypeError (network error) into daemon-unavailable without raw details', () => {
     const err = new TypeError('fetch failed: connect ECONNREFUSED 127.0.0.1:4173');
     const result = translateFetchFailure(err);
     assert.equal(result.ok, false);
-    assert.equal(result.category, 'daemon');
+    assert.equal(result.category, 'daemon-unavailable');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
     assert.equal(result.message, 'Daemon unreachable');
     assert.ok(!result.message.includes('ECONNREFUSED'), 'must not leak connection details');
     assert.ok(!result.message.includes('127.0.0.1'), 'must not leak IP addresses');
   });
 
-  it('translates AbortError (timeout) into daemon-unreachable', () => {
+  it('translates AbortError (timeout) into DAEMON_TIMEOUT with retryAfterMs', () => {
     const err = new Error('The operation was aborted');
     err.name = 'AbortError';
     const result = translateFetchFailure(err);
-    assert.equal(result.category, 'daemon');
-    assert.equal(result.code, 'DAEMON_UNREACHABLE');
-    assert.equal(result.message, 'Daemon request timeout or abort');
+    assert.equal(result.category, 'daemon-unavailable');
+    assert.equal(result.code, 'DAEMON_TIMEOUT');
+    assert.equal(result.message, 'Daemon request timed out');
+    assert.equal(typeof result.retryAfterMs, 'number');
+    assert.ok((result.retryAfterMs ?? 0) > 0, 'timeout should include retry hint');
   });
 
-  it('translates generic Error into daemon category without raw details', () => {
+  it('translates generic Error into daemon-unavailable without raw details', () => {
     const err = new Error('getaddrinfo ENOTFOUND internal-host.corp.net');
     const result = translateFetchFailure(err);
-    assert.equal(result.category, 'daemon');
+    assert.equal(result.category, 'daemon-unavailable');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
     assert.equal(result.message, 'Daemon unreachable');
     assert.ok(!result.message.includes('internal-host'), 'must not leak internal hostnames');
   });
 
-  it('translates non-Error values into daemon category', () => {
+  it('translates non-Error values into daemon-unavailable', () => {
     const result = translateFetchFailure('random string');
-    assert.equal(result.category, 'daemon');
+    assert.equal(result.category, 'daemon-unavailable');
     assert.equal(result.code, 'DAEMON_UNREACHABLE');
     assert.equal(result.message, 'Daemon unreachable');
   });

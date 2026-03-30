@@ -115,7 +115,7 @@ export function jsonResponse(body: unknown, status = 200, statusText?: string): 
 }
 
 export function installFetchStub(
-  handler: (url: string, init: RequestInit | undefined) => Response,
+  handler: (url: string, init: RequestInit | undefined) => Response | Promise<Response>,
 ): void {
   fetchSpy.mockImplementation((input, init) => {
     const url = requestUrl(input);
@@ -136,6 +136,22 @@ export function installFetchStub(
     try {
       return Promise.resolve(handler(url, init));
     } catch (err: unknown) {
+      const approvalsMatch = /^\/conversations\/[^/]+\/approvals$/.exec(url);
+      if (approvalsMatch) {
+        return Promise.resolve(jsonResponse({ approvals: [] }));
+      }
+      if (url === '/operations/snapshot') {
+        return Promise.resolve(
+          jsonResponse({
+            queue: [],
+            health: null,
+            budget: null,
+            availability: 'empty',
+            lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+            nextCursor: null,
+          }),
+        );
+      }
       if (url === '/config/safe') {
         return Promise.resolve(
           jsonResponse({

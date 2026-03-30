@@ -113,9 +113,10 @@ export function createSyncController(options: SyncControllerOptions): SyncContro
         const snapshot = await client.getSnapshot();
         if (lifecycle.disposed || requestId !== snapshotRequestId) return;
         dispatch({ type: 'snapshot/success', snapshot });
-      } catch {
+      } catch (err: unknown) {
         if (lifecycle.disposed || requestId !== snapshotRequestId) return;
-        dispatch({ type: 'snapshot/failure' });
+        const errorMessage = err instanceof Error && err.message !== '' ? err.message : undefined;
+        dispatch({ type: 'snapshot/failure', errorMessage });
       }
     })();
   }

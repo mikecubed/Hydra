@@ -732,9 +732,14 @@ describe('GatewayWsServer', () => {
 
     const response = await expectUnexpectedResponseBody(port, { sessionId: session.id });
     assert.equal(response.status, 429);
-    const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+    const payload = JSON.parse(response.body) as {
+      code?: string;
+      ok?: boolean;
+      retryAfterMs?: number;
+    };
     assert.equal(payload.ok, false);
     assert.equal(payload.code, 'RATE_LIMITED');
+    assert.equal(payload.retryAfterMs, 5_000);
   });
 
   it('shares the mutating rate-limit budget between HTTP requests and websocket upgrades', async () => {
@@ -766,9 +771,14 @@ describe('GatewayWsServer', () => {
 
       const response = await expectUnexpectedResponseBody(localPort, { sessionId: session.id });
       assert.equal(response.status, 429);
-      const payload = JSON.parse(response.body) as { code?: string; ok?: boolean };
+      const payload = JSON.parse(response.body) as {
+        code?: string;
+        ok?: boolean;
+        retryAfterMs?: number;
+      };
       assert.equal(payload.ok, false);
       assert.equal(payload.code, 'RATE_LIMITED');
+      assert.equal(payload.retryAfterMs, 5_000);
     } finally {
       localGateway.wsServer?.close();
       localGateway.heartbeat.stop();

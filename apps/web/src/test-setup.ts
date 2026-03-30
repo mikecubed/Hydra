@@ -20,6 +20,7 @@ vi.mock('./features/auth/hooks/use-session.ts', () => ({
       createdAt: new Date().toISOString(),
     },
     isLoading: false,
+    pollErrorCount: 0,
     extend: async () => {},
     logout: async () => {},
     refresh: async () => {},

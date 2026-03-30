@@ -6,6 +6,10 @@
  * package.json scripts reference .js entrypoints so `npm run` works.
  * This prevents regressions where the published package exposes raw .ts
  * entrypoints that Node cannot run without native TypeScript support.
+ *
+ * Also validates that the packaged web runtime (dist/web-runtime/) is included
+ * with a bundled gateway server entry and built browser assets, and that
+ * post-pack cleanup restores the source repo to its clean TypeScript-only state.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -13,7 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +36,8 @@ describe('packaging', { timeout: 120_000 }, () => {
     // ── Isolation: copy the repo to a temp dir so prepack/postpack side-effects
     // (generated .js files, .packfiles, .package.json.bak) never touch the real
     // working tree.  This prevents races with other tests running concurrently.
+    // We include apps/ and packages/ so the web runtime can be built and bundled
+    // during prepack, but exclude nested node_modules (deps resolve via symlink).
     const excludeTopLevel = new Set([
       'node_modules',
       '.git',
@@ -41,8 +47,6 @@ describe('packaging', { timeout: 120_000 }, () => {
       '.tsbuild',
       '.build-exe',
       '.pkg-cache',
-      'apps',
-      'packages',
     ]);
 
     repoClone = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-repo-'));
@@ -52,7 +56,11 @@ describe('packaging', { timeout: 120_000 }, () => {
         const rel = path.relative(ROOT, src);
         if (rel === '') return true; // root dir itself
         const topSegment = rel.split(path.sep)[0];
-        return !excludeTopLevel.has(topSegment);
+        if (excludeTopLevel.has(topSegment)) return false;
+        // Exclude nested node_modules inside workspace packages
+        const segments = rel.split(path.sep);
+        if (segments.length > 1 && segments.includes('node_modules')) return false;
+        return true;
       },
     });
 
@@ -84,9 +92,7 @@ describe('packaging', { timeout: 120_000 }, () => {
     tgzPath = path.join(tmpDir, tgzName);
     fs.renameSync(srcTgz, tgzPath);
 
-    // Dispose of the clone now that the tarball is captured
-    fs.rmSync(repoClone, { recursive: true, force: true });
-    repoClone = '';
+    // Keep clone alive so tests can verify postpack cleanup ran correctly.
 
     // Create a minimal package.json and install the tarball
     fs.writeFileSync(
@@ -204,5 +210,207 @@ describe('packaging', { timeout: 120_000 }, () => {
       (repoPkg.scripts.go as string).includes('.ts'),
       'Repo scripts.go should reference .ts after postpack restore',
     );
+  });
+
+  // ── Web runtime packaging ────────────────────────────────────────────────
+
+  it('tarball contains dist/web-runtime/server.js gateway entry', () => {
+    const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
+    assert.ok(fs.existsSync(serverJs), 'dist/web-runtime/server.js missing from tarball');
+    const content = fs.readFileSync(serverJs, 'utf8');
+    assert.ok(content.length > 0, 'dist/web-runtime/server.js is empty');
+  });
+
+  it('bundled gateway entry remains an ESM artifact', () => {
+    const serverJs = path.join(hydraPkgDir, 'dist', 'web-runtime', 'server.js');
+    const content = fs.readFileSync(serverJs, 'utf8');
+    assert.ok(/\bimport\b/.test(content) || /\bexport\b/.test(content));
+  });
+
+  it('tarball contains dist/web-runtime/web/ browser assets', () => {
+    const webDir = path.join(hydraPkgDir, 'dist', 'web-runtime', 'web');
+    assert.ok(fs.existsSync(webDir), 'dist/web-runtime/web/ missing from tarball');
+    assert.ok(
+      fs.existsSync(path.join(webDir, 'index.html')),
+      'dist/web-runtime/web/index.html missing from tarball',
+    );
+  });
+
+  it('tarball contains the packaged runtime marker', () => {
+    const marker = path.join(hydraPkgDir, 'dist', 'web-runtime', '.packaged');
+    assert.ok(fs.existsSync(marker), 'dist/web-runtime/.packaged missing from tarball');
+  });
+
+  it('bundled gateway entry is runnable', async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-state-'));
+    const port = String(45_000 + Math.floor(Math.random() * 1000));
+    const child = spawn(process.execPath, ['dist/web-runtime/server.js'], {
+      cwd: hydraPkgDir,
+      env: {
+        ...process.env,
+        HYDRA_WEB_GATEWAY_PORT: port,
+        HYDRA_WEB_STATE_DIR: stateDir,
+        HYDRA_DAEMON_URL: 'http://127.0.0.1:9',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`Timed out waiting for startup. Output: ${output}`));
+        }, 10_000);
+        child.stdout.on('data', (chunk) => {
+          output += String(chunk);
+          if (output.includes('Hydra web gateway listening on')) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        child.stderr.on('data', (chunk) => {
+          output += String(chunk);
+        });
+        child.once('exit', (code) => {
+          clearTimeout(timer);
+          reject(
+            new Error(`Packaged server exited early with code ${String(code)}. Output: ${output}`),
+          );
+        });
+      });
+    } finally {
+      child.kill('SIGTERM');
+      await new Promise<void>((resolve) => {
+        child.once('exit', () => {
+          resolve();
+        });
+      });
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('tarball includes dist/web-runtime/ in package.json files', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(hydraPkgDir, 'package.json'), 'utf8'));
+    const files = pkg.files as string[];
+    assert.ok(
+      files.some((f: string) => f.includes('dist/web-runtime')),
+      `Expected "dist/web-runtime/" in files array, got: ${JSON.stringify(files)}`,
+    );
+  });
+
+  it('postpack cleans dist/web-runtime/ in the packed clone', () => {
+    // Verify that clean-pack.ts (postpack) actually removed dist/web-runtime/
+    // inside the repo clone where npm pack ran — not in the untouched source repo.
+    assert.ok(repoClone, 'repoClone should still exist for cleanup verification');
+    const cloneWebRuntime = path.join(repoClone, 'dist', 'web-runtime');
+    assert.ok(
+      !fs.existsSync(cloneWebRuntime),
+      'dist/web-runtime/ should be cleaned from the clone after postpack',
+    );
+  });
+
+  it('packaging aborts when gateway exists but browser assets cannot be produced', () => {
+    // Create a minimal clone where the gateway entry exists but apps/web/ has
+    // no buildable source, verifying that build-pack.ts fails instead of
+    // silently producing a tarball with server.js but no browser assets.
+    const failClone = fs.mkdtempSync(path.join(os.tmpdir(), 'hydra-pack-fail-'));
+    try {
+      // Copy only the structural essentials — no apps/web/src/ so vite build fails
+      fs.cpSync(ROOT, failClone, {
+        recursive: true,
+        filter: (src: string) => {
+          const rel = path.relative(ROOT, src);
+          if (rel === '') return true;
+          const topSegment = rel.split(path.sep)[0];
+          if (['node_modules', '.git', 'test', 'coverage', 'dist', '.tsbuild'].includes(topSegment))
+            return false;
+          const segments = rel.split(path.sep);
+          if (segments.length > 1 && segments.includes('node_modules')) return false;
+          // Exclude apps/web/src so vite build has nothing to compile
+          if (rel.startsWith(path.join('apps', 'web', 'src'))) return false;
+          return true;
+        },
+      });
+
+      const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+      fs.symlinkSync(
+        path.join(ROOT, 'node_modules'),
+        path.join(failClone, 'node_modules'),
+        symlinkType,
+      );
+
+      let exitCode: number | null = null;
+      try {
+        execSync('npm pack', {
+          cwd: failClone,
+          stdio: 'pipe',
+          encoding: 'utf8',
+          env: { ...process.env, HUSKY: '0' },
+        });
+        exitCode = 0;
+      } catch {
+        exitCode = 1;
+      }
+
+      assert.notEqual(
+        exitCode,
+        0,
+        'npm pack should fail when apps/web/dist cannot be produced (gateway exists but web source is missing)',
+      );
+
+      // ── Verify prepack failure cleanup ──────────────────────────────────
+      // build-pack.ts should have cleaned up all generated artifacts so the
+      // tree stays clean even though npm skipped postpack.
+
+      assert.ok(
+        !fs.existsSync(path.join(failClone, '.packfiles')),
+        '.packfiles should be cleaned up after prepack failure',
+      );
+      assert.ok(
+        !fs.existsSync(path.join(failClone, '.package.json.bak')),
+        '.package.json.bak should be cleaned up after prepack failure',
+      );
+      assert.ok(
+        !fs.existsSync(path.join(failClone, 'dist', 'web-runtime')),
+        'dist/web-runtime/ should be cleaned up after prepack failure',
+      );
+
+      // No stale .js files should remain alongside .ts sources
+      const staleJs: string[] = [];
+      function scanStaleJs(dir: string) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            scanStaleJs(full);
+          } else if (entry.name.endsWith('.js') && fs.existsSync(full.replace(/\.js$/, '.ts'))) {
+            staleJs.push(path.relative(failClone, full));
+          }
+        }
+      }
+      try {
+        scanStaleJs(path.join(failClone, 'lib'));
+      } catch {
+        /* lib/ may not exist */
+      }
+      try {
+        scanStaleJs(path.join(failClone, 'bin'));
+      } catch {
+        /* bin/ may not exist */
+      }
+      assert.deepStrictEqual(
+        staleJs,
+        [],
+        `Stale .js files found after prepack failure: ${staleJs.join(', ')}`,
+      );
+
+      // package.json should not be mutated (no .ts → .js rewrite persisted)
+      const failPkg = JSON.parse(fs.readFileSync(path.join(failClone, 'package.json'), 'utf8'));
+      assert.ok(
+        (failPkg.scripts.start as string).includes('.ts'),
+        'package.json scripts.start should still reference .ts after failed prepack cleanup',
+      );
+    } finally {
+      fs.rmSync(failClone, { recursive: true, force: true });
+    }
   });
 });

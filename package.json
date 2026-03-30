@@ -28,6 +28,7 @@
   "files": [
     "bin/",
     "lib/",
+    "dist/web-runtime/",
     "docs/*.md",
     "docs/research/*.md",
     "hydra.config.json",
@@ -83,11 +84,13 @@
     "quality": "npm run lint && npm run format:check && npm run typecheck && npm run lint:cycles && npm --workspace @hydra/web run typecheck:workspace",
     "setup:hooks": "node scripts/setup-hooks.ts",
     "test": "node --test --experimental-test-module-mocks 'test/**/*.test.ts' 'apps/**/src/**/*.test.ts' 'packages/**/src/**/*.test.ts' && npm --workspace @hydra/web run test:browser",
+    "test:packaging": "node --test --experimental-test-module-mocks test/packaging.test.ts",
     "test:coverage": "c8 npm test",
     "test:coverage:check": "node_modules/.bin/c8 check-coverage",
     "test:report": "node --test 'test/**/*.test.ts' --test-reporter=tap --test-reporter-destination=docs/coordination/test-results.tap",
     "package": "node -e \"require('fs').mkdirSync('dist', { recursive: true })\" && npm pack --pack-destination dist",
     "package:dry-run": "npm pack --dry-run",
+    "package:evidence": "npm run package:dry-run -- --json && npm run test:packaging",
     "prepack": "node scripts/build-pack.ts",
     "postpack": "node scripts/clean-pack.ts",
     "build:exe": "node scripts/build-exe.ts",
@@ -156,9 +159,12 @@
     "typescript-eslint": "^8.57.0"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "cross-spawn": "^7.0.6",
+    "hono": "^4.12.8",
     "picocolors": "^1.1.1",
+    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "overrides": {

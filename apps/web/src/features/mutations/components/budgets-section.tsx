@@ -8,6 +8,7 @@ import { useState, useCallback, useMemo, type JSX } from 'react';
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
 import { MutationsRequestError } from '../api/mutations-client.ts';
+import type { ErrorCategory } from '../../../shared/gateway-errors.ts';
 import { ConfirmDialog } from './confirm-dialog.tsx';
 import { MutationErrorBanner } from './mutation-error-banner.tsx';
 
@@ -19,6 +20,24 @@ interface BudgetRowState {
   isDialogOpen: boolean;
   isLoading: boolean;
   error: string | null;
+  errorCategory: ErrorCategory | null;
+  retryAfterMs: number | null;
+}
+
+type BudgetValidationField = 'daily' | 'weekly' | 'row';
+
+interface BudgetValidationResult {
+  message: string;
+  field: BudgetValidationField;
+}
+
+interface BudgetRowFeedback {
+  validationError: BudgetValidationResult | null;
+  showAdvisory: boolean;
+  hasInput: boolean;
+  errorId: string;
+  isDailyInvalid: boolean;
+  isWeeklyInvalid: boolean;
 }
 
 export interface BudgetsSectionProps {
@@ -35,13 +54,37 @@ function parsePositiveInt(val: string): number | null {
   return null;
 }
 
-function validateRow(row: BudgetRowState): string | null {
+function validateRow(row: BudgetRowState): BudgetValidationResult | null {
   const d = parsePositiveInt(row.dailyInput);
   const w = parsePositiveInt(row.weeklyInput);
-  if (row.dailyInput !== '' && d === null) return 'Daily limit must be a positive integer';
-  if (row.weeklyInput !== '' && w === null) return 'Weekly limit must be a positive integer';
-  if (row.dailyInput === '' && row.weeklyInput === '') return 'At least one limit is required';
+  if (row.dailyInput !== '' && d === null) {
+    return { message: 'Daily limit must be a positive integer', field: 'daily' };
+  }
+  if (row.weeklyInput !== '' && w === null) {
+    return { message: 'Weekly limit must be a positive integer', field: 'weekly' };
+  }
+  if (row.dailyInput === '' && row.weeklyInput === '') {
+    return { message: 'At least one limit is required', field: 'row' };
+  }
   return null;
+}
+
+function getBudgetRowFeedback(id: string, row: BudgetRowState): BudgetRowFeedback {
+  const dailyLimit = parsePositiveInt(row.dailyInput);
+  const weeklyLimit = parsePositiveInt(row.weeklyInput);
+  const validationError = validateRow(row);
+  const hasInput = row.dailyInput !== '' || row.weeklyInput !== '';
+  const errorVisible = validationError !== null && hasInput;
+  return {
+    validationError,
+    showAdvisory: dailyLimit !== null && weeklyLimit !== null && dailyLimit > weeklyLimit,
+    hasInput,
+    errorId: `budget-error-${id}`,
+    isDailyInvalid:
+      errorVisible && (validationError.field === 'daily' || validationError.field === 'row'),
+    isWeeklyInvalid:
+      errorVisible && (validationError.field === 'weekly' || validationError.field === 'row'),
+  };
 }
 
 function formatLimit(val: number | undefined): string {
@@ -82,11 +125,8 @@ function BudgetRow({
   onConfirm,
   onDismissError,
 }: BudgetRowProps): JSX.Element {
-  const d = parsePositiveInt(row.dailyInput);
-  const w = parsePositiveInt(row.weeklyInput);
-  const validationError = validateRow(row);
-  const showAdvisory = d !== null && w !== null && d > w;
-  const hasInput = row.dailyInput !== '' || row.weeklyInput !== '';
+  const { validationError, showAdvisory, hasInput, errorId, isDailyInvalid, isWeeklyInvalid } =
+    getBudgetRowFeedback(id, row);
   return (
     <div aria-label={`Budget for ${id}`}>
       <span>{id}</span>
@@ -95,6 +135,8 @@ function BudgetRow({
         id={`daily-${id}`}
         type="number"
         value={row.dailyInput}
+        aria-invalid={isDailyInvalid || undefined}
+        aria-describedby={isDailyInvalid ? errorId : undefined}
         onChange={(e) => {
           onDailyChange(e.target.value);
         }}
@@ -105,6 +147,8 @@ function BudgetRow({
         id={`weekly-${id}`}
         type="number"
         value={row.weeklyInput}
+        aria-invalid={isWeeklyInvalid || undefined}
+        aria-describedby={isWeeklyInvalid ? errorId : undefined}
         onChange={(e) => {
           onWeeklyChange(e.target.value);
         }}
@@ -117,8 +161,17 @@ function BudgetRow({
       >
         Apply
       </button>
-      {validationError !== null && hasInput && <span role="alert">{validationError}</span>}
-      <MutationErrorBanner message={row.error} onDismiss={onDismissError} />
+      {validationError !== null && hasInput && (
+        <span id={errorId} role="alert">
+          {validationError.message}
+        </span>
+      )}
+      <MutationErrorBanner
+        message={row.error}
+        category={row.errorCategory}
+        retryAfterMs={row.retryAfterMs}
+        onDismiss={onDismissError}
+      />
       <ConfirmDialog
         isOpen={row.isDialogOpen}
         title={`Update ${id} budget`}
@@ -165,7 +218,7 @@ function renderBudgetRows({
         handleConfirm(id);
       }}
       onDismissError={() => {
-        updateRow(id, { error: null });
+        updateRow(id, { error: null, errorCategory: null, retryAfterMs: null });
       }}
     />
   ));
@@ -187,6 +240,8 @@ function buildInitialRows(
         isDialogOpen: false,
         isLoading: false,
         error: null,
+        errorCategory: null,
+        retryAfterMs: null,
       },
     ]),
   );
@@ -207,6 +262,8 @@ function buildBudgetBaseline(
     isDialogOpen: false,
     isLoading: false,
     error: null,
+    errorCategory: null,
+    retryAfterMs: null,
   };
 }
 
@@ -232,10 +289,10 @@ async function applyBudget({
   const row = rows[id];
   const validationError = validateRow(row);
   if (validationError !== null) {
-    updateRow(id, { error: validationError });
+    updateRow(id, { error: validationError.message, errorCategory: null, retryAfterMs: null });
     return;
   }
-  updateRow(id, { isLoading: true, error: null });
+  updateRow(id, { isLoading: true, error: null, errorCategory: null, retryAfterMs: null });
   try {
     await client.postBudget({
       modelId: id,
@@ -248,9 +305,14 @@ async function applyBudget({
     onBudgetMutated();
   } catch (err: unknown) {
     updateRow(id, {
+      dailyInput: row.serverDailyInput,
+      weeklyInput: row.serverWeeklyInput,
       isLoading: false,
       isDialogOpen: false,
       error: err instanceof MutationsRequestError ? err.gatewayError.message : 'Unexpected error',
+      errorCategory: err instanceof MutationsRequestError ? err.gatewayError.category : null,
+      retryAfterMs:
+        err instanceof MutationsRequestError ? (err.gatewayError.retryAfterMs ?? null) : null,
     });
   }
 }

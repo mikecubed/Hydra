@@ -11,6 +11,7 @@ import {
   createInitialOperationsState,
   reduceOperationsState,
 } from '../model/operations-reducer.ts';
+import type { OperationsWorkspaceState } from '../model/operations-types.ts';
 import {
   selectAvailability,
   selectControlsForSelectedItem,
@@ -21,6 +22,7 @@ import {
   selectQueueItems,
   selectSelectedDetail,
   selectSelectedWorkItemId,
+  selectSnapshotErrorMessage,
   selectSnapshotStatus,
   selectStatusFilter,
 } from '../model/selectors.ts';
@@ -101,6 +103,21 @@ function makeDetailResponse(
 describe('selectSnapshotStatus', () => {
   it('returns the current snapshot status', () => {
     assert.equal(selectSnapshotStatus(createInitialOperationsState()), 'idle');
+  });
+});
+
+describe('selectSnapshotErrorMessage', () => {
+  it('returns null for initial state', () => {
+    assert.equal(selectSnapshotErrorMessage(createInitialOperationsState()), null);
+  });
+
+  it('returns the error message when set', () => {
+    const state: OperationsWorkspaceState = {
+      ...createInitialOperationsState(),
+      snapshotStatus: 'error',
+      snapshotErrorMessage: 'Daemon unreachable',
+    };
+    assert.equal(selectSnapshotErrorMessage(state), 'Daemon unreachable');
   });
 });
 
@@ -299,5 +316,86 @@ describe('selectControlsForSelectedItem', () => {
     const controls = selectControlsForSelectedItem(state);
     assert.equal(controls.length, 1);
     assert.equal(controls[0].controlId, 'ctrl-1');
+  });
+});
+
+// ─── Reference stability ────────────────────────────────────────────────────
+
+describe('reference stability — selectFilteredQueueItems', () => {
+  it('returns the same reference on consecutive calls with unchanged state', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({ id: 'wq-1', status: 'active' }),
+        makeQueueItem({ id: 'wq-2', status: 'completed' }),
+      ],
+    });
+    let state = createInitialOperationsState();
+    state = reduceOperationsState(state, { type: 'snapshot/request' });
+    state = reduceOperationsState(state, { type: 'snapshot/success', snapshot });
+    state = reduceOperationsState(state, {
+      type: 'filters/set-status',
+      statusFilter: ['active'],
+    });
+
+    const first = selectFilteredQueueItems(state);
+    const second = selectFilteredQueueItems(state);
+    assert.equal(first, second, 'expected same array reference on second call');
+  });
+
+  it('returns the same reference when filter is empty and queue unchanged', () => {
+    const snapshot = makeSnapshotResponse({
+      queue: [makeQueueItem({ id: 'wq-1' }), makeQueueItem({ id: 'wq-2' })],
+    });
+    let state = createInitialOperationsState();
+    state = reduceOperationsState(state, { type: 'snapshot/request' });
+    state = reduceOperationsState(state, { type: 'snapshot/success', snapshot });
+
+    const first = selectFilteredQueueItems(state);
+    const second = selectFilteredQueueItems(state);
+    assert.equal(first, second, 'expected same array reference when filter is empty');
+  });
+
+  it('does not leak cached results across different state instances', () => {
+    // Build state A with filter ['active']
+    const snapshotA = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({ id: 'wq-1', status: 'active' }),
+        makeQueueItem({ id: 'wq-2', status: 'completed' }),
+      ],
+    });
+    let stateA = createInitialOperationsState();
+    stateA = reduceOperationsState(stateA, { type: 'snapshot/request' });
+    stateA = reduceOperationsState(stateA, { type: 'snapshot/success', snapshot: snapshotA });
+    stateA = reduceOperationsState(stateA, {
+      type: 'filters/set-status',
+      statusFilter: ['active'],
+    });
+
+    const resultA = selectFilteredQueueItems(stateA);
+    assert.equal(resultA.length, 1, 'state A should have 1 active item');
+    assert.equal(resultA[0].id, 'wq-1');
+
+    // Build state B with a different queue and filter ['completed']
+    const snapshotB = makeSnapshotResponse({
+      queue: [
+        makeQueueItem({ id: 'wq-3', status: 'completed' }),
+        makeQueueItem({ id: 'wq-4', status: 'completed' }),
+        makeQueueItem({ id: 'wq-5', status: 'active' }),
+      ],
+    });
+    let stateB = createInitialOperationsState();
+    stateB = reduceOperationsState(stateB, { type: 'snapshot/request' });
+    stateB = reduceOperationsState(stateB, { type: 'snapshot/success', snapshot: snapshotB });
+    stateB = reduceOperationsState(stateB, {
+      type: 'filters/set-status',
+      statusFilter: ['completed'],
+    });
+
+    const resultB = selectFilteredQueueItems(stateB);
+    assert.equal(resultB.length, 2, 'state B should have 2 completed items');
+    assert.ok(
+      resultB.every((item) => item.status === 'completed'),
+      'state B results must all be completed — cache must not leak state A results',
+    );
   });
 });

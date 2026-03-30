@@ -24,6 +24,7 @@ export function gatewayErrorResponse(c: Context, err: GatewayError): Response {
     category,
     message: err.message,
     httpStatus: err.statusCode,
+    retryAfterMs: err.retryAfterMs,
   });
   return c.json(body, err.statusCode as ContentfulStatusCode);
 }

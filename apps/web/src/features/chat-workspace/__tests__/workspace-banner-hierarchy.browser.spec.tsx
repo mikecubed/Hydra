@@ -25,6 +25,31 @@ import {
   EMPTY_HISTORY,
 } from './browser-helpers.ts';
 
+async function findConnectionStatus() {
+  const statuses = await screen.findAllByRole('status');
+  const match = statuses.find((status) =>
+    /(connecting|reconnecting|disconnected)/i.test(status.textContent ?? ''),
+  );
+  if (!match) {
+    throw new Error('Expected connection status banner to be present');
+  }
+  return match;
+}
+
+function queryConnectionStatus() {
+  return screen
+    .queryAllByRole('status')
+    .find((status) => /(connecting|reconnecting|disconnected)/i.test(status.textContent ?? ''));
+}
+
+function queryConnectionAlert() {
+  return screen
+    .queryAllByRole('alert')
+    .find((alert) =>
+      /(disconnected|reconnect|gateway|session|daemon|sync)/i.test(alert.textContent ?? ''),
+    );
+}
+
 beforeEach(() => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
 });
@@ -52,7 +77,7 @@ describe('connection banner in real route hierarchy', () => {
 
     // The workspace route starts with transportStatus 'connecting', which is
     // not fully quiet → banner should render as a polite status.
-    const banner = await screen.findByRole('status');
+    const banner = await findConnectionStatus();
     expect(banner).toBeInTheDocument();
     expect(banner).toHaveTextContent(/connecting/i);
   });
@@ -71,7 +96,7 @@ describe('connection banner in real route hierarchy', () => {
     render(<AppProviders />);
 
     // Wait for workspace to mount and show the initial connecting banner
-    await screen.findByRole('status');
+    await findConnectionStatus();
 
     // Open the WebSocket to move transport to 'live'
     const ws = latestSocket();
@@ -82,8 +107,8 @@ describe('connection banner in real route hierarchy', () => {
     // Once transport is live + sync idle + daemon healthy + session active,
     // the banner should disappear.
     await vi.waitFor(() => {
-      expect(screen.queryByRole('alert')).toBeNull();
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(queryConnectionAlert()).toBeUndefined();
+      expect(queryConnectionStatus()).toBeUndefined();
     });
   });
 
@@ -114,8 +139,8 @@ describe('connection banner in real route hierarchy', () => {
 
     // Banner should be hidden when connected
     await vi.waitFor(() => {
-      expect(screen.queryByRole('alert')).toBeNull();
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(queryConnectionAlert()).toBeUndefined();
+      expect(queryConnectionStatus()).toBeUndefined();
     });
 
     // Simulate abnormal close — triggers reconnect
@@ -124,7 +149,7 @@ describe('connection banner in real route hierarchy', () => {
     });
 
     // After close, the banner should show reconnecting status
-    const banner = await screen.findByRole('status');
+    const banner = await findConnectionStatus();
     expect(banner).toHaveTextContent(/reconnecting/i);
 
     vi.useRealTimers();

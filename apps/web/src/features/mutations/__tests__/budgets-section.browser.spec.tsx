@@ -2,10 +2,11 @@
  * T7 — BudgetsSection browser specs: rows re-sync when model IDs change after refetch.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, act } from '@testing-library/react';
+import { cleanup, render, screen, act, fireEvent } from '@testing-library/react';
 
 import type { SafeConfigView } from '@hydra/web-contracts';
 import type { MutationsClient } from '../api/mutations-client.ts';
+import { MutationsRequestError } from '../api/mutations-client.ts';
 import { BudgetsSection } from '../components/budgets-section.tsx';
 
 afterEach(() => {
@@ -185,5 +186,165 @@ describe('BudgetsSection — row sync', () => {
     }
     expect(refreshedDaily.value).toBe('2000');
     expect(refreshedWeekly.value).toBe('8000');
+  });
+
+  it('shows rate-limit retry guidance from the live budget row', async () => {
+    const client = makeMockClient();
+    client.postBudget = vi.fn().mockRejectedValue(
+      new MutationsRequestError(429, {
+        ok: false,
+        code: 'RATE_LIMITED',
+        category: 'rate-limit',
+        message: 'Too many updates',
+        httpStatus: 429,
+        retryAfterMs: 4000,
+      }),
+    );
+
+    render(
+      <BudgetsSection
+        config={makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+        onBudgetMutated={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByText('Confirm'));
+
+    await act(async () => {});
+
+    expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent('try again in 4 seconds');
+  });
+
+  it('does not set aria-invalid when both inputs are empty (row-level error not rendered)', async () => {
+    const client = makeMockClient();
+
+    render(
+      <BudgetsSection
+        config={makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+        onBudgetMutated={vi.fn()}
+      />,
+    );
+
+    const dailyInput = screen.getByLabelText('Daily limit', { selector: '#daily-gpt-4' });
+    const weeklyInput = screen.getByLabelText('Weekly limit', { selector: '#weekly-gpt-4' });
+    if (!(dailyInput instanceof HTMLInputElement) || !(weeklyInput instanceof HTMLInputElement)) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+
+    // Clear both inputs so the row-level "At least one limit is required" fires
+    fireEvent.change(dailyInput, { target: { value: '' } });
+    fireEvent.change(weeklyInput, { target: { value: '' } });
+
+    // The error alert should NOT be rendered (hasInput is false)
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // ARIA attributes must not reference a non-existent element
+    expect(dailyInput.getAttribute('aria-invalid')).toBeNull();
+    expect(weeklyInput.getAttribute('aria-invalid')).toBeNull();
+    expect(dailyInput.getAttribute('aria-describedby')).toBeNull();
+    expect(weeklyInput.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('marks invalid budget inputs and links them to the validation message', async () => {
+    const client = makeMockClient();
+
+    render(
+      <BudgetsSection
+        config={makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+        onBudgetMutated={vi.fn()}
+      />,
+    );
+
+    const dailyInput = screen.getByLabelText('Daily limit', {
+      selector: '#daily-gpt-4',
+    });
+    const weeklyInput = screen.getByLabelText('Weekly limit', {
+      selector: '#weekly-gpt-4',
+    });
+    if (!(dailyInput instanceof HTMLInputElement) || !(weeklyInput instanceof HTMLInputElement)) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+
+    fireEvent.change(dailyInput, { target: { value: '0' } });
+
+    expect(dailyInput.getAttribute('aria-invalid')).toBe('true');
+    expect(weeklyInput.getAttribute('aria-invalid')).toBeNull();
+    expect(dailyInput.getAttribute('aria-describedby')).toBe('budget-error-gpt-4');
+    expect(screen.getByRole('alert')).toHaveTextContent('Daily limit must be a positive integer');
+  });
+
+  it('rolls back rejected edits to authoritative values and adopts newer server budgets after refetch', async () => {
+    const client = makeMockClient();
+    client.postBudget = vi.fn().mockRejectedValue(
+      new MutationsRequestError(409, {
+        ok: false,
+        code: 'STALE_REVISION',
+        category: 'stale-revision',
+        message: 'Config changed. Refresh and try again.',
+        httpStatus: 409,
+      }),
+    );
+
+    const initialConfig = makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } });
+    const refreshedConfig = makeConfigWithBudgets({ 'gpt-4': { daily: 2000, weekly: 8000 } });
+
+    let rerender!: ReturnType<typeof render>['rerender'];
+    await act(async () => {
+      ({ rerender } = render(
+        <BudgetsSection
+          config={initialConfig}
+          revision="r1"
+          client={client}
+          onSuccess={vi.fn()}
+          onBudgetMutated={vi.fn()}
+        />,
+      ));
+    });
+
+    const dailyInput = screen.getByLabelText('Daily limit', {
+      selector: '#daily-gpt-4',
+    });
+    const weeklyInput = screen.getByLabelText('Weekly limit', {
+      selector: '#weekly-gpt-4',
+    });
+    if (!(dailyInput instanceof HTMLInputElement) || !(weeklyInput instanceof HTMLInputElement)) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+
+    fireEvent.change(dailyInput, { target: { value: '1500' } });
+    fireEvent.change(weeklyInput, { target: { value: '7000' } });
+    fireEvent.click(screen.getByText('Apply'));
+    fireEvent.click(screen.getByText('Confirm'));
+
+    await act(async () => {});
+
+    expect(dailyInput.value).toBe('1000');
+    expect(weeklyInput.value).toBe('5000');
+    expect(screen.getByRole('alert')).toHaveTextContent('Config changed. Refresh and try again.');
+
+    await act(async () => {
+      rerender(
+        <BudgetsSection
+          config={refreshedConfig}
+          revision="r2"
+          client={client}
+          onSuccess={vi.fn()}
+          onBudgetMutated={vi.fn()}
+        />,
+      );
+    });
+
+    expect(dailyInput.value).toBe('2000');
+    expect(weeklyInput.value).toBe('8000');
   });
 });

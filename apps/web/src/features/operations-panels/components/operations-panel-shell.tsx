@@ -105,7 +105,12 @@ export function OperationsPanelShell({
         <h3 id="operations-panel-heading" style={{ margin: 0, fontSize: '1.1rem' }}>
           Operations
         </h3>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Operations refresh status"
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+        >
           <FreshnessBadge freshness={freshness} />
           {snapshotStatus === 'loading' && <span style={loadingLabelStyle}>Refreshing…</span>}
         </div>

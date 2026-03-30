@@ -106,15 +106,11 @@ export async function submitComposerDraft(deps: SubmitDraftDeps): Promise<Submit
   try {
     const response = await client.submitInstruction(conversationId, { instruction });
 
-    // Append the authoritative operator turn from the response so the
-    // transcript shows the submitted instruction immediately — even when
-    // historyLoaded is already true and the transcript loader won't re-fetch.
     store.dispatch({
       type: 'conversation/append-submit-turn',
       conversationId,
       entry: turnToTranscriptEntry(response.turn),
     });
-
     store.dispatch({ type: 'draft/set-text', conversationId, draftText: '' });
     store.dispatch({
       type: 'draft/set-submit-state',

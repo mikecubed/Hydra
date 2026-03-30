@@ -186,6 +186,54 @@ describe('snapshot lifecycle', () => {
     assert.equal(state.freshness, 'stale');
   });
 
+  // ── T013: snapshotErrorMessage tracking ─────────────────────────────────
+
+  it('sets default snapshotErrorMessage on snapshot/failure without explicit message', () => {
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/failure' },
+    ]);
+
+    assert.equal(state.snapshotStatus, 'error');
+    assert.equal(typeof state.snapshotErrorMessage, 'string');
+    assert.ok((state.snapshotErrorMessage ?? '').length > 0);
+  });
+
+  it('sets explicit snapshotErrorMessage on snapshot/failure with errorMessage', () => {
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/failure', errorMessage: 'Gateway 503: daemon unreachable' },
+    ]);
+
+    assert.equal(state.snapshotErrorMessage, 'Gateway 503: daemon unreachable');
+  });
+
+  it('clears snapshotErrorMessage on snapshot/request', () => {
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/failure', errorMessage: 'first error' },
+      { type: 'snapshot/request' },
+    ]);
+
+    assert.equal(state.snapshotErrorMessage, null);
+  });
+
+  it('clears snapshotErrorMessage on snapshot/success', () => {
+    const state = applyActions(createInitialOperationsState(), [
+      { type: 'snapshot/request' },
+      { type: 'snapshot/failure', errorMessage: 'error' },
+      { type: 'snapshot/request' },
+      { type: 'snapshot/success', snapshot: makeSnapshotResponse() },
+    ]);
+
+    assert.equal(state.snapshotErrorMessage, null);
+  });
+
+  it('initial state has null snapshotErrorMessage', () => {
+    const state = createInitialOperationsState();
+    assert.equal(state.snapshotErrorMessage, null);
+  });
+
   it('replaces snapshot on successive success', () => {
     const first = makeSnapshotResponse();
     const second = makeSnapshotResponse({

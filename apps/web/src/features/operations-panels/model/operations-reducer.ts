@@ -21,7 +21,7 @@ import type { OperationsWorkspaceState } from './operations-types.ts';
 export type OperationsAction =
   | { readonly type: 'snapshot/request' }
   | { readonly type: 'snapshot/success'; readonly snapshot: GetOperationsSnapshotResponse }
-  | { readonly type: 'snapshot/failure' }
+  | { readonly type: 'snapshot/failure'; readonly errorMessage?: string }
   | { readonly type: 'filters/set-status'; readonly statusFilter: readonly WorkItemStatus[] }
   | { readonly type: 'selection/select'; readonly workItemId: string }
   | { readonly type: 'selection/deselect' }
@@ -44,6 +44,7 @@ export function createInitialOperationsState(): OperationsWorkspaceState {
   return {
     snapshotStatus: 'idle',
     snapshot: null,
+    snapshotErrorMessage: null,
     freshness: 'stale',
     availability: 'empty',
     lastSynchronizedAt: null,
@@ -63,10 +64,6 @@ export function createInitialOperationsState(): OperationsWorkspaceState {
   };
 }
 
-/**
- * Route-mount initializer — starts as loading/refreshing so the first paint
- * reflects the pending snapshot fetch rather than briefly flashing idle state.
- */
 export function createRouteInitialOperationsState(): OperationsWorkspaceState {
   return {
     ...createInitialOperationsState(),
@@ -82,6 +79,7 @@ function reduceSnapshotRequest(state: OperationsWorkspaceState): OperationsWorks
     ...state,
     snapshotStatus: 'loading',
     freshness: 'refreshing',
+    snapshotErrorMessage: null,
   };
 }
 
@@ -121,6 +119,7 @@ function reduceSnapshotSuccess(
     ...state,
     snapshotStatus: 'ready',
     snapshot,
+    snapshotErrorMessage: null,
     freshness: 'live',
     availability: snapshot.availability,
     lastSynchronizedAt: snapshot.lastSynchronizedAt,
@@ -128,11 +127,16 @@ function reduceSnapshotSuccess(
   };
 }
 
-function reduceSnapshotFailure(state: OperationsWorkspaceState): OperationsWorkspaceState {
+function reduceSnapshotFailure(
+  state: OperationsWorkspaceState,
+  errorMessage?: string,
+): OperationsWorkspaceState {
   return {
     ...state,
     snapshotStatus: 'error',
     freshness: 'stale',
+    snapshotErrorMessage:
+      errorMessage ?? 'Failed to load operations data. The daemon may be unreachable.',
   };
 }
 
@@ -286,7 +290,7 @@ export function reduceOperationsState(
     case 'snapshot/success':
       return reduceSnapshotSuccess(state, action.snapshot);
     case 'snapshot/failure':
-      return reduceSnapshotFailure(state);
+      return reduceSnapshotFailure(state, action.errorMessage);
     case 'filters/set-status':
       return reduceFiltersSetStatus(state, action.statusFilter);
     case 'selection/select':

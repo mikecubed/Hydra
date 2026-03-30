@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type {
   GetOperationsSnapshotResponse,
@@ -8,6 +8,7 @@ import type {
 } from '@hydra/web-contracts';
 
 import { AppProviders } from '../../../app/providers.tsx';
+import { WorkspaceOperationsPanel } from '../components/workspace-operations-panel.tsx';
 import {
   FakeWebSocket,
   fetchSpy,
@@ -127,6 +128,9 @@ it('shows loading state on first paint before snapshot resolves', async () => {
   await waitFor(() => {
     expect(screen.getByText('Refreshing…')).toBeInTheDocument();
   });
+  expect(screen.getByRole('status', { name: 'Operations refresh status' })).toHaveTextContent(
+    'Refreshing…',
+  );
   expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/loading/i);
 
   resolveSnapshot(
@@ -141,6 +145,9 @@ it('shows loading state on first paint before snapshot resolves', async () => {
   );
 
   expect(await screen.findByText('live')).toBeInTheDocument();
+  expect(screen.getByRole('status', { name: 'Operations refresh status' })).toHaveTextContent(
+    'live',
+  );
 });
 
 it('loads the operations snapshot and renders queue items from the gateway', async () => {
@@ -356,4 +363,375 @@ it('retries detail fetch when clicking the already-selected work item after a fa
   fireEvent.click(queueItem);
   expect(await screen.findByText('Checkpoint ready')).toBeInTheDocument();
   expect(detailFetches).toBe(2);
+});
+
+// ─── T024 Regression: refresh-cycle & selector stability ────────────────────
+
+describe('T024 refresh-cycle regressions', () => {
+  it('recovers freshness from stale→live after a failed snapshot is retried', async () => {
+    let snapshotCallCount = 0;
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({ conversations: [], totalCount: 0 });
+      }
+
+      if (url === '/operations/snapshot') {
+        snapshotCallCount += 1;
+        if (snapshotCallCount === 1) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              code: 'DAEMON_UNREACHABLE',
+              category: 'daemon',
+              message: 'Daemon unreachable',
+            }),
+            { status: 503, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        return jsonResponse({
+          queue: [makeHydrationItem()],
+          health: null,
+          budget: null,
+          availability: 'ready',
+          lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+          nextCursor: null,
+        });
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<AppProviders />);
+
+    // First snapshot fails → stale + degraded banner
+    expect(await screen.findByText('stale')).toBeInTheDocument();
+    expect(screen.getByTestId('operations-degraded-banner')).toBeInTheDocument();
+    expect(snapshotCallCount).toBe(1);
+
+    // Retry via degraded banner button
+    fireEvent.click(screen.getByTestId('operations-retry-button'));
+
+    // Second snapshot succeeds → live
+    expect(await screen.findByText('live')).toBeInTheDocument();
+    expect(await screen.findByText('Investigate queue hydration')).toBeInTheDocument();
+    expect(screen.queryByTestId('operations-degraded-banner')).not.toBeInTheDocument();
+    expect(snapshotCallCount).toBe(2);
+  });
+
+  it('preserves selected item and detail across a snapshot refresh that keeps the item', async () => {
+    const item = makeHydrationItem();
+    const detail: GetWorkItemDetailResponse = {
+      item,
+      checkpoints: [
+        {
+          id: 'cp-1',
+          sequence: 0,
+          label: 'Phase alpha',
+          status: 'reached',
+          timestamp: '2026-07-01T00:00:05.000Z',
+          detail: null,
+        },
+      ],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [],
+      itemBudget: null,
+      availability: 'partial',
+    };
+
+    let snapshotCallCount = 0;
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({ conversations: [], totalCount: 0 });
+      }
+      if (url === '/operations/snapshot') {
+        snapshotCallCount += 1;
+        return jsonResponse({
+          queue: [{ ...item, title: snapshotCallCount === 1 ? item.title : 'Updated title' }],
+          health: null,
+          budget: null,
+          availability: 'ready',
+          lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+          nextCursor: null,
+        });
+      }
+      if (url === '/operations/work-items/wi-42') {
+        return jsonResponse(detail);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { rerender } = render(<WorkspaceOperationsPanel refreshNonce={0} />);
+
+    // Select item and load detail
+    const queueItem = await screen.findByText('Investigate queue hydration');
+    fireEvent.click(queueItem);
+    expect(await screen.findByText('Phase alpha')).toBeInTheDocument();
+    expect(snapshotCallCount).toBe(1);
+
+    rerender(<WorkspaceOperationsPanel refreshNonce={1} />);
+
+    await waitFor(() => {
+      expect(snapshotCallCount).toBe(2);
+    });
+
+    const selectedButton = await screen.findByRole('button', { name: /Updated title/i });
+    expect(selectedButton).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('Phase alpha')).toBeInTheDocument();
+  });
+
+  it('clears selection when a snapshot refresh removes the selected item', async () => {
+    const item = makeHydrationItem();
+    const detail: GetWorkItemDetailResponse = {
+      item,
+      checkpoints: [
+        {
+          id: 'cp-1',
+          sequence: 0,
+          label: 'Disappearing checkpoint',
+          status: 'reached',
+          timestamp: '2026-07-01T00:00:05.000Z',
+          detail: null,
+        },
+      ],
+      routing: null,
+      assignments: [],
+      council: null,
+      controls: [],
+      itemBudget: null,
+      availability: 'partial',
+    };
+
+    let snapshotCallCount = 0;
+    installFetchStub((url) => {
+      if (url === '/operations/snapshot') {
+        snapshotCallCount += 1;
+        return jsonResponse({
+          queue: snapshotCallCount === 1 ? [item] : [],
+          health: null,
+          budget: null,
+          availability: snapshotCallCount === 1 ? 'ready' : 'empty',
+          lastSynchronizedAt:
+            snapshotCallCount === 1 ? '2026-07-01T00:00:00.000Z' : '2026-07-02T00:00:00.000Z',
+          nextCursor: null,
+        });
+      }
+      if (url === '/operations/work-items/wi-42') {
+        return jsonResponse(detail);
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const { rerender } = render(<WorkspaceOperationsPanel refreshNonce={0} />);
+
+    // Select item
+    const queueItem = await screen.findByText('Investigate queue hydration');
+    fireEvent.click(queueItem);
+    expect(await screen.findByText('Disappearing checkpoint')).toBeInTheDocument();
+    expect(snapshotCallCount).toBe(1);
+
+    rerender(<WorkspaceOperationsPanel refreshNonce={1} />);
+
+    await waitFor(() => {
+      expect(snapshotCallCount).toBe(2);
+      expect(screen.queryByText('Disappearing checkpoint')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('operations-empty-state')).toHaveTextContent(/no work items/i);
+    expect(screen.queryByTestId('detail-panel-slot')).not.toBeInTheDocument();
+    expect(
+      screen
+        .queryAllByRole('button')
+        .some((button) => button.getAttribute('aria-current') === 'true'),
+    ).toBe(false);
+  });
+
+  it('concurrent snapshot refreshes do not clobber the freshness badge', async () => {
+    let snapshotCalls = 0;
+    let resolveFirst!: (r: Response) => void;
+    let resolveSecond!: (r: Response) => void;
+
+    fetchSpy.mockImplementation((input: RequestInfo | URL) => {
+      const url = resolveUrl(input);
+      if (url === '/session/info') {
+        return Promise.resolve(
+          jsonResponse({
+            operatorId: 'test-operator',
+            state: 'active',
+            expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+            lastActivityAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+          }),
+        );
+      }
+      if (url === '/conversations?status=active&limit=20') {
+        return Promise.resolve(jsonResponse({ conversations: [], totalCount: 0 }));
+      }
+      if (url === '/operations/snapshot') {
+        snapshotCalls += 1;
+        if (snapshotCalls === 1) {
+          return new Promise<Response>((r) => {
+            resolveFirst = r;
+          });
+        }
+        return new Promise<Response>((r) => {
+          resolveSecond = r;
+        });
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const { rerender } = render(<WorkspaceOperationsPanel refreshNonce={0} />);
+
+    // Initial mount triggers first snapshot fetch
+    await waitFor(() => {
+      expect(snapshotCalls).toBe(1);
+    });
+    expect(screen.getByText('Refreshing…')).toBeInTheDocument();
+
+    rerender(<WorkspaceOperationsPanel refreshNonce={1} />);
+    await waitFor(() => {
+      expect(snapshotCalls).toBe(2);
+    });
+
+    resolveSecond(
+      jsonResponse({
+        queue: [{ ...makeHydrationItem(), title: 'Second snapshot wins' }],
+        health: null,
+        budget: null,
+        availability: 'ready',
+        lastSynchronizedAt: '2026-07-02T00:00:00.000Z',
+        nextCursor: null,
+      }),
+    );
+
+    expect(await screen.findByText('live')).toBeInTheDocument();
+    expect(await screen.findByText('Second snapshot wins')).toBeInTheDocument();
+
+    resolveFirst(
+      jsonResponse({
+        queue: [makeHydrationItem()],
+        health: null,
+        budget: null,
+        availability: 'ready',
+        lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+        nextCursor: null,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('status', { name: 'Operations refresh status' })).toHaveTextContent(
+        'live',
+      );
+    });
+    expect(screen.getByText('Second snapshot wins')).toBeInTheDocument();
+    expect(screen.queryByText('Investigate queue hydration')).not.toBeInTheDocument();
+  });
+
+  it('does not flash stale badge during normal snapshot loading cycle', async () => {
+    let resolveSnapshot!: (response: Response) => void;
+    const snapshotPromise = new Promise<Response>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+
+    installFetchStub((url) => {
+      if (url === '/conversations?status=active&limit=20') {
+        return jsonResponse({ conversations: [], totalCount: 0 });
+      }
+      if (url === '/operations/snapshot') {
+        return snapshotPromise;
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    render(<WorkspaceOperationsPanel refreshNonce={0} />);
+
+    const refreshStatus = screen.getByRole('status', { name: 'Operations refresh status' });
+    expect(refreshStatus).toHaveTextContent('Refreshing…');
+    expect(refreshStatus).toHaveTextContent('refreshing');
+    expect(refreshStatus).not.toHaveTextContent('stale');
+
+    resolveSnapshot(
+      jsonResponse({
+        queue: [],
+        health: null,
+        budget: null,
+        availability: 'empty',
+        lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+        nextCursor: null,
+      }),
+    );
+
+    expect(await screen.findByText('live')).toBeInTheDocument();
+    expect(refreshStatus).toHaveTextContent('live');
+    expect(refreshStatus).not.toHaveTextContent('stale');
+  });
+
+  it('renders multiple queue items with stable identity after snapshot load', async () => {
+    const items = [
+      { ...makeHydrationItem(), id: 'wi-1', title: 'First task', position: 0 },
+      { ...makeHydrationItem(), id: 'wi-2', title: 'Second task', position: 1 },
+      { ...makeHydrationItem(), id: 'wi-3', title: 'Third task', position: 2 },
+    ];
+
+    installBaseOperationsStub({
+      queue: items,
+      health: null,
+      budget: null,
+      availability: 'ready',
+      lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+      nextCursor: null,
+    });
+
+    render(<AppProviders />);
+
+    // All three items render
+    expect(await screen.findByText('First task')).toBeInTheDocument();
+    expect(screen.getByText('Second task')).toBeInTheDocument();
+    expect(screen.getByText('Third task')).toBeInTheDocument();
+
+    // Verify list structure
+    const listItems = screen.getAllByRole('listitem');
+    expect(listItems).toHaveLength(3);
+
+    // No items should be selected initially
+    const buttons = screen.getAllByRole('button');
+    const selectedButtons = buttons.filter((b) => b.getAttribute('aria-current') === 'true');
+    expect(selectedButtons).toHaveLength(0);
+  });
+
+  it('shows health panel alongside queue items when health data is present', async () => {
+    installBaseOperationsStub({
+      queue: [makeHydrationItem()],
+      health: {
+        status: 'degraded',
+        scope: 'global',
+        observedAt: '2026-07-01T00:00:00.000Z',
+        message: 'Codex agent unresponsive',
+        detailsAvailability: 'ready',
+      },
+      budget: {
+        status: 'warning',
+        scope: 'global',
+        scopeId: null,
+        summary: 'Budget 75% consumed',
+        used: 750_000,
+        limit: 1_000_000,
+        unit: 'tokens',
+        complete: true,
+      },
+      availability: 'ready',
+      lastSynchronizedAt: '2026-07-01T00:00:00.000Z',
+      nextCursor: null,
+    });
+
+    render(<AppProviders />);
+
+    expect(await screen.findByText('Investigate queue hydration')).toBeInTheDocument();
+    // Health/budget panel slot should be present
+    expect(screen.getByTestId('health-budget-slot')).toBeInTheDocument();
+  });
 });

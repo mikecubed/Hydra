@@ -274,12 +274,12 @@ describe('DaemonOperationsClient', () => {
       assert.equal(result.error.category, 'daemon');
     });
 
-    it('translates network failure into daemon-unreachable', async () => {
+    it('translates network failure into daemon-unavailable', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
 
       const result = await client.getWorkItemDetail('wi-1');
       assert.ok('error' in result);
-      assert.equal(result.error.category, 'daemon');
+      assert.equal(result.error.category, 'daemon-unavailable');
       assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
     });
   });
@@ -348,7 +348,7 @@ describe('DaemonOperationsClient', () => {
       assert.equal(result.error.category, 'daemon');
     });
 
-    it('translates network failure into daemon-unreachable', async () => {
+    it('translates network failure into daemon-unavailable', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
 
       const result = await client.getWorkItemControls('wi-1');
@@ -551,7 +551,7 @@ describe('DaemonOperationsClient', () => {
       assert.equal(result.error.category, 'daemon');
     });
 
-    it('translates network failure into daemon-unreachable', async () => {
+    it('translates network failure into daemon-unavailable', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
 
       const result = await client.submitControlAction('wi-1', 'ctrl-1', actionBody);
@@ -641,7 +641,7 @@ describe('DaemonOperationsClient', () => {
       assert.equal(result.error.category, 'daemon');
     });
 
-    it('translates network failure into daemon-unreachable', async () => {
+    it('translates network failure into daemon-unavailable', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
 
       const result = await client.discoverControls(discoveryBody);
@@ -674,24 +674,24 @@ describe('DaemonOperationsClient', () => {
   // ─── Error handling (cross-cutting) ─────────────────────────────────────────
 
   describe('error handling', () => {
-    it('translates network failure into daemon-unreachable', async () => {
+    it('translates network failure into daemon-unavailable', async () => {
       fetchMock.mock.mockImplementation(() => Promise.reject(new TypeError('fetch failed')));
 
       const result = await client.getOperationsSnapshot();
       assert.ok('error' in result);
-      assert.equal(result.error.category, 'daemon');
+      assert.equal(result.error.category, 'daemon-unavailable');
       assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
     });
 
-    it('translates timeout (AbortError) into daemon-unreachable', async () => {
+    it('translates timeout (AbortError) into daemon-unavailable', async () => {
       const abortError = new Error('The operation was aborted');
       abortError.name = 'AbortError';
       fetchMock.mock.mockImplementation(() => Promise.reject(abortError));
 
       const result = await client.getWorkItemDetail('wi-1');
       assert.ok('error' in result);
-      assert.equal(result.error.category, 'daemon');
-      assert.equal(result.error.code, 'DAEMON_UNREACHABLE');
+      assert.equal(result.error.category, 'daemon-unavailable');
+      assert.equal(result.error.code, 'DAEMON_TIMEOUT');
     });
 
     it('provides AbortSignal with timeout to fetch', async () => {

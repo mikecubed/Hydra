@@ -157,12 +157,35 @@ function ControlItem({
 }): JSX.Element {
   const interactive = isInteractive(control, hasPendingControl);
   const showBadge = OUTCOME_AVAILABILITIES.has(control.availability);
+  const labelId = `control-label-${control.controlId}`;
+  const badgeId = `control-badge-${control.controlId}`;
+  const reasonId = `control-reason-${control.controlId}`;
+  const pendingId = `control-pending-${control.controlId}`;
+  const describedBy = [
+    control.reason == null ? null : reasonId,
+    hasPendingControl ? pendingId : null,
+    showBadge ? badgeId : null,
+  ]
+    .filter((value): value is string => value !== null)
+    .join(' ');
 
   return (
-    <div style={controlRowStyle} data-testid={`control-item-${control.controlId}`}>
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      aria-describedby={describedBy.length > 0 ? describedBy : undefined}
+      style={controlRowStyle}
+      data-testid={`control-item-${control.controlId}`}
+    >
       <div style={labelRowStyle}>
-        <span style={controlLabelStyle}>{control.label}</span>
-        {showBadge && <AvailabilityBadge availability={control.availability} />}
+        <span id={labelId} style={controlLabelStyle}>
+          {control.label}
+        </span>
+        {showBadge && (
+          <span id={badgeId}>
+            <AvailabilityBadge availability={control.availability} />
+          </span>
+        )}
       </div>
       {control.options.length > 0 && (
         <div style={optionRowStyle}>
@@ -193,8 +216,16 @@ function ControlItem({
           })}
         </div>
       )}
-      {control.reason != null && <span style={reasonStyle}>{control.reason}</span>}
-      {hasPendingControl && <span style={pendingLabelStyle}>Control pending</span>}
+      {control.reason != null && (
+        <span id={reasonId} style={reasonStyle}>
+          {control.reason}
+        </span>
+      )}
+      {hasPendingControl && (
+        <span id={pendingId} style={pendingLabelStyle}>
+          Control pending
+        </span>
+      )}
     </div>
   );
 }

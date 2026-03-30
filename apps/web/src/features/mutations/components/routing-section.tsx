@@ -32,7 +32,7 @@ export function RoutingSection({
   const currentMode: RoutingMode = rawMode;
   const [pendingMode, setPendingMode] = useState<RoutingMode | null>(null);
 
-  const { mutate, isLoading, error, reset } = useMutation(
+  const { mutate, isLoading, error, errorCategory, retryAfterMs, reset } = useMutation(
     (body: { mode: RoutingMode; expectedRevision: string }) => client.postRoutingMode(body),
     { onSuccess },
   );
@@ -60,13 +60,14 @@ export function RoutingSection({
   return (
     <section aria-labelledby="routing-section-heading">
       <h3 id="routing-section-heading">Routing Mode</h3>
-      <p>
+      <p id="routing-current-mode">
         Current: <strong>{currentMode}</strong>
       </p>
       <label htmlFor="routing-mode-select">Change routing mode</label>
       <select
         id="routing-mode-select"
         value={currentMode}
+        aria-describedby="routing-current-mode"
         onChange={handleSelectChange}
         disabled={isLoading}
       >
@@ -76,7 +77,12 @@ export function RoutingSection({
           </option>
         ))}
       </select>
-      <MutationErrorBanner message={error} onDismiss={reset} />
+      <MutationErrorBanner
+        message={error}
+        category={errorCategory}
+        retryAfterMs={retryAfterMs}
+        onDismiss={reset}
+      />
       <ConfirmDialog
         isOpen={pendingMode !== null}
         title="Change Routing Mode"
