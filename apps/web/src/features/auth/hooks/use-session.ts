@@ -273,7 +273,7 @@ export function createSessionManager(deps: SessionManagerDeps): SessionManager {
     async refresh() {
       const info = await deps.getSessionInfo();
       if (ctx.destroyed) return null;
-      setState(ctx, { session: info });
+      setState(ctx, { session: info, pollErrorCount: 0 });
       syncBackgroundMonitoring(ctx, deps);
       return info;
     },

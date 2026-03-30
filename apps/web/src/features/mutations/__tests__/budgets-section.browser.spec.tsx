@@ -219,6 +219,39 @@ describe('BudgetsSection — row sync', () => {
     expect(screen.getByTestId('mutation-retry-hint')).toHaveTextContent('try again in 4 seconds');
   });
 
+  it('does not set aria-invalid when both inputs are empty (row-level error not rendered)', async () => {
+    const client = makeMockClient();
+
+    render(
+      <BudgetsSection
+        config={makeConfigWithBudgets({ 'gpt-4': { daily: 1000, weekly: 5000 } })}
+        revision="r1"
+        client={client}
+        onSuccess={vi.fn()}
+        onBudgetMutated={vi.fn()}
+      />,
+    );
+
+    const dailyInput = screen.getByLabelText('Daily limit', { selector: '#daily-gpt-4' });
+    const weeklyInput = screen.getByLabelText('Weekly limit', { selector: '#weekly-gpt-4' });
+    if (!(dailyInput instanceof HTMLInputElement) || !(weeklyInput instanceof HTMLInputElement)) {
+      throw new TypeError('Expected gpt-4 budget controls to be input elements');
+    }
+
+    // Clear both inputs so the row-level "At least one limit is required" fires
+    fireEvent.change(dailyInput, { target: { value: '' } });
+    fireEvent.change(weeklyInput, { target: { value: '' } });
+
+    // The error alert should NOT be rendered (hasInput is false)
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // ARIA attributes must not reference a non-existent element
+    expect(dailyInput.getAttribute('aria-invalid')).toBeNull();
+    expect(weeklyInput.getAttribute('aria-invalid')).toBeNull();
+    expect(dailyInput.getAttribute('aria-describedby')).toBeNull();
+    expect(weeklyInput.getAttribute('aria-describedby')).toBeNull();
+  });
+
   it('marks invalid budget inputs and links them to the validation message', async () => {
     const client = makeMockClient();
 
